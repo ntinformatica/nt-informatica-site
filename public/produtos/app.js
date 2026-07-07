@@ -2400,7 +2400,7 @@ function whatsappHref(product, variant = productVariant(product)) {
 
 function productHref(product) {
   if (!product.id) return "";
-  return `index.html?categoria=${encodeURIComponent(product.category)}&produto=${encodeURIComponent(product.id)}`;
+  return `/produtos?categoria=${encodeURIComponent(product.category)}&produto=${encodeURIComponent(product.id)}`;
 }
 
 function absoluteProductHref(product) {
@@ -2408,7 +2408,7 @@ function absoluteProductHref(product) {
 }
 
 function categoryHref(category) {
-  return `index.html?categoria=${encodeURIComponent(category)}`;
+  return `/produtos?categoria=${encodeURIComponent(category)}`;
 }
 
 function renderProductMedia(product) {
