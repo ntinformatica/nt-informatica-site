@@ -2375,6 +2375,10 @@ function categoryFromUrl() {
   return categories.some(([name]) => name === requested) ? requested : categories[0][0];
 }
 
+function hasCategoryParam() {
+  return new URLSearchParams(window.location.search).has("categoria");
+}
+
 function productFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get("produto");
@@ -2409,6 +2413,30 @@ function absoluteProductHref(product) {
 
 function categoryHref(category) {
   return `/produtos?categoria=${encodeURIComponent(category)}`;
+}
+
+function isMobileViewport() {
+  return window.matchMedia("(max-width: 680px)").matches;
+}
+
+function scrollToCatalogProducts() {
+  if (!isMobileViewport()) return;
+  requestAnimationFrame(() => {
+    document.querySelector(".catalog-head")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+}
+
+function keepActiveCategoryVisible(category) {
+  if (!isMobileViewport()) return;
+  const activeButton = document.querySelector(`.category-button[data-category="${CSS.escape(category)}"]`);
+  activeButton?.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest",
+    inline: "center",
+  });
 }
 
 function renderProductMedia(product) {
@@ -2607,7 +2635,7 @@ function renderProductDetail(product) {
   `;
 }
 
-function setCategory(category) {
+function setCategory(category, options = {}) {
   const url = new URL(window.location.href);
   url.searchParams.set("categoria", category);
   window.history.replaceState({}, "", url);
@@ -2621,6 +2649,7 @@ function setCategory(category) {
   document.querySelectorAll(".category-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.category === category);
   });
+  keepActiveCategoryVisible(category);
 
   grid.innerHTML = visible
     .map((product) => `
@@ -2638,6 +2667,10 @@ function setCategory(category) {
       </article>
     `)
     .join("");
+
+  if (options.scroll) {
+    scrollToCatalogProducts();
+  }
 }
 
 strip.innerHTML = categories
@@ -2655,7 +2688,7 @@ strip.innerHTML = categories
 strip.addEventListener("click", (event) => {
   const button = event.target.closest(".category-button");
   if (!button) return;
-  setCategory(button.dataset.category);
+  setCategory(button.dataset.category, { scroll: true });
 });
 
 grid.addEventListener("click", (event) => {
@@ -2688,5 +2721,5 @@ const selectedProduct = productFromUrl();
 if (selectedProduct) {
   renderProductDetail(selectedProduct);
 } else {
-  setCategory(categoryFromUrl());
+  setCategory(categoryFromUrl(), { scroll: hasCategoryParam() });
 }

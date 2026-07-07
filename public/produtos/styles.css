@@ -201,6 +201,7 @@ h1 {
   gap: 16px;
   margin-bottom: 18px;
   padding-top: 8px;
+  scroll-margin-top: 18px;
 }
 
 .catalog-head h2 {
@@ -525,9 +526,69 @@ h1 {
     width: 100%;
   }
 
+  .hero {
+    margin-bottom: 18px;
+  }
+
+  .hero p:last-child {
+    font-size: 15px;
+  }
+
+  .category-strip {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    margin: 0 -16px 18px;
+    padding: 0 16px 8px;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: thin;
+  }
+
+  .category-button {
+    flex: 0 0 132px;
+    min-height: 0;
+    scroll-snap-align: start;
+  }
+
+  .category-button:hover,
+  .category-button.active {
+    transform: none;
+  }
+
+  .category-media {
+    min-height: 0;
+    height: 72px;
+    aspect-ratio: auto;
+  }
+
+  .category-body {
+    padding: 10px;
+  }
+
+  .category-button strong {
+    margin-bottom: 0;
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .category-button p {
+    display: none;
+  }
+
   .catalog-head {
     align-items: flex-start;
     flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+    scroll-margin-top: 14px;
+  }
+
+  .catalog-head h2 {
+    font-size: 28px;
+  }
+
+  #productCount {
+    padding: 8px 12px;
   }
 
   .product-detail {

@@ -168,23 +168,23 @@ function Services() {
 function Products() {
   return (
     <Section id="produtos" eyebrow="Produtos" title="Escolha uma categoria para abrir a vitrine." description="Cada segmento abre uma página própria com os produtos daquela linha, deixando a loja mais organizada para o cliente.">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-4">
         {productCategories.map(({ name, description, image }) => {
-          const categoryUrl = `produtos/index.html?categoria=${encodeURIComponent(name)}`;
+          const categoryUrl = `/produtos?categoria=${encodeURIComponent(name)}`;
 
           return (
             <a
               key={name}
               href={categoryUrl}
-              className="glass motion-card overflow-hidden rounded-lg text-left shadow-card transition hover:border-nt-cyan/60"
+              className="glass motion-card min-w-[150px] snap-start overflow-hidden rounded-lg text-left shadow-card transition hover:border-nt-cyan/60 sm:min-w-0"
             >
               <div className="relative overflow-hidden border-b border-white/10">
-                <img src={image} alt={`Categoria ${name}`} className="aspect-[4/3] w-full object-cover" />
+                <img src={image} alt={`Categoria ${name}`} className="h-24 w-full object-cover sm:h-auto sm:aspect-[4/3]" />
               </div>
-              <div className="p-5">
-                <h3 className="text-lg font-black text-white">{name}</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-300">{description}</p>
-                <span className="mt-5 inline-flex text-sm font-bold text-nt-cyan">Ver produtos</span>
+              <div className="p-3 sm:p-5">
+                <h3 className="text-sm font-black leading-tight text-white sm:text-lg">{name}</h3>
+                <p className="mt-2 hidden text-sm leading-6 text-slate-300 sm:block">{description}</p>
+                <span className="mt-3 inline-flex text-xs font-bold text-nt-cyan sm:mt-5 sm:text-sm">Ver produtos</span>
               </div>
             </a>
           );
