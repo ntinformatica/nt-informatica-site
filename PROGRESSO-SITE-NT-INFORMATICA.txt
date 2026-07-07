@@ -1,0 +1,62 @@
+PROGRESSO DO SITE - NT INFORMATICA E CELULARES
+Data do salvamento: 04/07/2026
+
+Pasta principal do projeto:
+C:\Users\NT GAMING\Documents\Codex\2026-07-03\files-mentioned-by-the-user-crie\work\nt-informatica-site
+
+Pasta final para abrir/entregar:
+C:\Users\NT GAMING\Documents\Codex\2026-07-03\files-mentioned-by-the-user-crie\outputs\nt-informatica-site
+
+Status geral:
+- Site principal criado com visual moderno e responsivo.
+- Logo da NT Informatica aplicada no topo.
+- Botao "Agendar Arena Gamer" direciona para a pagina da Arena.
+- Botao "Solicitar orcamento" direciona para WhatsApp da loja: 55 47 99930-9344.
+- Area de servicos com mensagens personalizadas para WhatsApp.
+- Secao Arena Gamer com planos e links para agendamento.
+- Vitrine de produtos separada por categorias clicaveis.
+- Pagina de produtos criada em public/produtos.
+
+Categorias ja estruturadas:
+- Monitores
+- Teclados
+- Mouses
+- Headsets
+- Gabinetes
+- SSDs
+- Memorias RAM
+- Fontes
+- Controles
+- Carregadores
+- Cabos
+- Acessorios gamer
+
+Produtos reais ja cadastrados:
+- 6 monitores reais com fotos, resumo e pagina de detalhes.
+- Teclados reais cadastrados:
+  - AULA F3018 mecanico
+  - AULA WIN60 HE 8K branco
+  - MonsGeek M1 V5 TMR magnetico preto
+  - Mancer Tharix Rainbow ABNT2 switch vermelho
+  - TGT M60 A2 Rainbow ABNT2 preto
+
+Padrao dos produtos:
+- Card compacto na categoria.
+- Preco como "Consulte".
+- Botao "Ver detalhes".
+- Pagina de detalhe com imagem grande, miniaturas, descricao, ficha tecnica e WhatsApp.
+
+Link local do site principal:
+http://localhost:5173/
+
+Link na rede local:
+http://192.168.1.7:5173/
+
+Link direto dos produtos:
+http://192.168.1.7:5173/produtos/index.html
+
+Link direto da categoria Teclados:
+http://192.168.1.7:5173/produtos/index.html?categoria=Teclados
+
+Proximo passo sugerido:
+- Continuar adicionando produtos por categoria, mantendo o mesmo padrao de card curto e pagina de detalhes.

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" role="img" aria-label="Kits e combos">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#082f49"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="600" fill="url(#bg)"/>
+  <g opacity=".22" stroke="#7dd3fc" stroke-width="2">
+    <path d="M0 120h800M0 240h800M0 360h800M0 480h800M120 0v600M240 0v600M360 0v600M480 0v600M600 0v600M720 0v600"/>
+  </g>
+  <rect x="120" y="125" width="560" height="310" rx="32" fill="#020617" stroke="#38bdf8" stroke-width="10"/>
+  <rect x="160" y="165" width="330" height="112" rx="18" fill="#0f172a" stroke="#67e8f9" stroke-width="8"/>
+  <g fill="#38bdf8">
+    <rect x="190" y="195" width="36" height="18" rx="4"/>
+    <rect x="242" y="195" width="36" height="18" rx="4"/>
+    <rect x="294" y="195" width="36" height="18" rx="4"/>
+    <rect x="346" y="195" width="36" height="18" rx="4"/>
+    <rect x="398" y="195" width="36" height="18" rx="4"/>
+    <rect x="205" y="230" width="214" height="18" rx="4"/>
+  </g>
+  <path d="M570 168c52 0 84 39 84 86s-32 86-84 86-84-39-84-86 32-86 84-86Z" fill="#0f172a" stroke="#67e8f9" stroke-width="8"/>
+  <path d="M548 247h44M570 225v44" stroke="url(#cyan)" stroke-width="14" stroke-linecap="round"/>
+  <rect x="184" y="322" width="180" height="72" rx="18" fill="#0f172a" stroke="#38bdf8" stroke-width="8"/>
+  <path d="M222 358h104" stroke="#67e8f9" stroke-width="12" stroke-linecap="round"/>
+  <path d="M380 348c52-35 120-35 172 0" fill="none" stroke="#38bdf8" stroke-width="14" stroke-linecap="round"/>
+  <path d="M415 381c30-20 72-20 102 0" fill="none" stroke="#67e8f9" stroke-width="12" stroke-linecap="round"/>
+  <text x="400" y="510" text-anchor="middle" fill="#e0f2fe" font-family="Arial, sans-serif" font-size="46" font-weight="800">KITS</text>
+</svg>

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NT Informática Arena</title>
+    <meta name="description" content="Reserve horários para jogar no PC Gamer ou PlayStation 5 da NT Informática Arena. Agenda rápida, contato pelo WhatsApp e valor por hora.">
+    <meta name="theme-color" content="#0b0d10">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="NT Informática Arena">
+    <meta property="og:title" content="NT Informática Arena">
+    <meta property="og:description" content="Agenda online para jogar no PC Gamer ou PlayStation 5 da NT Informática.">
+    <meta property="og:image" content="assets/gaming-lounge-banner.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="NT Informática Arena">
+    <meta name="twitter:description" content="Reserve seu horário no PC Gamer ou PlayStation 5 da NT Informática.">
+    <meta name="twitter:image" content="assets/gaming-lounge-banner.png">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="assets/icon-192.png">
+    <link rel="apple-touch-icon" href="assets/icon-192.png">
+    <link rel="stylesheet" href="styles.css?v=20260706-1030">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="topbar" aria-label="Resumo da loja">
+        <div class="brand-lockup">
+          <img class="brand-logo" src="assets/nt-informatica-logo.jpg" alt="Logo da NT Informática">
+          <div>
+            <p class="brand-name">NT Informática</p>
+            <h1>Arena</h1>
+            <p class="brand-subtitle">Agenda Gamer</p>
+          </div>
+        </div>
+        <div class="topbar-highlights" aria-label="Destaques da arena">
+          <span>PC + PS5</span>
+          <span>R$ 20/h</span>
+        </div>
+        <a class="site-back-link" href="../index.html">Voltar para o site</a>
+        <button class="icon-button" type="button" aria-label="Abrir mensagens" data-view="chat">?</button>
+      </section>
+
+      <section class="hero" aria-label="Arena gamer">
+        <img src="assets/gaming-lounge-banner.png" alt="Setup gamer da NT Informática com PC e controle de videogame">
+        <div class="hero-overlay">
+          <div class="hero-copy">
+            <strong>R$ 20/hora</strong>
+            <div class="game-badges" aria-label="Jogos em destaque">
+              <span class="game-badge pc">Cyberpunk</span>
+              <span class="game-badge pc">God of War</span>
+              <span class="game-badge ps">PS5</span>
+              <span class="game-badge ps">GTA VI</span>
+            </div>
+            <div class="platform-row" aria-label="Plataformas disponíveis">
+              <span class="platform-badge pc">PC Gamer</span>
+              <span class="platform-badge ps">PlayStation 5</span>
+            </div>
+          </div>
+          <span class="open-badge">Aberto hoje</span>
+        </div>
+      </section>
+
+      <nav class="tabs" aria-label="Seções do aplicativo">
+        <button class="tab active" type="button" data-view="schedule">Agenda</button>
+        <button class="tab" type="button" data-view="bookings">Reservas</button>
+        <button class="tab" type="button" data-view="chat">Contato</button>
+      </nav>
+
+      <section class="view active" id="schedule-view">
+        <div class="availability-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Escolha o dia</p>
+              <h2>Horários disponíveis</h2>
+            </div>
+            <button class="ghost-button" type="button" id="todayButton">Hoje</button>
+          </div>
+
+          <div class="day-strip" id="dayStrip" aria-label="Dias disponíveis"></div>
+
+          <div class="station-grid" aria-label="Estações disponíveis">
+            <button class="station-card active" type="button" data-station="pc">
+              <span>PC GAMER</span>
+              <strong>Ryzen 5, RTX, 120Hz</strong>
+            </button>
+            <button class="station-card" type="button" data-station="ps5">
+              <span>PLAYSTATION 5</span>
+              <strong>GTA 6</strong>
+            </button>
+          </div>
+
+          <div class="slot-grid" id="slotGrid" aria-live="polite"></div>
+        </div>
+
+        <form class="booking-panel" id="bookingForm">
+          <div>
+            <p class="eyebrow">Reserva rápida</p>
+            <h2 id="selectedSummary">Selecione um horário</h2>
+          </div>
+
+          <label>
+            Nome
+            <input id="customerName" name="customerName" autocomplete="name" placeholder="Seu nome" required>
+          </label>
+
+          <label>
+            WhatsApp
+            <input id="customerPhone" name="customerPhone" inputmode="tel" placeholder="(00) 00000-0000" required>
+          </label>
+
+          <label>
+            Duração
+            <select id="duration" name="duration">
+              <option value="1">1 hora - R$ 20</option>
+              <option value="2">2 horas - R$ 40</option>
+              <option value="3">3 horas - R$ 50</option>
+            </select>
+          </label>
+
+          <div class="payment-row">
+            <span>Pagamento</span>
+            <strong>Pix/loja</strong>
+          </div>
+
+          <button class="primary-button reserve-button" type="submit">Reservar</button>
+          <p class="fine-print">Pré-reserva: o horário fica salvo neste navegador e a confirmação do pagamento acontece pelo WhatsApp.</p>
+        </form>
+
+        <aside class="contact-preview-panel" aria-label="Informações rápidas">
+          <article class="info-card">
+            <span>Player</span>
+            <em>Pra jogar de vez em quando</em>
+            <strong>R$ 150,00/mês</strong>
+            <p>10 horas no mês.</p>
+            <small>Sai R$ 15,00 por hora.</small>
+            <a class="plan-button" href="https://wa.me/5547999309344?text=Ol%C3%A1%2C%20NT%20Inform%C3%A1tica%21%20Quero%20saber%20mais%20sobre%20o%20plano%20Player%20da%20Arena%20Gamer." target="_blank" rel="noreferrer">Quero o Player</a>
+          </article>
+          <article class="info-card">
+            <span>Pro</span>
+            <em>Mais horas, melhor custo</em>
+            <strong>R$ 250,00/mês</strong>
+            <p>20 horas no mês.</p>
+            <small>Sai R$ 12,50 por hora.</small>
+            <a class="plan-button" href="https://wa.me/5547999309344?text=Ol%C3%A1%2C%20NT%20Inform%C3%A1tica%21%20Quero%20saber%20mais%20sobre%20o%20plano%20Pro%20da%20Arena%20Gamer." target="_blank" rel="noreferrer">Quero o Pro</a>
+          </article>
+          <article class="info-card">
+            <span>Squad</span>
+            <em>Mais economia e jogatina</em>
+            <strong>R$ 400,00/mês</strong>
+            <p>35 horas no mês.</p>
+            <small>Sai R$ 11,43 por hora.</small>
+            <a class="plan-button" href="https://wa.me/5547999309344?text=Ol%C3%A1%2C%20NT%20Inform%C3%A1tica%21%20Quero%20saber%20mais%20sobre%20o%20plano%20Squad%20da%20Arena%20Gamer." target="_blank" rel="noreferrer">Quero o Squad</a>
+          </article>
+        </aside>
+      </section>
+
+      <section class="view" id="bookings-view">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Minhas reservas</p>
+            <h2>Agendamentos salvos</h2>
+          </div>
+        </div>
+        <div class="booking-list" id="bookingList"></div>
+      </section>
+
+      <section class="view" id="chat-view">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Fale com a loja</p>
+            <h2>Dúvidas e atendimento</h2>
+          </div>
+        </div>
+
+        <div class="faq-list">
+          <details open>
+            <summary>Quanto custa para jogar?</summary>
+            <p>O valor base é R$ 20 por hora, tanto para PC Gamer quanto para PS5.</p>
+          </details>
+          <details>
+            <summary>Preciso pagar antes?</summary>
+            <p>A pré-reserva abre o WhatsApp com dia, horário, duração e valor. A loja confirma por Pix ou recebe no balcão.</p>
+          </details>
+          <details>
+            <summary>Posso reservar para mais de uma pessoa?</summary>
+            <p>Sim. A versão final pode ter campo para quantidade de jogadores, combos e torneios.</p>
+          </details>
+        </div>
+
+        <a class="primary-button link-button" id="whatsappLink" href="#" target="_blank" rel="noreferrer">Chamar no WhatsApp</a>
+        <button class="ghost-button full" type="button" id="copyMessage">Copiar mensagem de reserva</button>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="app.js?v=20260706-1030"></script>
+  </body>
+</html>
