@@ -112,5 +112,5 @@ export const initialAdminProducts = [
 export const adminRecentChanges = [
   "SEO institucional atualizado com dados oficiais.",
   "Categorias vazias agora exibem consulta pelo WhatsApp.",
-  "Painel administrativo iniciado como protótipo local.",
+  "Painel administrativo conectado à camada Supabase com fallback local.",
 ];

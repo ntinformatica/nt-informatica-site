@@ -1,8 +1,8 @@
-# Painel Administrativo Inteligente - Fase 1
+# Painel Administrativo Inteligente - Fase 2
 
-Esta fase cria somente a interface inicial do painel administrativo em `/admin`.
+Esta fase conecta o painel administrativo a uma camada de dados preparada para Supabase.
 
-Nao ha integracao com Supabase, backend real ou publicacao automatica no catalogo publico.
+Se o Supabase nao estiver configurado, o painel continua funcionando com `localStorage`.
 
 ## Como acessar
 
@@ -25,7 +25,7 @@ No deploy da Vercel:
 https://nt-informatica-site.vercel.app/admin
 ```
 
-## Rotas criadas
+## Rotas
 
 - `/admin/login`
 - `/admin`
@@ -36,60 +36,86 @@ https://nt-informatica-site.vercel.app/admin
 - `/admin/arena`
 - `/admin/configuracoes`
 
-Tambem existem telas reservadas para:
-
-- `/admin/avaliacoes`
-- `/admin/conteudo`
-
 ## O que ja funciona
 
-- Layout administrativo responsivo com sidebar, topo, cards, tabelas e formularios.
-- Dashboard com resumo de produtos, destaques, esgotados, categorias, reservas e ultimas alteracoes.
-- Lista de produtos com busca, filtro por categoria e filtro por status.
-- Acoes visuais/locais: editar, excluir, duplicar, publicar e despublicar.
-- Formulario de novo produto e edicao com os principais campos comerciais.
-- Dados mockados salvos em `localStorage`, apenas no navegador do administrador.
+- Layout administrativo responsivo.
+- Dashboard com resumo de produtos e categorias.
+- Produtos: listar, criar, editar, excluir, duplicar, publicar/despublicar e destacar.
+- Categorias: listar, criar, editar e excluir.
+- Integracao com Supabase via `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`.
+- Fallback local quando o Supabase nao estiver configurado.
 - Modal visual do importador inteligente por link.
 
 ## O que ainda e prototipo
 
 - Login nao possui autenticacao real.
-- Produtos salvos no painel nao alteram o catalogo publico em `/produtos`.
+- Produtos salvos no painel ainda nao alteram o catalogo publico em `/produtos`.
 - Reservas da Arena nao sao sincronizadas online.
 - Importador por link ainda nao busca dados automaticamente.
 - Nao ha controle de usuarios, permissoes ou auditoria real.
 
-## Proximos passos para Supabase
+## Como configurar Supabase
 
-1. Criar projeto Supabase.
-2. Criar tabelas para produtos, categorias, variacoes, imagens, reservas, usuarios e logs.
-3. Configurar autenticação do Supabase para `/admin/login`.
-4. Trocar `localStorage` por consultas ao Supabase.
-5. Criar regras RLS para proteger dados administrativos.
-6. Definir fluxo de rascunho, revisao e publicacao no catalogo.
+1. Acesse `https://supabase.com`.
+2. Crie um novo projeto.
+3. Abra `SQL Editor`.
+4. Cole e execute o conteudo de `supabase/schema.sql`.
+5. Abra `Project Settings > API`.
+6. Copie:
+   - `Project URL`
+   - `anon public key`
+7. Crie um arquivo `.env.local` na raiz do projeto:
 
-## Proximos passos para importador por link
+```bash
+VITE_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+VITE_SUPABASE_ANON_KEY=sua_chave_anon_publica
+```
 
-1. Criar uma funcao segura para receber a URL.
-2. Buscar nome, descricao, imagens, especificacoes, preco e variacoes.
-3. Normalizar os dados para o formato interno da NT.
-4. Criar rascunho editavel no painel.
-5. Permitir revisao manual antes de publicar.
+8. Rode o projeto:
 
-## Observacao importante
+```bash
+npm run dev
+```
 
-O painel da Fase 1 foi criado para acelerar ajustes futuros, mas o fluxo atual do site publico continua intacto:
+9. Acesse `/admin/produtos` e `/admin/categorias`.
 
-- Home
-- `/produtos`
-- `/arena`
-- Deploy Vercel
+## Variaveis na Vercel
+
+No painel da Vercel:
+
+1. Abra o projeto.
+2. Acesse `Settings > Environment Variables`.
+3. Cadastre:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+4. Salve para Production, Preview e Development se desejar.
+5. Faca um novo deploy.
+
+## SQL necessario
+
+O arquivo esta em:
+
+```text
+supabase/schema.sql
+```
+
+Ele cria:
+
+- `categories`
+- `products`
+- `product_variations`
+
+Tambem cria indices, triggers de `updated_at` e categorias iniciais.
+
+## Observacao de seguranca
+
+Nesta fase o painel usa a chave `anon public` para operar as tabelas. Antes de usar em producao com varios usuarios, o ideal e implementar autenticacao real no Supabase, ativar RLS e criar politicas administrativas.
 
 ## Deploy na Vercel
 
 O build cria fallbacks fisicos em `dist/admin/` para evitar 404 em acesso direto ao painel.
 
-O `vercel.json` tambem mantem:
+O `vercel.json` mantem:
 
 - `/produtos` apontando para `/produtos/index.html`
 - `/arena` apontando para `/arena/index.html`

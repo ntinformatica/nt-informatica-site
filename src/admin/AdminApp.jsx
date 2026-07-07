@@ -22,15 +22,19 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { isSupabaseConfigured } from "../lib/supabase";
 import { businessName } from "../data/siteData";
+import { adminRecentChanges, adminSessionKey, adminStatuses } from "./adminData";
+import { createCategory, deleteCategory, listCategories, updateCategory } from "./services/categoryService";
+import { slugify } from "./services/localStorageHelpers";
 import {
-  adminCategories,
-  adminRecentChanges,
-  adminSessionKey,
-  adminStatuses,
-  adminStorageKey,
-  initialAdminProducts,
-} from "./adminData";
+  createProduct,
+  deleteProduct,
+  listProducts,
+  updateProduct,
+  updateProductFeatured,
+  updateProductStatus,
+} from "./services/productService";
 
 const menuItems = [
   ["Dashboard", "/admin", Home],
@@ -45,7 +49,8 @@ const menuItems = [
 const emptyProduct = {
   name: "",
   slug: "",
-  category: "Monitores",
+  categoryId: "",
+  category: "",
   brand: "",
   model: "",
   price: "",
@@ -63,30 +68,8 @@ const emptyProduct = {
   internalNotes: "",
 };
 
-function readProducts() {
-  try {
-    const stored = localStorage.getItem(adminStorageKey);
-    return stored ? JSON.parse(stored) : initialAdminProducts;
-  } catch {
-    return initialAdminProducts;
-  }
-}
-
-function saveProducts(products) {
-  localStorage.setItem(adminStorageKey, JSON.stringify(products));
-}
-
-function slugify(value) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
 function formatCurrency(value) {
-  if (!value) return "Consulte";
+  if (value === null || value === undefined || value === "") return "Consulte";
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
 }
 
@@ -115,7 +98,7 @@ function AdminButton({ children, icon: Icon, variant = "primary", className = ""
 
   return (
     <button
-      className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-bold transition ${styles[variant]} ${className}`}
+      className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${styles[variant]} ${className}`}
       {...props}
     >
       {Icon ? <Icon size={17} /> : null}
@@ -140,7 +123,7 @@ function LoginPage() {
           <p className="text-sm font-bold uppercase tracking-[0.24em] text-nt-cyan">Painel NT</p>
           <h1 className="mt-3 text-3xl font-black">Entrar no administrativo</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300">
-            Protótipo visual da Fase 1. A autenticação real será conectada depois com Supabase.
+            Fase 2 preparada para Supabase. A autenticação real entra em uma próxima etapa.
           </p>
           <label className="mt-6 block text-sm font-bold text-slate-200">
             E-mail
@@ -167,7 +150,7 @@ function LoginPage() {
   );
 }
 
-function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen }) {
+function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice }) {
   const pathname = window.location.pathname;
 
   function logout() {
@@ -185,15 +168,14 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen }) {
           </a>
           <button className="lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Fechar menu"><X /></button>
         </div>
-        <nav className="mt-8 grid gap-1">
+        <div className={`mt-5 rounded-md border px-3 py-2 text-xs font-bold ${mode === "Supabase" ? "border-lime-300/30 bg-lime-300/10 text-lime-200" : "border-amber-300/30 bg-amber-300/10 text-amber-100"}`}>
+          Modo: {mode}
+        </div>
+        <nav className="mt-6 grid gap-1">
           {menuItems.map(([label, href, Icon]) => {
             const active = pathname === href || (href !== "/admin" && pathname.startsWith(href));
             return (
-              <a
-                key={href}
-                href={href}
-                className={`flex items-center gap-3 rounded-md px-3 py-3 text-sm font-bold transition ${active ? "bg-nt-cyan/12 text-nt-cyan" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}
-              >
+              <a key={href} href={href} className={`flex items-center gap-3 rounded-md px-3 py-3 text-sm font-bold transition ${active ? "bg-nt-cyan/12 text-nt-cyan" : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
                 <Icon size={18} />
                 {label}
               </a>
@@ -224,7 +206,10 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen }) {
             </div>
           </div>
         </header>
-        <main className="px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+        <main className="px-4 py-6 sm:px-6 lg:px-8">
+          {notice ? <div className="mb-5 rounded-md border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">{notice}</div> : null}
+          {children}
+        </main>
       </div>
     </div>
   );
@@ -249,12 +234,12 @@ function SummaryCard({ label, value, icon: Icon, tone = "cyan" }) {
   );
 }
 
-function Dashboard({ products }) {
+function Dashboard({ products, categories }) {
   const totals = {
     products: products.length,
     featured: products.filter((item) => item.featured).length,
     soldOut: products.filter((item) => item.status === "esgotado").length,
-    categories: adminCategories.length,
+    categories: categories.length,
   };
 
   return (
@@ -267,33 +252,23 @@ function Dashboard({ products }) {
         <SummaryCard label="Reservas da Arena" value="0" icon={CalendarDays} tone="amber" />
         <SummaryCard label="Últimas alterações" value={adminRecentChanges.length} icon={BarChart3} />
       </div>
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="glass rounded-lg p-5 shadow-card">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="text-xl font-black">Produtos recentes</h2>
-            <a href="/admin/produtos" className="text-sm font-bold text-nt-cyan hover:text-white">Ver todos</a>
-          </div>
-          <div className="mt-5 grid gap-3">
-            {products.slice(0, 5).map((product) => (
-              <div key={product.id} className="flex flex-col gap-3 rounded-md border border-white/10 bg-white/5 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="font-bold">{product.name}</p>
-                  <p className="text-sm text-slate-400">{product.category} · {product.status}</p>
-                </div>
-                <span className="text-sm font-black text-nt-cyan">{formatCurrency(product.promoPrice || product.price)}</span>
+      <section className="glass rounded-lg p-5 shadow-card">
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-xl font-black">Produtos recentes</h2>
+          <a href="/admin/produtos" className="text-sm font-bold text-nt-cyan hover:text-white">Ver todos</a>
+        </div>
+        <div className="mt-5 grid gap-3">
+          {products.slice(0, 5).map((product) => (
+            <div key={product.id} className="flex flex-col gap-3 rounded-md border border-white/10 bg-white/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-bold">{product.name}</p>
+                <p className="text-sm text-slate-400">{product.category} · {product.status}</p>
               </div>
-            ))}
-          </div>
-        </section>
-        <section className="glass rounded-lg p-5 shadow-card">
-          <h2 className="text-xl font-black">Últimas alterações</h2>
-          <div className="mt-5 grid gap-3">
-            {adminRecentChanges.map((item) => (
-              <p key={item} className="rounded-md border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">{item}</p>
-            ))}
-          </div>
-        </section>
-      </div>
+              <span className="text-sm font-black text-nt-cyan">{formatCurrency(product.promoPrice || product.price)}</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -316,7 +291,7 @@ function ImportModal({ open, onClose }) {
           <input className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan" placeholder="Cole o link da Kabum, Pichau, Mercado Livre..." />
         </label>
         <div className="mt-5 rounded-md border border-amber-300/30 bg-amber-300/10 p-4 text-sm leading-6 text-amber-100">
-          Nesta primeira fase, a importação automática ainda não está ativa. Esta função será integrada depois.
+          A importação automática será conectada depois. Nesta fase o banco já está preparado para receber rascunhos.
         </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
           <AdminButton variant="secondary" onClick={onClose}>Cancelar</AdminButton>
@@ -327,7 +302,7 @@ function ImportModal({ open, onClose }) {
   );
 }
 
-function ProductsPage({ products, setProducts }) {
+function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, onFeatured }) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
   const [status, setStatus] = useState("Todos");
@@ -340,32 +315,6 @@ function ProductsPage({ products, setProducts }) {
     return matchSearch && matchCategory && matchStatus;
   }), [products, search, category, status]);
 
-  function removeProduct(id) {
-    const nextProducts = products.filter((product) => product.id !== id);
-    setProducts(nextProducts);
-  }
-
-  function duplicateProduct(product) {
-    const copy = {
-      ...product,
-      id: `${product.id}-copia-${Date.now()}`,
-      name: `${product.name} cópia`,
-      slug: `${product.slug}-copia`,
-      status: "rascunho",
-      featured: false,
-      updatedAt: new Date().toISOString().slice(0, 10),
-    };
-    setProducts([copy, ...products]);
-  }
-
-  function togglePublish(product) {
-    setProducts(products.map((item) => (
-      item.id === product.id
-        ? { ...item, status: item.status === "rascunho" ? "disponível" : "rascunho", updatedAt: new Date().toISOString().slice(0, 10) }
-        : item
-    )));
-  }
-
   return (
     <>
       <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 xl:grid-cols-[1.2fr_0.8fr_0.8fr_auto_auto]">
@@ -375,7 +324,7 @@ function ProductsPage({ products, setProducts }) {
         </label>
         <select value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
           <option>Todas</option>
-          {adminCategories.map((item) => <option key={item}>{item}</option>)}
+          {categories.map((item) => <option key={item.id}>{item.name}</option>)}
         </select>
         <select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
           <option>Todos</option>
@@ -388,7 +337,7 @@ function ProductsPage({ products, setProducts }) {
         </a>
       </div>
       <section className="mt-6 overflow-hidden rounded-lg border border-white/10 bg-[#0b111d] shadow-card">
-        <div className="hidden grid-cols-[1.3fr_0.7fr_0.7fr_0.6fr_1fr] border-b border-white/10 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400 lg:grid">
+        <div className="hidden grid-cols-[1.25fr_0.65fr_0.65fr_0.55fr_1.25fr] border-b border-white/10 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400 lg:grid">
           <span>Produto</span>
           <span>Categoria</span>
           <span>Status</span>
@@ -397,7 +346,7 @@ function ProductsPage({ products, setProducts }) {
         </div>
         <div className="divide-y divide-white/10">
           {filteredProducts.map((product) => (
-            <article key={product.id} className="grid gap-4 p-5 lg:grid-cols-[1.3fr_0.7fr_0.7fr_0.6fr_1fr] lg:items-center">
+            <article key={product.id} className="grid gap-4 p-5 lg:grid-cols-[1.25fr_0.65fr_0.65fr_0.55fr_1.25fr] lg:items-center">
               <div>
                 <p className="font-black">{product.name}</p>
                 <p className="mt-1 text-sm text-slate-400">{product.brand} {product.model} · SKU {product.sku || "sem código"}</p>
@@ -409,9 +358,14 @@ function ProductsPage({ products, setProducts }) {
                 <a href={`/admin/produtos/editar/${product.id}`} className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:border-nt-cyan">
                   <Pencil size={15} /> Editar
                 </a>
-                <AdminButton variant="secondary" onClick={() => duplicateProduct(product)}>Duplicar</AdminButton>
-                <AdminButton variant="secondary" onClick={() => togglePublish(product)}>{product.status === "rascunho" ? "Publicar" : "Despublicar"}</AdminButton>
-                <AdminButton variant="danger" onClick={() => removeProduct(product.id)} icon={Trash2}>Excluir</AdminButton>
+                <AdminButton variant="secondary" onClick={() => onDuplicate(product)}>Duplicar</AdminButton>
+                <AdminButton variant="secondary" onClick={() => onStatus(product, product.status === "rascunho" ? "disponível" : "rascunho")}>
+                  {product.status === "rascunho" ? "Publicar" : "Despublicar"}
+                </AdminButton>
+                <AdminButton variant="secondary" onClick={() => onFeatured(product, !product.featured)}>
+                  {product.featured ? "Tirar destaque" : "Destacar"}
+                </AdminButton>
+                <AdminButton variant="danger" onClick={() => onDelete(product.id)} icon={Trash2}>Excluir</AdminButton>
               </div>
             </article>
           ))}
@@ -423,30 +377,27 @@ function ProductsPage({ products, setProducts }) {
   );
 }
 
-function ProductFormPage({ mode, productId, products, setProducts }) {
+function ProductFormPage({ mode, productId, products, categories, onSave }) {
   const existingProduct = products.find((product) => product.id === productId);
-  const [form, setForm] = useState(existingProduct || emptyProduct);
+  const firstCategory = categories[0];
+  const [form, setForm] = useState(existingProduct || { ...emptyProduct, categoryId: firstCategory?.id || "", category: firstCategory?.name || "" });
   const isEdit = mode === "edit";
 
   function updateField(field, value) {
     setForm((current) => {
       const next = { ...current, [field]: value };
       if (field === "name" && !isEdit) next.slug = slugify(value);
+      if (field === "categoryId") {
+        const category = categories.find((item) => item.id === value);
+        next.category = category?.name || "";
+      }
       return next;
     });
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
-    const payload = {
-      ...form,
-      id: isEdit ? existingProduct.id : slugify(form.slug || form.name) || `produto-${Date.now()}`,
-      updatedAt: new Date().toISOString().slice(0, 10),
-    };
-    const nextProducts = isEdit
-      ? products.map((product) => (product.id === payload.id ? payload : product))
-      : [payload, ...products];
-    setProducts(nextProducts);
+    await onSave(isEdit ? existingProduct.id : null, form);
     window.location.href = "/admin/produtos";
   }
 
@@ -464,14 +415,14 @@ function ProductFormPage({ mode, productId, products, setProducts }) {
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
         <TextField label="Nome" value={form.name} onChange={(value) => updateField("name", value)} required />
         <TextField label="Slug" value={form.slug} onChange={(value) => updateField("slug", value)} required />
-        <SelectField label="Categoria" value={form.category} onChange={(value) => updateField("category", value)} options={adminCategories} />
+        <SelectField label="Categoria" value={form.categoryId} onChange={(value) => updateField("categoryId", value)} options={categories.map((item) => [item.id, item.name])} />
         <TextField label="Marca" value={form.brand} onChange={(value) => updateField("brand", value)} />
         <TextField label="Modelo" value={form.model} onChange={(value) => updateField("model", value)} />
         <TextField label="SKU/código interno" value={form.sku} onChange={(value) => updateField("sku", value)} />
         <TextField label="Preço" value={form.price} onChange={(value) => updateField("price", value)} />
         <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} />
         <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} />
-        <SelectField label="Status" value={form.status} onChange={(value) => updateField("status", value)} options={adminStatuses} />
+        <SelectField label="Status" value={form.status} onChange={(value) => updateField("status", value)} options={adminStatuses.map((item) => [item, item])} />
         <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
         <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
           <input type="checkbox" checked={form.featured} onChange={(event) => updateField("featured", event.target.checked)} />
@@ -488,7 +439,7 @@ function ProductFormPage({ mode, productId, products, setProducts }) {
       </section>
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <a href="/admin/produtos" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan">Cancelar</a>
-        <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar alterações" : "Criar rascunho"}</AdminButton>
+        <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar alterações" : "Criar produto"}</AdminButton>
       </div>
     </form>
   );
@@ -528,26 +479,70 @@ function SelectField({ label, value, onChange, options }) {
   return (
     <label className="block text-sm font-bold text-slate-200">
       {label}
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
-        {options.map((option) => <option key={option}>{option}</option>)}
+      <select value={value || ""} onChange={(event) => onChange(event.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
+        {options.map(([optionValue, optionLabel]) => <option key={optionValue} value={optionValue}>{optionLabel}</option>)}
       </select>
     </label>
   );
 }
 
-function CategoriesPage({ products }) {
+function CategoriesPage({ categories, products, onCreate, onUpdate, onDelete }) {
+  const [form, setForm] = useState({ name: "", slug: "", description: "", sortOrder: categories.length + 1, active: true });
+  const [editingId, setEditingId] = useState(null);
+
+  function editCategory(category) {
+    setEditingId(category.id);
+    setForm(category);
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (editingId) {
+      await onUpdate(editingId, form);
+    } else {
+      await onCreate(form);
+    }
+    setEditingId(null);
+    setForm({ name: "", slug: "", description: "", sortOrder: categories.length + 1, active: true });
+  }
+
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-      {adminCategories.map((category) => {
-        const total = products.filter((product) => product.category === category).length;
-        return (
-          <article key={category} className="glass rounded-lg p-5 shadow-card">
-            <p className="text-xl font-black">{category}</p>
-            <p className="mt-3 text-sm text-slate-400">{total ? `${total} produto(s) no protótipo` : "Categoria vazia no painel"}</p>
-          </article>
-        );
-      })}
-    </section>
+    <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+      <form onSubmit={submit} className="glass rounded-lg p-5 shadow-card">
+        <h2 className="text-xl font-black">{editingId ? "Editar categoria" : "Nova categoria"}</h2>
+        <div className="mt-5 grid gap-4">
+          <TextField label="Nome" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value, slug: current.slug || slugify(value) }))} required />
+          <TextField label="Slug" value={form.slug} onChange={(value) => setForm((current) => ({ ...current, slug: value }))} required />
+          <TextField label="Ordem" type="number" value={form.sortOrder} onChange={(value) => setForm((current) => ({ ...current, sortOrder: Number(value) }))} />
+          <TextareaField label="Descrição" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+          <label className="flex items-center gap-3 text-sm font-bold text-slate-200">
+            <input type="checkbox" checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
+            Categoria ativa
+          </label>
+          <AdminButton type="submit" icon={FilePlus2}>{editingId ? "Salvar categoria" : "Criar categoria"}</AdminButton>
+        </div>
+      </form>
+      <section className="grid gap-4">
+        {categories.map((category) => {
+          const total = products.filter((product) => product.categoryId === category.id || product.category === category.name).length;
+          return (
+            <article key={category.id} className="glass rounded-lg p-5 shadow-card">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xl font-black">{category.name}</p>
+                  <p className="mt-2 text-sm text-slate-400">{total} produto(s) · slug: {category.slug}</p>
+                  {category.description ? <p className="mt-3 text-sm text-slate-300">{category.description}</p> : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <AdminButton variant="secondary" onClick={() => editCategory(category)} icon={Pencil}>Editar</AdminButton>
+                  <AdminButton variant="danger" onClick={() => onDelete(category.id)} icon={Trash2}>Excluir</AdminButton>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+    </div>
   );
 }
 
@@ -560,7 +555,7 @@ function ArenaPage() {
       <section className="glass rounded-lg p-6 lg:col-span-3">
         <h2 className="text-2xl font-black">Arena Gamer</h2>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          Nesta fase, a tela da Arena é apenas visual. A confirmação de reservas, bloqueio de horários e integração com banco online entram na próxima fase com Supabase.
+          A integração da Arena com banco online fica para uma próxima fase. Produtos e categorias já estão preparados para Supabase.
         </p>
       </section>
     </div>
@@ -574,7 +569,7 @@ function SettingsPage() {
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <TextField label="Nome da empresa" value={businessName} onChange={() => {}} readOnly />
         <TextField label="URL do site" value="https://nt-informatica-site.vercel.app" onChange={() => {}} readOnly />
-        <TextField label="Integração Supabase" value="Não configurada nesta fase" onChange={() => {}} readOnly />
+        <TextField label="Supabase" value={isSupabaseConfigured ? "Configurado" : "Usando fallback local"} onChange={() => {}} readOnly />
         <TextField label="Importador por link" value="Protótipo visual" onChange={() => {}} readOnly />
       </div>
     </section>
@@ -593,19 +588,90 @@ function PlaceholderPage({ title }) {
 }
 
 export function AdminApp() {
-  const [products, setProductsState] = useState(readProducts);
+  const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState("");
   const info = routeInfo(window.location.pathname);
+  const mode = isSupabaseConfigured ? "Supabase" : "Local";
+
+  async function loadAdminData() {
+    setLoading(true);
+    try {
+      const loadedCategories = await listCategories();
+      const loadedProducts = await listProducts(loadedCategories);
+      setCategories(loadedCategories);
+      setProducts(loadedProducts);
+      setNotice(isSupabaseConfigured ? "" : "Supabase não configurado. O painel está usando localStorage como fallback.");
+    } catch (error) {
+      console.error(error);
+      const fallbackCategories = await listCategories();
+      const fallbackProducts = await listProducts(fallbackCategories);
+      setCategories(fallbackCategories);
+      setProducts(fallbackProducts);
+      setNotice("Não foi possível acessar o Supabase. O painel carregou o fallback local.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (info.page !== "login" && !localStorage.getItem(adminSessionKey)) {
       localStorage.setItem(adminSessionKey, JSON.stringify({ email: "prototipo@nt.local", startedAt: new Date().toISOString() }));
     }
+    loadAdminData();
   }, [info.page]);
 
-  function setProducts(nextProducts) {
-    setProductsState(nextProducts);
-    saveProducts(nextProducts);
+  async function saveProduct(id, product) {
+    if (id) await updateProduct(id, product, categories);
+    else await createProduct(product, categories);
+    await loadAdminData();
+  }
+
+  async function removeProduct(id) {
+    await deleteProduct(id, categories);
+    await loadAdminData();
+  }
+
+  async function duplicateProduct(product) {
+    await createProduct(
+      {
+        ...product,
+        id: undefined,
+        name: `${product.name} cópia`,
+        slug: `${product.slug}-copia-${Date.now()}`,
+        status: "rascunho",
+        featured: false,
+      },
+      categories,
+    );
+    await loadAdminData();
+  }
+
+  async function changeProductStatus(product, status) {
+    await updateProductStatus(product.id, status, categories);
+    await loadAdminData();
+  }
+
+  async function changeProductFeatured(product, featured) {
+    await updateProductFeatured(product.id, featured, categories);
+    await loadAdminData();
+  }
+
+  async function addCategory(category) {
+    await createCategory(category);
+    await loadAdminData();
+  }
+
+  async function editCategory(id, category) {
+    await updateCategory(id, category);
+    await loadAdminData();
+  }
+
+  async function removeCategory(id) {
+    await deleteCategory(id);
+    await loadAdminData();
   }
 
   if (info.page === "login") return <LoginPage />;
@@ -613,23 +679,33 @@ export function AdminApp() {
   const titles = {
     dashboard: ["Dashboard", "Resumo rápido do catálogo e da operação."],
     products: ["Produtos", "Busca, filtros, publicação e ações rápidas."],
-    productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Rascunho local preparado para integração futura."],
-    categories: ["Categorias", "Organização inicial das categorias do catálogo."],
+    productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Rascunho preparado para Supabase."],
+    categories: ["Categorias", "Cadastro real ou local das categorias."],
     arena: ["Arena Gamer", "Base visual para futuras reservas online."],
-    settings: ["Configurações", "Dados e integrações futuras do painel."],
+    settings: ["Configurações", "Status das integrações do painel."],
     placeholder: [info.title, "Área preparada para uma próxima etapa."],
   };
   const [title, subtitle] = titles[info.page] || titles.dashboard;
 
   return (
-    <AdminShell title={title} subtitle={subtitle} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}>
-      {info.page === "dashboard" ? <Dashboard products={products} /> : null}
-      {info.page === "products" ? <ProductsPage products={products} setProducts={setProducts} /> : null}
-      {info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} setProducts={setProducts} /> : null}
-      {info.page === "categories" ? <CategoriesPage products={products} /> : null}
-      {info.page === "arena" ? <ArenaPage /> : null}
-      {info.page === "settings" ? <SettingsPage /> : null}
-      {info.page === "placeholder" ? <PlaceholderPage title={info.title} /> : null}
+    <AdminShell title={title} subtitle={subtitle} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} mode={mode} notice={notice}>
+      {loading ? <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando dados do painel...</p> : null}
+      {!loading && info.page === "dashboard" ? <Dashboard products={products} categories={categories} /> : null}
+      {!loading && info.page === "products" ? (
+        <ProductsPage
+          products={products}
+          categories={categories}
+          onDelete={removeProduct}
+          onDuplicate={duplicateProduct}
+          onStatus={changeProductStatus}
+          onFeatured={changeProductFeatured}
+        />
+      ) : null}
+      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} /> : null}
+      {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} /> : null}
+      {!loading && info.page === "arena" ? <ArenaPage /> : null}
+      {!loading && info.page === "settings" ? <SettingsPage /> : null}
+      {!loading && info.page === "placeholder" ? <PlaceholderPage title={info.title} /> : null}
     </AdminShell>
   );
 }
