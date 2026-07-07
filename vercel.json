@@ -29,35 +29,7 @@
       "destination": "/index.html"
     },
     {
-      "source": "/admin/login",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/produtos",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/produtos/novo",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/produtos/editar/:id",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/categorias",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/arena",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/configuracoes",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/(.*)",
+      "source": "/admin/:path*",
       "destination": "/index.html"
     }
   ]

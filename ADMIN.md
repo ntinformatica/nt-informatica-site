@@ -84,3 +84,13 @@ O painel da Fase 1 foi criado para acelerar ajustes futuros, mas o fluxo atual d
 - `/produtos`
 - `/arena`
 - Deploy Vercel
+
+## Deploy na Vercel
+
+O build cria fallbacks fisicos em `dist/admin/` para evitar 404 em acesso direto ao painel.
+
+O `vercel.json` tambem mantem:
+
+- `/produtos` apontando para `/produtos/index.html`
+- `/arena` apontando para `/arena/index.html`
+- `/admin` e `/admin/:path*` apontando para `/index.html`
