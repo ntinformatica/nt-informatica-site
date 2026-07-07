@@ -21,6 +21,7 @@ import { Footer } from "./components/Footer";
 import { Header } from "./components/Header";
 import { TechPlaceholder } from "./components/Placeholder";
 import { Section } from "./components/Section";
+import { AdminApp } from "./admin/AdminApp";
 import {
   arenaFeatures,
   arenaBookingUrl,
@@ -380,6 +381,10 @@ function Contact() {
 }
 
 export default function App() {
+  if (window.location.pathname.startsWith("/admin")) {
+    return <AdminApp />;
+  }
+
   return (
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
       <Header />

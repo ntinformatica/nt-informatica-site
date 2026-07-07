@@ -63,6 +63,7 @@ npm run preview
 ```text
 src/
   App.jsx
+  admin/
   data/siteData.js
   components/
 public/
@@ -79,6 +80,20 @@ dist/
 - Produtos da vitrine: `public/produtos/app.js`
 - Agenda da Arena Gamer: `public/arena/app.js`
 - Pagina da Arena Gamer: `public/arena/index.html`
+- Painel administrativo visual: `src/admin/`
+
+## Painel administrativo
+
+A Fase 1 do painel fica disponivel em:
+
+```text
+/admin
+/admin/login
+```
+
+O painel usa dados mockados e `localStorage` apenas para prototipo. Ele ainda nao altera o catalogo publico e nao possui Supabase/backend real.
+
+Leia mais em `ADMIN.md`.
 
 ## Publicar na Vercel
 
