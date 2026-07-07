@@ -3,6 +3,26 @@
   publish = "dist"
 
 [[redirects]]
+  from = "/arena"
+  to = "/arena/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/arena/"
+  to = "/arena/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/produtos"
+  to = "/produtos/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/produtos/"
+  to = "/produtos/index.html"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

@@ -1,13 +1,13 @@
 const CACHE_NAME = "nt-informatica-arena-v20260706-1030";
 const ASSETS = [
-  "./",
-  "./index.html",
-  "./styles.css",
-  "./app.js",
-  "./manifest.json",
-  "./assets/gaming-lounge-banner.png",
-  "./assets/icon-192.png",
-  "./assets/icon-512.png"
+  "/arena/",
+  "/arena/index.html",
+  "/arena/styles.css",
+  "/arena/app.js",
+  "/arena/manifest.json",
+  "/arena/assets/gaming-lounge-banner.png",
+  "/arena/assets/icon-192.png",
+  "/arena/assets/icon-512.png"
 ];
 
 self.addEventListener("install", (event) => {

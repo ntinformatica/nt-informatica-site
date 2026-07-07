@@ -336,7 +336,7 @@ render();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=20260706-1010").catch(() => {
+    navigator.serviceWorker.register("/arena/sw.js?v=20260706-1010", { scope: "/arena/" }).catch(() => {
       showToast("Modo instalavel indisponivel neste navegador.");
     });
   });

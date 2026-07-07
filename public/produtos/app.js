@@ -2358,6 +2358,17 @@ const title = document.querySelector("#categoryTitle");
 const pageTitle = document.querySelector("#pageTitle");
 const count = document.querySelector("#productCount");
 
+function assetPath(path) {
+  if (!path || /^(https?:|data:|\/)/.test(path)) return path;
+  if (path.startsWith("../category-assets/")) {
+    return `/category-assets/${path.replace("../category-assets/", "")}`;
+  }
+  if (path.startsWith("assets/")) {
+    return `/produtos/${path}`;
+  }
+  return path;
+}
+
 function categoryFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get("categoria");
@@ -2375,7 +2386,7 @@ function productVariant(product, index = 0) {
 }
 
 function productImages(product, variant = productVariant(product)) {
-  return variant?.images ?? product.images ?? [];
+  return (variant?.images ?? product.images ?? []).map(assetPath);
 }
 
 function productField(product, variant, field) {
@@ -2632,7 +2643,7 @@ function setCategory(category) {
 strip.innerHTML = categories
   .map(([name, description, image]) => `
     <button class="category-button" type="button" data-category="${name}">
-      <img class="category-media" src="${image}" alt="Categoria ${name}">
+      <img class="category-media" src="${assetPath(image)}" alt="Categoria ${name}">
       <span class="category-body">
         <strong>${name}</strong>
         <p>${description}</p>
