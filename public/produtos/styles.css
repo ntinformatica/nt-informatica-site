@@ -228,6 +228,34 @@ h1 {
   overflow: hidden;
 }
 
+.empty-category {
+  grid-column: 1 / -1;
+  max-width: 720px;
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  border-radius: 8px;
+  padding: 28px;
+  background: rgba(15, 23, 42, 0.76);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
+}
+
+.empty-category strong {
+  display: block;
+  color: #fff;
+  font-size: 26px;
+  font-weight: 950;
+}
+
+.empty-category p {
+  margin: 12px 0 0;
+  color: #cbd5e1;
+  line-height: 1.7;
+}
+
+.empty-category .buy-button {
+  width: auto;
+  margin-top: 20px;
+}
+
 .product-card-link {
   display: block;
 }

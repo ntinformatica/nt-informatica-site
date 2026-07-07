@@ -1,4 +1,4 @@
-import {
+﻿import {
   Cpu,
   Camera,
   CirclePlay,
@@ -22,14 +22,22 @@ export const whatsappNumber = "5547999309344";
 
 // EDITE AQUI: links definitivos das redes sociais.
 export const socialLinks = {
-  instagram: "https://instagram.com/",
-  youtubeInfo: "https://youtube.com/",
-  youtubeGaming: "https://youtube.com/",
-  tiktok: "https://tiktok.com/",
+  instagram: "https://www.instagram.com/ntinformaticaoficial",
+  youtubeInfo: "https://youtube.com/@ntinformaticaecelulares",
+  youtubeGaming: "https://youtube.com/@ntgaming-k8w",
+  tiktok: "https://www.tiktok.com/@nt.informatica0",
+  googleMaps: "https://maps.app.goo.gl/TWV4pKZNVUQCqUFw8",
 };
 
 // EDITE AQUI: link do sistema de agendamento da Arena Gamer.
-export const arenaBookingUrl = "arena/index.html?v=20260706-1030";
+export const siteUrl = "https://nt-informatica-site.vercel.app";
+export const ogImageUrl = `${siteUrl}/arena/assets/nt-informatica-logo.jpg`;
+export const arenaBookingUrl = "/arena?v=20260706-1030";
+export const businessName = "NT Informática, Celulares e Games";
+export const businessSlogan = "Assistência técnica especializada, produtos gamers, informática, celulares, notebooks, videogames e NT Arena Gamer em um só lugar.";
+export const businessAddress = "Rua Johann Sachse, 2891, Sala 1 - Badenfurt, Blumenau - SC";
+export const businessEmail = "ntinformaticacomercial@gmail.com";
+export const businessCnpj = "57.659.145/0001-16";
 
 export const navLinks = [
   ["Início", "inicio"],
@@ -119,32 +127,32 @@ export const productCategories = [
 ];
 
 export const products = [
-  { name: "SSD 480GB", category: "SSDs", price: "R$ --,--", icon: HardDrive, description: "Mais velocidade para PC e notebook." },
-  { name: "SSD NVMe 1TB", category: "SSDs", price: "R$ --,--", icon: HardDrive, description: "Armazenamento rápido para jogos e programas pesados." },
-  { name: "Memória RAM DDR4", category: "Memórias RAM", price: "R$ --,--", icon: Cpu, description: "Upgrade para multitarefa e jogos." },
-  { name: "Memória RAM DDR5", category: "Memórias RAM", price: "R$ --,--", icon: Cpu, description: "Desempenho moderno para plataformas atuais." },
-  { name: "Fonte 500W", category: "Fontes", price: "R$ --,--", icon: ShieldCheck, description: "Energia estável para seu computador." },
-  { name: "Fonte 650W 80 Plus", category: "Fontes", price: "R$ --,--", icon: ShieldCheck, description: "Opção para setups gamers com placa de vídeo." },
-  { name: "Gabinete Gamer", category: "Gabinetes", price: "R$ --,--", icon: Monitor, description: "Visual moderno com boa refrigeração." },
-  { name: "Gabinete com lateral em vidro", category: "Gabinetes", price: "R$ --,--", icon: Monitor, description: "Modelo editável para destacar setups RGB." },
-  { name: "Monitor Full HD", category: "Monitores", price: "R$ --,--", icon: Monitor, description: "Imagem nítida para trabalho e games." },
-  { name: "Monitor Gamer 24\"", category: "Monitores", price: "R$ --,--", icon: Monitor, description: "Tela editável para destacar taxa de atualização e entrada HDMI." },
-  { name: "Teclado Gamer RGB", category: "Teclados", price: "R$ --,--", icon: Keyboard, description: "Modelo com iluminação para completar o setup." },
-  { name: "Teclado Mecânico", category: "Teclados", price: "R$ --,--", icon: Keyboard, description: "Opção editável para jogos e digitação." },
-  { name: "Mouse Gamer RGB", category: "Mouses", price: "R$ --,--", icon: Mouse, description: "Precisão e pegada confortável para partidas." },
-  { name: "Mouse Sem Fio", category: "Mouses", price: "R$ --,--", icon: Mouse, description: "Praticidade para uso diário e trabalho." },
-  { name: "Headset Gamer", category: "Headsets", price: "R$ --,--", icon: Headphones, description: "Som imersivo e microfone para chamadas e jogos." },
-  { name: "Headset com microfone", category: "Headsets", price: "R$ --,--", icon: Headphones, description: "Modelo editável para atendimento, estudo e game." },
-  { name: "Controle para PC", category: "Controles", price: "R$ --,--", icon: Gamepad2, description: "Para jogar no computador com mais conforto." },
-  { name: "Controle sem fio", category: "Controles", price: "R$ --,--", icon: Gamepad2, description: "Produto editável para consoles e games." },
-  { name: "Carregador Turbo", category: "Carregadores e cabos", price: "R$ --,--", icon: Smartphone, description: "Carregamento rápido para celulares compatíveis." },
-  { name: "Carregador Notebook", category: "Carregadores e cabos", price: "R$ --,--", icon: Smartphone, description: "Fonte editável para modelos de notebook." },
-  { name: "Cabo HDMI", category: "Carregadores e cabos", price: "R$ --,--", icon: ShieldCheck, description: "Para TV, monitor, console e computador." },
-  { name: "Cabo USB-C", category: "Carregadores e cabos", price: "R$ --,--", icon: ShieldCheck, description: "Cabo editável para carga e transferência." },
-  { name: "Combo Gamer Squad", category: "Kits e combos", price: "R$ --,--", icon: Mouse, description: "Teclado, mouse, headset e mousepad no mesmo kit." },
-  { name: "Kit Escritório sem fio", category: "Kits e combos", price: "R$ --,--", icon: Keyboard, description: "Teclado e mouse sem fio para mesa limpa e prática." },
-  { name: "Kit Escritório com fio", category: "Kits e combos", price: "R$ --,--", icon: Keyboard, description: "Teclado e mouse com fio para uso diário." },
-  { name: "Mousepad Gamer", category: "Acessórios gamer", price: "R$ --,--", icon: Mouse, description: "Base confortável para melhorar o setup." },
+  { name: "SSD 480GB", category: "SSDs", price: "Consulte", icon: HardDrive, description: "Mais velocidade para PC e notebook." },
+  { name: "SSD NVMe 1TB", category: "SSDs", price: "Consulte", icon: HardDrive, description: "Armazenamento rápido para jogos e programas pesados." },
+  { name: "Memória RAM DDR4", category: "Memórias RAM", price: "Consulte", icon: Cpu, description: "Upgrade para multitarefa e jogos." },
+  { name: "Memória RAM DDR5", category: "Memórias RAM", price: "Consulte", icon: Cpu, description: "Desempenho moderno para plataformas atuais." },
+  { name: "Fonte 500W", category: "Fontes", price: "Consulte", icon: ShieldCheck, description: "Energia estável para seu computador." },
+  { name: "Fonte 650W 80 Plus", category: "Fontes", price: "Consulte", icon: ShieldCheck, description: "Opção para setups gamers com placa de vídeo." },
+  { name: "Gabinete Gamer", category: "Gabinetes", price: "Consulte", icon: Monitor, description: "Visual moderno com boa refrigeração." },
+  { name: "Gabinete com lateral em vidro", category: "Gabinetes", price: "Consulte", icon: Monitor, description: "Opção com visual moderno para setups RGB." },
+  { name: "Monitor Full HD", category: "Monitores", price: "Consulte", icon: Monitor, description: "Imagem nítida para trabalho e games." },
+  { name: "Monitor Gamer 24\"", category: "Monitores", price: "Consulte", icon: Monitor, description: "Tela gamer com foco em fluidez, imagem nítida e entrada HDMI." },
+  { name: "Teclado Gamer RGB", category: "Teclados", price: "Consulte", icon: Keyboard, description: "Modelo com iluminação para completar o setup." },
+  { name: "Teclado Mecânico", category: "Teclados", price: "Consulte", icon: Keyboard, description: "Opção para jogos, digitação e setups com resposta rápida." },
+  { name: "Mouse Gamer RGB", category: "Mouses", price: "Consulte", icon: Mouse, description: "Precisão e pegada confortável para partidas." },
+  { name: "Mouse Sem Fio", category: "Mouses", price: "Consulte", icon: Mouse, description: "Praticidade para uso diário e trabalho." },
+  { name: "Headset Gamer", category: "Headsets", price: "Consulte", icon: Headphones, description: "Som imersivo e microfone para chamadas e jogos." },
+  { name: "Headset com microfone", category: "Headsets", price: "Consulte", icon: Headphones, description: "Modelo para atendimento, estudo, chamadas e games." },
+  { name: "Controle para PC", category: "Controles", price: "Consulte", icon: Gamepad2, description: "Para jogar no computador com mais conforto." },
+  { name: "Controle sem fio", category: "Controles", price: "Consulte", icon: Gamepad2, description: "Produto para consoles, PC e games com mais liberdade." },
+  { name: "Carregador Turbo", category: "Carregadores e cabos", price: "Consulte", icon: Smartphone, description: "Carregamento rápido para celulares compatíveis." },
+  { name: "Carregador Notebook", category: "Carregadores e cabos", price: "Consulte", icon: Smartphone, description: "Fonte para modelos de notebook conforme compatibilidade." },
+  { name: "Cabo HDMI", category: "Carregadores e cabos", price: "Consulte", icon: ShieldCheck, description: "Para TV, monitor, console e computador." },
+  { name: "Cabo USB-C", category: "Carregadores e cabos", price: "Consulte", icon: ShieldCheck, description: "Cabo para carga, transferência e uso diário." },
+  { name: "Combo Gamer Squad", category: "Kits e combos", price: "Consulte", icon: Mouse, description: "Teclado, mouse, headset e mousepad no mesmo kit." },
+  { name: "Kit Escritório sem fio", category: "Kits e combos", price: "Consulte", icon: Keyboard, description: "Teclado e mouse sem fio para mesa limpa e prática." },
+  { name: "Kit Escritório com fio", category: "Kits e combos", price: "Consulte", icon: Keyboard, description: "Teclado e mouse com fio para uso diário." },
+  { name: "Mousepad Gamer", category: "Acessórios gamer", price: "Consulte", icon: Mouse, description: "Base confortável para melhorar o setup." },
 ];
 
 // EDITE AQUI: PCs à venda, preços e configurações.
@@ -155,7 +163,7 @@ export const pcs = [
     ram: "8GB DDR4",
     storage: "SSD 240GB",
     gpu: "Vídeo integrado",
-    price: "R$ --,--",
+    price: "Consulte",
     installment: "10x sem juros",
     pix: "15% OFF no Pix/dinheiro",
   },
@@ -165,7 +173,7 @@ export const pcs = [
     ram: "16GB DDR4",
     storage: "SSD 480GB",
     gpu: "GTX / RX de entrada",
-    price: "R$ --,--",
+    price: "Consulte",
     installment: "10x sem juros",
     pix: "15% OFF no Pix/dinheiro",
   },
@@ -175,7 +183,7 @@ export const pcs = [
     ram: "16GB DDR4",
     storage: "SSD NVMe 1TB",
     gpu: "RTX / RX intermediária",
-    price: "R$ --,--",
+    price: "Consulte",
     installment: "10x sem juros",
     pix: "15% OFF no Pix/dinheiro",
   },
@@ -203,7 +211,11 @@ export const testimonials = [
 
 // EDITE AQUI: horários e endereço.
 export const contactInfo = {
-  store: "NT Informática e Celulares",
-  hours: "Segunda a sábado, 09h às 18h",
-  address: "Endereço da loja - editar aqui",
+  store: businessName,
+  phone: "+55 47 99930-9344",
+  email: businessEmail,
+  cnpj: businessCnpj,
+  hours: "Segunda a sexta, 08:00 às 19:00. Sábado, 08:00 às 13:00. Domingo fechado.",
+  address: businessAddress,
 };
+

@@ -2651,6 +2651,21 @@ function setCategory(category, options = {}) {
   });
   keepActiveCategoryVisible(category);
 
+  if (!visible.length) {
+    const message = `Olá, NT Informática. Quero consultar disponibilidade de produtos na categoria ${category}.`;
+    grid.innerHTML = `
+      <article class="empty-category">
+        <strong>Produtos em cadastro</strong>
+        <p>Estamos cadastrando novos produtos nesta categoria. Entre em contato pelo WhatsApp para consultar disponibilidade.</p>
+        <a class="buy-button" href="${whatsappHref({ name: category, whatsappMessage: message }, null)}" target="_blank" rel="noreferrer">Consultar no WhatsApp</a>
+      </article>
+    `;
+    if (options.scroll) {
+      scrollToCatalogProducts();
+    }
+    return;
+  }
+
   grid.innerHTML = visible
     .map((product) => `
       <article class="product-card">

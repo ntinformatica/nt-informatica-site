@@ -1,7 +1,9 @@
-import {
+﻿import {
   CalendarCheck,
   CheckCircle2,
   Clock,
+  Gamepad2,
+  Headphones,
   MapPin,
   MessageCircle,
   Monitor,
@@ -9,6 +11,7 @@ import {
   ShoppingBag,
   Sparkles,
   Star,
+  Wrench,
 } from "lucide-react";
 import heroImage from "./assets/hero-nt-gaming.png";
 import arenaImage from "./assets/arena-gamer-banner.png";
@@ -35,11 +38,46 @@ import {
 } from "./data/siteData";
 
 const messages = {
-  arena: "Olá, gostaria de agendar um horário na Arena Gamer da NT Informática.",
+  arena: "Olá, gostaria de agendar um horário na NT Arena Gamer.",
   budget: "Olá, gostaria de solicitar um orçamento para assistência técnica.",
-  product: "Olá, tenho interesse neste produto da NT Informática.",
-  contact: "Olá, gostaria de falar com a NT Informática.",
+  product: "Olá, tenho interesse em um produto da NT Informática, Celulares e Games.",
+  contact: "Olá, gostaria de falar com a NT Informática, Celulares e Games.",
 };
+
+const whyChooseCards = [
+  {
+    title: "Assistência Técnica Especializada",
+    description: "Consertamos celulares, notebooks, computadores, videogames e diversos equipamentos eletrônicos com diagnóstico técnico e atendimento especializado.",
+    icon: Wrench,
+    href: "#servicos",
+  },
+  {
+    title: "NT Arena Gamer",
+    description: "PCs Gamer de alto desempenho e PlayStation 5 para jogar os principais títulos da atualidade.",
+    icon: Gamepad2,
+    href: arenaBookingUrl,
+  },
+  {
+    title: "Produtos Selecionados",
+    description: "Produtos escolhidos com foco em qualidade, garantia e suporte especializado.",
+    icon: ShoppingBag,
+    href: "/produtos",
+  },
+  {
+    title: "Atendimento Personalizado",
+    description: "Nossa equipe ajuda você a encontrar a melhor solução para sua necessidade.",
+    icon: Headphones,
+    href: whatsappLink(messages.contact),
+    external: true,
+  },
+];
+
+const howItWorksSteps = [
+  "Entre em contato.",
+  "Receba o diagnóstico.",
+  "Aprove o orçamento.",
+  "Receba seu equipamento pronto.",
+];
 
 function Hero() {
   return (
@@ -67,6 +105,45 @@ function Hero() {
         </div>
       </div>
     </section>
+  );
+}
+
+function WhyChoose() {
+  return (
+    <Section id="porque-escolher" eyebrow="Confiança" title="Por que escolher a NT Informática?">
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        {whyChooseCards.map(({ title, description, icon: Icon, href, external }) => (
+          <a
+            key={title}
+            href={href}
+            target={external ? "_blank" : undefined}
+            rel={external ? "noreferrer" : undefined}
+            className="glass motion-card rounded-lg p-6 shadow-card"
+          >
+            <IconBadge icon={Icon} />
+            <h3 className="text-xl font-black text-white">{title}</h3>
+            <p className="mt-4 text-sm leading-6 text-slate-300">{description}</p>
+          </a>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function HowItWorks() {
+  return (
+    <Section id="como-funciona" eyebrow="Atendimento" title="Como funciona?">
+      <div className="grid gap-4 md:grid-cols-4">
+        {howItWorksSteps.map((step, index) => (
+          <Card key={step} className="p-5">
+            <span className="grid h-11 w-11 place-items-center rounded-md bg-nt-cyan/10 text-lg font-black text-nt-cyan">
+              {index + 1}
+            </span>
+            <p className="mt-5 text-lg font-black text-white">{step}</p>
+          </Card>
+        ))}
+      </div>
+    </Section>
   );
 }
 
@@ -253,7 +330,7 @@ function Content() {
 
 function Testimonials() {
   return (
-    <Section id="avaliacoes" eyebrow="Avaliações" title="Depoimentos editáveis de clientes.">
+    <Section id="avaliacoes" eyebrow="Avaliações" title="O que os clientes valorizam na NT.">
       <div className="grid gap-5 md:grid-cols-3">
         {testimonials.map((text) => (
           <Card key={text}>
@@ -275,9 +352,11 @@ function Contact() {
         <Card>
           <h3 className="text-2xl font-black text-white">{contactInfo.store}</h3>
           <div className="mt-6 grid gap-4 text-slate-300">
-            <p className="flex items-center gap-3"><MessageCircle className="text-nt-cyan" /> WhatsApp: editar número no código</p>
+            <p className="flex items-center gap-3"><MessageCircle className="text-nt-cyan" /> WhatsApp: {contactInfo.phone}</p>
             <p className="flex items-center gap-3"><Clock className="text-nt-cyan" /> {contactInfo.hours}</p>
             <p className="flex items-center gap-3"><MapPin className="text-nt-cyan" /> {contactInfo.address}</p>
+            <p className="flex items-center gap-3"><MessageCircle className="text-nt-cyan" /> {contactInfo.email}</p>
+            <p className="flex items-center gap-3"><CheckCircle2 className="text-nt-cyan" /> CNPJ: {contactInfo.cnpj}</p>
           </div>
           <div className="mt-6 flex flex-wrap gap-3 text-sm">
             <a href={socialLinks.instagram} target="_blank" rel="noreferrer" className="rounded-md border border-white/10 px-4 py-2 text-slate-200 hover:border-nt-cyan">Instagram</a>
@@ -286,15 +365,15 @@ function Contact() {
           </div>
           <WhatsAppButton message={messages.contact} className="mt-8 w-full text-base">Chamar no WhatsApp agora</WhatsAppButton>
         </Card>
-        <div className="min-h-[360px] overflow-hidden rounded-lg border border-slate-700 bg-grid bg-[length:28px_28px]">
+        <a href={socialLinks.googleMaps} target="_blank" rel="noreferrer" className="min-h-[360px] overflow-hidden rounded-lg border border-slate-700 bg-grid bg-[length:28px_28px]">
           <div className="flex h-full min-h-[360px] items-center justify-center bg-gradient-to-br from-nt-blue/20 to-black/30 p-8 text-center">
             <div>
               <MapPin className="mx-auto mb-4 text-nt-cyan" size={42} />
-              <p className="text-xl font-black text-white">Mapa placeholder</p>
-              <p className="mt-2 max-w-md text-sm leading-6 text-slate-300">Substitua por um iframe do Google Maps quando o endereço definitivo estiver pronto.</p>
+              <p className="text-xl font-black text-white">Abrir localização no Google Maps</p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-slate-300">{contactInfo.address}</p>
             </div>
           </div>
-        </div>
+        </a>
       </div>
     </Section>
   );
@@ -306,6 +385,8 @@ export default function App() {
       <Header />
       <Hero />
       <Highlights />
+      <WhyChoose />
+      <HowItWorks />
       <Arena />
       <Services />
       <Products />

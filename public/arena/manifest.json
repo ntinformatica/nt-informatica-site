@@ -1,5 +1,5 @@
 {
-  "name": "NT Informática Arena",
+  "name": "NT Arena Gamer",
   "short_name": "NT Arena",
   "start_url": "/arena/",
   "scope": "/arena/",
@@ -7,7 +7,7 @@
   "orientation": "portrait",
   "background_color": "#0b0d10",
   "theme_color": "#0b0d10",
-  "description": "Agenda de horários para PC Gamer e PlayStation 5 na NT Informática.",
+  "description": "Arena Gamer da NT Informática com PCs Gamer de alto desempenho e PlayStation 5.",
   "icons": [
     {
       "src": "/arena/assets/icon-192.png",

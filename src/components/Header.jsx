@@ -4,6 +4,8 @@ import logoNt from "../assets/nt-informatica-logo.jpg";
 import { navLinks } from "../data/siteData";
 import { WhatsAppButton } from "./Button";
 
+const contactMessage = "Olá, gostaria de falar com a NT Informática, Celulares e Games.";
+
 export function Header() {
   const [open, setOpen] = useState(false);
 
@@ -16,7 +18,7 @@ export function Header() {
           </span>
           <span className="leading-tight">
             <span className="block text-sm font-black uppercase text-white sm:text-base">NT Informática</span>
-            <span className="block text-xs font-semibold text-nt-cyan">e Celulares</span>
+            <span className="block text-xs font-semibold text-nt-cyan">Celulares e Games</span>
           </span>
         </a>
 
@@ -29,7 +31,7 @@ export function Header() {
         </nav>
 
         <div className="hidden lg:block">
-          <WhatsAppButton message="Olá, gostaria de falar com a NT Informática." />
+          <WhatsAppButton message={contactMessage} />
         </div>
 
         <button
@@ -54,7 +56,7 @@ export function Header() {
                 {label}
               </a>
             ))}
-            <WhatsAppButton message="Olá, gostaria de falar com a NT Informática." className="mt-2 w-full" />
+            <WhatsAppButton message={contactMessage} className="mt-2 w-full" />
           </nav>
         </div>
       )}
