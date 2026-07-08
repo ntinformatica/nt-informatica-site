@@ -3,7 +3,7 @@ import { adminStorageKey, initialAdminProducts } from "../adminData";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
 
 function arrayFromText(value) {
-  if (Array.isArray(value)) return value;
+  if (Array.isArray(value)) return value.filter(Boolean);
   if (!value) return [];
   return String(value)
     .split("\n")
@@ -12,12 +12,44 @@ function arrayFromText(value) {
 }
 
 function textFromArray(value) {
-  if (Array.isArray(value)) return value.join("\n");
+  if (Array.isArray(value)) return value.filter(Boolean).join("\n");
   return value || "";
 }
 
-function fromSupabase(row, categories = []) {
+function moneyOrNull(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const normalized = String(value).replace(/\./g, "").replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeVariation(variation = {}, index = 0) {
+  return {
+    id: variation.id || `variation-${Date.now()}-${index}`,
+    name: variation.name || "",
+    color: variation.color || variation.value || "",
+    price: variation.price ?? "",
+    promoPrice: variation.promoPrice ?? "",
+    stock: Number(variation.stock || 0),
+    sku: variation.sku || "",
+    image: variation.image || "",
+    active: variation.active !== false,
+  };
+}
+
+function parseVariations(value) {
+  if (Array.isArray(value)) return value.map(normalizeVariation);
+  if (!value) return [];
+  return String(value)
+    .split("\n")
+    .map((item, index) => normalizeVariation({ name: item.trim(), color: item.trim() }, index))
+    .filter((item) => item.name || item.color);
+}
+
+function fromSupabase(row, categories = [], variations = []) {
   const category = categories.find((item) => item.id === row.category_id);
+  const images = Array.isArray(row.images) ? row.images : [];
+  const mainImage = row.main_image || images[0] || "";
 
   return {
     id: row.id,
@@ -31,9 +63,20 @@ function fromSupabase(row, categories = []) {
     promoPrice: row.promo_price ?? "",
     shortDescription: row.short_description || "",
     fullDescription: row.full_description || "",
-    images: textFromArray(row.images),
-    gallery: textFromArray(row.images),
-    variations: "",
+    mainImage,
+    images: textFromArray(images),
+    gallery: textFromArray(images.filter((image) => image !== mainImage)),
+    variations: variations.map((variation) => normalizeVariation({
+      id: variation.id,
+      name: variation.name,
+      color: variation.color || variation.value,
+      price: variation.price ?? "",
+      promoPrice: variation.promo_price ?? "",
+      stock: variation.stock ?? 0,
+      sku: variation.sku || "",
+      image: variation.image || variation.images?.[0] || "",
+      active: variation.active !== false && variation.status !== "inativo",
+    })),
     stock: row.stock ?? 0,
     status: row.status || "rascunho",
     featured: Boolean(row.featured),
@@ -46,6 +89,7 @@ function fromSupabase(row, categories = []) {
 
 function toSupabase(product, categories = []) {
   const category = categories.find((item) => item.id === product.categoryId || item.name === product.category);
+  const images = [...new Set([product.mainImage, ...arrayFromText(product.images), ...arrayFromText(product.gallery)].filter(Boolean))];
 
   return {
     name: product.name,
@@ -55,27 +99,58 @@ function toSupabase(product, categories = []) {
     model: product.model || "",
     short_description: product.shortDescription || "",
     full_description: product.fullDescription || "",
-    price: product.price === "" ? null : Number(product.price),
-    promo_price: product.promoPrice === "" ? null : Number(product.promoPrice),
+    price: moneyOrNull(product.price),
+    promo_price: moneyOrNull(product.promoPrice),
     status: product.status || "rascunho",
     stock: Number(product.stock || 0),
     featured: Boolean(product.featured),
     sku: product.sku || "",
     warranty: product.warranty || "",
-    images: arrayFromText(product.images || product.gallery),
+    main_image: product.mainImage || images[0] || "",
+    images,
     internal_notes: product.internalNotes || "",
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function toSupabaseVariation(variation, productId) {
+  const normalized = normalizeVariation(variation);
+  return {
+    product_id: productId,
+    name: normalized.name || normalized.color || "Variação",
+    value: normalized.color || normalized.name || "",
+    color: normalized.color || "",
+    price: moneyOrNull(normalized.price),
+    promo_price: moneyOrNull(normalized.promoPrice),
+    stock: Number(normalized.stock || 0),
+    sku: normalized.sku || "",
+    image: normalized.image || "",
+    images: normalized.image ? [normalized.image] : [],
+    active: normalized.active !== false,
+    status: normalized.active === false ? "inativo" : "ativo",
     updated_at: new Date().toISOString(),
   };
 }
 
 function normalizeLocalProduct(product, categories = []) {
   const category = categories.find((item) => item.id === product.categoryId || item.name === product.category);
+  const images = [...new Set([product.mainImage, ...arrayFromText(product.images), ...arrayFromText(product.gallery)].filter(Boolean))];
+
   return {
     ...product,
     id: product.id || slugify(product.name),
     slug: product.slug || slugify(product.name),
     categoryId: category?.id || product.categoryId || slugify(product.category || "sem-categoria"),
     category: category?.name || product.category || "Sem categoria",
+    price: product.price ?? "",
+    promoPrice: product.promoPrice ?? "",
+    mainImage: product.mainImage || images[0] || "",
+    images: textFromArray(images),
+    gallery: textFromArray(images.slice(1)),
+    variations: parseVariations(product.variations),
+    stock: Number(product.stock || 0),
+    featured: Boolean(product.featured),
+    status: product.status || "rascunho",
   };
 }
 
@@ -83,15 +158,37 @@ function readLocalProducts(categories = []) {
   return readJson(adminStorageKey, initialAdminProducts).map((product) => normalizeLocalProduct(product, categories));
 }
 
-function writeLocalProducts(products) {
-  writeJson(adminStorageKey, products);
+function writeLocalProducts(products, categories = []) {
+  writeJson(adminStorageKey, products.map((product) => normalizeLocalProduct(product, categories)));
+}
+
+async function saveVariations(productId, variations) {
+  await supabaseRequest(`/product_variations?product_id=eq.${encodeURIComponent(productId)}`, {
+    method: "DELETE",
+  });
+
+  const payload = parseVariations(variations).map((variation) => toSupabaseVariation(variation, productId));
+  if (!payload.length) return [];
+
+  return supabaseRequest("/product_variations", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function listProducts(categories = []) {
   if (isSupabaseConfigured) {
     try {
-      const rows = await supabaseRequest("/products?select=*&order=updated_at.desc");
-      return rows.map((row) => fromSupabase(row, categories));
+      const [rows, variationRows] = await Promise.all([
+        supabaseRequest("/products?select=*&order=updated_at.desc"),
+        supabaseRequest("/product_variations?select=*&order=created_at.asc"),
+      ]);
+
+      return rows.map((row) => fromSupabase(
+        row,
+        categories,
+        variationRows.filter((variation) => variation.product_id === row.id),
+      ));
     } catch (error) {
       console.warn("Fallback local de produtos ativado:", error);
       return readLocalProducts(categories);
@@ -108,7 +205,8 @@ export async function createProduct(product, categories = []) {
         method: "POST",
         body: JSON.stringify(toSupabase(product, categories)),
       });
-      return fromSupabase(row, categories);
+      const variations = await saveVariations(row.id, product.variations);
+      return fromSupabase(row, categories, variations);
     } catch (error) {
       console.warn("Criando produto no fallback local:", error);
     }
@@ -123,7 +221,7 @@ export async function createProduct(product, categories = []) {
     },
     categories,
   );
-  writeLocalProducts([item, ...products]);
+  writeLocalProducts([item, ...products], categories);
   return item;
 }
 
@@ -134,17 +232,17 @@ export async function updateProduct(id, product, categories = []) {
         method: "PATCH",
         body: JSON.stringify(toSupabase(product, categories)),
       });
-      return fromSupabase(row, categories);
+      const variations = await saveVariations(id, product.variations);
+      return fromSupabase(row, categories, variations);
     } catch (error) {
       console.warn("Atualizando produto no fallback local:", error);
     }
   }
 
-  const products = readLocalProducts(categories);
-  const nextProducts = products.map((item) => (
+  const nextProducts = readLocalProducts(categories).map((item) => (
     item.id === id ? normalizeLocalProduct({ ...item, ...product, id, updatedAt: new Date().toISOString() }, categories) : item
   ));
-  writeLocalProducts(nextProducts);
+  writeLocalProducts(nextProducts, categories);
   return nextProducts.find((item) => item.id === id);
 }
 
@@ -160,7 +258,7 @@ export async function deleteProduct(id, categories = []) {
     }
   }
 
-  writeLocalProducts(readLocalProducts(categories).filter((item) => item.id !== id));
+  writeLocalProducts(readLocalProducts(categories).filter((item) => item.id !== id), categories);
 }
 
 export async function updateProductStatus(id, status, categories = []) {

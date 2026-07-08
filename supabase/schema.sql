@@ -5,6 +5,7 @@ create table if not exists public.categories (
   name text not null,
   slug text not null unique,
   description text default '',
+  icon text default '',
   sort_order integer default 0,
   active boolean not null default true,
   created_at timestamptz not null default now(),
@@ -27,6 +28,7 @@ create table if not exists public.products (
   featured boolean not null default false,
   sku text default '',
   warranty text default '',
+  main_image text default '',
   images text[] not null default '{}',
   internal_notes text default '',
   created_at timestamptz not null default now(),
@@ -37,16 +39,33 @@ create table if not exists public.product_variations (
   id uuid primary key default gen_random_uuid(),
   product_id uuid not null references public.products(id) on delete cascade,
   name text not null,
-  value text not null,
+  value text default '',
+  color text default '',
   price numeric(12, 2),
   promo_price numeric(12, 2),
   stock integer not null default 0,
   sku text default '',
+  image text default '',
   images text[] not null default '{}',
   active boolean not null default true,
+  status text not null default 'ativo' check (status in ('ativo', 'inativo')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.categories add column if not exists icon text default '';
+alter table public.products add column if not exists main_image text default '';
+alter table public.product_variations add column if not exists color text default '';
+alter table public.product_variations add column if not exists image text default '';
+alter table public.product_variations add column if not exists status text not null default 'ativo';
+
+alter table public.products drop constraint if exists products_status_check;
+alter table public.products
+  add constraint products_status_check check (status in ('disponível', 'esgotado', 'sob encomenda', 'rascunho'));
+
+alter table public.product_variations drop constraint if exists product_variations_status_check;
+alter table public.product_variations
+  add constraint product_variations_status_check check (status in ('ativo', 'inativo'));
 
 create index if not exists categories_slug_idx on public.categories(slug);
 create index if not exists products_slug_idx on public.products(slug);

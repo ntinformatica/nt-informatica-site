@@ -1,4 +1,4 @@
-export const adminStorageKey = "nt-admin-products-v1";
+export const adminStorageKey = "nt-admin-products-v2";
 export const adminSessionKey = "nt-admin-session-v1";
 
 export const adminCategories = [
@@ -30,9 +30,10 @@ export const initialAdminProducts = [
     promoPrice: "1275",
     shortDescription: "Monitor 32 polegadas QHD com 165Hz e 1ms.",
     fullDescription: "Produto cadastrado como referência para o futuro painel administrativo.",
+    mainImage: "",
     images: "",
     gallery: "",
-    variations: "",
+    variations: [],
     stock: 2,
     status: "disponível",
     featured: true,
@@ -52,9 +53,14 @@ export const initialAdminProducts = [
     promoPrice: "425",
     shortDescription: "Controle sem fio para Xbox, PC e dispositivos compatíveis.",
     fullDescription: "Produto com variações de cor preparado para edição futura.",
+    mainImage: "",
     images: "",
     gallery: "",
-    variations: "Preto, Branco, Verde",
+    variations: [
+      { name: "Preto", color: "Preto", price: "500", promoPrice: "425", stock: 1, sku: "NT-CTL-XBOX-PT", image: "", active: true },
+      { name: "Branco", color: "Branco", price: "500", promoPrice: "425", stock: 1, sku: "NT-CTL-XBOX-BR", image: "", active: true },
+      { name: "Verde", color: "Verde", price: "500", promoPrice: "425", stock: 1, sku: "NT-CTL-XBOX-VD", image: "", active: true },
+    ],
     stock: 3,
     status: "disponível",
     featured: true,
@@ -74,9 +80,13 @@ export const initialAdminProducts = [
     promoPrice: "425",
     shortDescription: "Headset gamer sem fio com visual premium.",
     fullDescription: "Rascunho visual para simular edição rápida no painel.",
+    mainImage: "",
     images: "",
     gallery: "",
-    variations: "Preto, Branco",
+    variations: [
+      { name: "Preto", color: "Preto", price: "500", promoPrice: "425", stock: 1, sku: "NT-HDS-V9PRO-PT", image: "", active: true },
+      { name: "Branco", color: "Branco", price: "500", promoPrice: "425", stock: 0, sku: "NT-HDS-V9PRO-BR", image: "", active: true },
+    ],
     stock: 1,
     status: "rascunho",
     featured: false,
@@ -96,9 +106,13 @@ export const initialAdminProducts = [
     promoPrice: "153",
     shortDescription: "Gabinete gamer compacto com lateral em vidro.",
     fullDescription: "Produto preparado para controle de estoque no painel.",
+    mainImage: "",
     images: "",
     gallery: "",
-    variations: "Preto, Branco",
+    variations: [
+      { name: "Preto", color: "Preto", price: "180", promoPrice: "153", stock: 0, sku: "NT-GAB-CV100-PT", image: "", active: true },
+      { name: "Branco", color: "Branco", price: "180", promoPrice: "153", stock: 0, sku: "NT-GAB-CV100-BR", image: "", active: true },
+    ],
     stock: 0,
     status: "esgotado",
     featured: false,

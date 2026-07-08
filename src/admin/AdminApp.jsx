@@ -22,8 +22,8 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { isSupabaseConfigured } from "../lib/supabase";
 import { businessName } from "../data/siteData";
+import { isSupabaseConfigured } from "../lib/supabase";
 import { adminRecentChanges, adminSessionKey, adminStatuses } from "./adminData";
 import { createCategory, deleteCategory, listCategories, updateCategory } from "./services/categoryService";
 import { slugify } from "./services/localStorageHelpers";
@@ -57,9 +57,10 @@ const emptyProduct = {
   promoPrice: "",
   shortDescription: "",
   fullDescription: "",
+  mainImage: "",
   images: "",
   gallery: "",
-  variations: "",
+  variations: [],
   stock: 0,
   status: "rascunho",
   featured: false,
@@ -68,24 +69,60 @@ const emptyProduct = {
   internalNotes: "",
 };
 
+const emptyVariation = {
+  name: "",
+  color: "",
+  price: "",
+  promoPrice: "",
+  stock: 0,
+  sku: "",
+  image: "",
+  active: true,
+};
+
+function parseMoney(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  const parsed = Number(String(value).replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function formatCurrency(value) {
-  if (value === null || value === undefined || value === "") return "Consulte";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value));
+  const parsed = parseMoney(value);
+  if (parsed === null) return "Consulte";
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parsed);
+}
+
+function calculateCashPrice(value) {
+  const parsed = parseMoney(value);
+  return parsed === null ? "" : (parsed * 0.85).toFixed(2);
 }
 
 function routeInfo(pathname) {
-  if (pathname === "/admin/login") return { page: "login" };
-  if (pathname === "/admin/produtos/novo") return { page: "productForm", mode: "new" };
-  if (pathname.startsWith("/admin/produtos/editar/")) {
-    return { page: "productForm", mode: "edit", id: decodeURIComponent(pathname.replace("/admin/produtos/editar/", "")) };
+  const cleanPath = pathname.replace(/\/$/, "") || "/admin";
+  if (cleanPath === "/admin/login") return { page: "login" };
+  if (cleanPath === "/admin/produtos/novo") return { page: "productForm", mode: "new" };
+  if (cleanPath.startsWith("/admin/produtos/editar/")) {
+    return { page: "productForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/produtos/editar/", "")) };
   }
-  if (pathname === "/admin/produtos") return { page: "products" };
-  if (pathname === "/admin/categorias") return { page: "categories" };
-  if (pathname === "/admin/arena") return { page: "arena" };
-  if (pathname === "/admin/configuracoes") return { page: "settings" };
-  if (pathname === "/admin/avaliacoes") return { page: "placeholder", title: "Avaliações" };
-  if (pathname === "/admin/conteudo") return { page: "placeholder", title: "Conteúdo" };
+  if (cleanPath === "/admin/produtos") return { page: "products" };
+  if (cleanPath === "/admin/categorias") return { page: "categories" };
+  if (cleanPath === "/admin/arena") return { page: "arena" };
+  if (cleanPath === "/admin/configuracoes") return { page: "settings" };
+  if (cleanPath === "/admin/avaliacoes") return { page: "placeholder", title: "Avaliações" };
+  if (cleanPath === "/admin/conteudo") return { page: "placeholder", title: "Conteúdo" };
   return { page: "dashboard" };
+}
+
+function normalizeProductForm(product, categories) {
+  const firstCategory = categories[0];
+  const category = categories.find((item) => item.id === product?.categoryId || item.name === product?.category);
+  return {
+    ...emptyProduct,
+    ...product,
+    categoryId: category?.id || product?.categoryId || firstCategory?.id || "",
+    category: category?.name || product?.category || firstCategory?.name || "",
+    variations: Array.isArray(product?.variations) ? product.variations : [],
+  };
 }
 
 function AdminButton({ children, icon: Icon, variant = "primary", className = "", ...props }) {
@@ -123,25 +160,10 @@ function LoginPage() {
           <p className="text-sm font-bold uppercase tracking-[0.24em] text-nt-cyan">Painel NT</p>
           <h1 className="mt-3 text-3xl font-black">Entrar no administrativo</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300">
-            Fase 2 preparada para Supabase. A autenticação real entra em uma próxima etapa.
+            Painel preparado para Supabase, com fallback local quando as variáveis não estiverem configuradas.
           </p>
-          <label className="mt-6 block text-sm font-bold text-slate-200">
-            E-mail
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan"
-            />
-          </label>
-          <label className="mt-4 block text-sm font-bold text-slate-200">
-            Senha
-            <input
-              type="password"
-              value="prototipo"
-              readOnly
-              className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan"
-            />
-          </label>
+          <TextField label="E-mail" value={email} onChange={setEmail} className="mt-6" />
+          <TextField label="Senha" value="prototipo" onChange={() => {}} type="password" readOnly />
           <AdminButton type="submit" className="mt-6 w-full" icon={CheckCircle2}>Acessar painel</AdminButton>
           <a href="/" className="mt-4 block text-center text-sm font-semibold text-slate-400 hover:text-white">Voltar ao site</a>
         </form>
@@ -151,7 +173,7 @@ function LoginPage() {
 }
 
 function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice }) {
-  const pathname = window.location.pathname;
+  const pathname = window.location.pathname.replace(/\/$/, "") || "/admin";
 
   function logout() {
     localStorage.removeItem(adminSessionKey);
@@ -291,7 +313,7 @@ function ImportModal({ open, onClose }) {
           <input className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan" placeholder="Cole o link da Kabum, Pichau, Mercado Livre..." />
         </label>
         <div className="mt-5 rounded-md border border-amber-300/30 bg-amber-300/10 p-4 text-sm leading-6 text-amber-100">
-          A importação automática será conectada depois. Nesta fase o banco já está preparado para receber rascunhos.
+          Nesta primeira fase, a importação automática ainda não está ativa. Esta função será integrada depois.
         </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
           <AdminButton variant="secondary" onClick={onClose}>Cancelar</AdminButton>
@@ -306,29 +328,37 @@ function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, o
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
   const [status, setStatus] = useState("Todos");
+  const [featured, setFeatured] = useState("Todos");
   const [importOpen, setImportOpen] = useState(false);
 
   const filteredProducts = useMemo(() => products.filter((product) => {
     const matchSearch = product.name.toLowerCase().includes(search.toLowerCase());
-    const matchCategory = category === "Todas" || product.category === category;
-    const matchStatus = status === "Todos" || product.status === status;
-    return matchSearch && matchCategory && matchStatus;
-  }), [products, search, category, status]);
+    const matchCategory = category === "Todas" || product.categoryId === category || product.category === category;
+    const matchStatus = status === "Todos" || (status === "publicado" ? product.status !== "rascunho" : product.status === "rascunho");
+    const matchFeatured = featured === "Todos" || (featured === "Destaque" ? product.featured : !product.featured);
+    return matchSearch && matchCategory && matchStatus && matchFeatured;
+  }), [products, search, category, status, featured]);
 
   return (
     <>
-      <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 xl:grid-cols-[1.2fr_0.8fr_0.8fr_auto_auto]">
+      <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 xl:grid-cols-[1.2fr_0.75fr_0.65fr_0.65fr_auto_auto]">
         <label className="relative">
           <Search className="pointer-events-none absolute left-3 top-3 text-slate-500" size={18} />
           <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome" className="w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
         </label>
         <select value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
-          <option>Todas</option>
-          {categories.map((item) => <option key={item.id}>{item.name}</option>)}
+          <option value="Todas">Todas categorias</option>
+          {categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
         <select value={status} onChange={(event) => setStatus(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
           <option>Todos</option>
-          {adminStatuses.map((item) => <option key={item}>{item}</option>)}
+          <option value="publicado">Publicado</option>
+          <option value="rascunho">Despublicado</option>
+        </select>
+        <select value={featured} onChange={(event) => setFeatured(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
+          <option>Todos</option>
+          <option>Destaque</option>
+          <option>Sem destaque</option>
         </select>
         <AdminButton icon={Import} variant="secondary" onClick={() => setImportOpen(true)} className="xl:min-w-56">Importar produto por link</AdminButton>
         <a href="/admin/produtos/novo" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white transition hover:bg-nt-cyan">
@@ -336,23 +366,27 @@ function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, o
           Novo Produto
         </a>
       </div>
+
       <section className="mt-6 overflow-hidden rounded-lg border border-white/10 bg-[#0b111d] shadow-card">
-        <div className="hidden grid-cols-[1.25fr_0.65fr_0.65fr_0.55fr_1.25fr] border-b border-white/10 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400 lg:grid">
+        <div className="hidden grid-cols-[1.25fr_0.55fr_0.55fr_0.45fr_0.55fr_1.35fr] border-b border-white/10 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400 lg:grid">
           <span>Produto</span>
           <span>Categoria</span>
           <span>Status</span>
+          <span>Estoque</span>
           <span>Preço</span>
           <span>Ações</span>
         </div>
         <div className="divide-y divide-white/10">
           {filteredProducts.map((product) => (
-            <article key={product.id} className="grid gap-4 p-5 lg:grid-cols-[1.25fr_0.65fr_0.65fr_0.55fr_1.25fr] lg:items-center">
+            <article key={product.id} className="grid gap-4 p-5 lg:grid-cols-[1.25fr_0.55fr_0.55fr_0.45fr_0.55fr_1.35fr] lg:items-center">
               <div>
                 <p className="font-black">{product.name}</p>
                 <p className="mt-1 text-sm text-slate-400">{product.brand} {product.model} · SKU {product.sku || "sem código"}</p>
+                {product.featured ? <span className="mt-2 inline-flex rounded-full bg-lime-300/10 px-3 py-1 text-xs font-bold text-lime-200">Destaque</span> : null}
               </div>
               <p className="text-sm text-slate-300">{product.category}</p>
               <span className="w-fit rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-bold text-slate-200">{product.status}</span>
+              <p className="font-bold">{product.stock ?? 0}</p>
               <p className="font-black text-nt-cyan">{formatCurrency(product.promoPrice || product.price)}</p>
               <div className="flex flex-wrap gap-2">
                 <a href={`/admin/produtos/editar/${product.id}`} className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:border-nt-cyan">
@@ -363,13 +397,21 @@ function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, o
                   {product.status === "rascunho" ? "Publicar" : "Despublicar"}
                 </AdminButton>
                 <AdminButton variant="secondary" onClick={() => onFeatured(product, !product.featured)}>
-                  {product.featured ? "Tirar destaque" : "Destacar"}
+                  {product.featured ? "Remover destaque" : "Destacar"}
                 </AdminButton>
                 <AdminButton variant="danger" onClick={() => onDelete(product.id)} icon={Trash2}>Excluir</AdminButton>
               </div>
             </article>
           ))}
-          {!filteredProducts.length ? <p className="p-6 text-sm text-slate-400">Nenhum produto encontrado com os filtros atuais.</p> : null}
+          {!filteredProducts.length ? (
+            <div className="p-8 text-center">
+              <p className="text-lg font-black">Nenhum produto cadastrado ainda.</p>
+              <p className="mt-2 text-sm text-slate-400">Crie o primeiro produto ou ajuste os filtros atuais.</p>
+              <a href="/admin/produtos/novo" className="mt-5 inline-flex min-h-10 items-center justify-center rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white hover:bg-nt-cyan">
+                Cadastrar primeiro produto
+              </a>
+            </div>
+          ) : null}
         </div>
       </section>
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
@@ -377,11 +419,16 @@ function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, o
   );
 }
 
-function ProductFormPage({ mode, productId, products, categories, onSave }) {
+function ProductFormPage({ mode, productId, products, categories, onSave, error }) {
   const existingProduct = products.find((product) => product.id === productId);
-  const firstCategory = categories[0];
-  const [form, setForm] = useState(existingProduct || { ...emptyProduct, categoryId: firstCategory?.id || "", category: firstCategory?.name || "" });
   const isEdit = mode === "edit";
+  const [form, setForm] = useState(() => normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
+  const installmentBase = form.price || form.promoPrice;
+  const cashPrice = calculateCashPrice(form.price);
+
+  useEffect(() => {
+    setForm(normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
+  }, [productId, products, categories, isEdit]);
 
   function updateField(field, value) {
     setForm((current) => {
@@ -395,10 +442,27 @@ function ProductFormPage({ mode, productId, products, categories, onSave }) {
     });
   }
 
+  function updateVariation(index, field, value) {
+    setForm((current) => ({
+      ...current,
+      variations: current.variations.map((variation, itemIndex) => (
+        itemIndex === index ? { ...variation, [field]: value } : variation
+      )),
+    }));
+  }
+
+  function addVariation() {
+    setForm((current) => ({ ...current, variations: [...current.variations, { ...emptyVariation }] }));
+  }
+
+  function removeVariation(index) {
+    setForm((current) => ({ ...current, variations: current.variations.filter((_, itemIndex) => itemIndex !== index) }));
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
-    await onSave(isEdit ? existingProduct.id : null, form);
-    window.location.href = "/admin/produtos";
+    const saved = await onSave(isEdit ? existingProduct.id : null, form);
+    if (saved) window.location.href = "/admin/produtos";
   }
 
   if (isEdit && !existingProduct) {
@@ -412,31 +476,76 @@ function ProductFormPage({ mode, productId, products, categories, onSave }) {
 
   return (
     <form onSubmit={handleSubmit} className="grid gap-6">
+      {error ? <div className="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
+
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
-        <TextField label="Nome" value={form.name} onChange={(value) => updateField("name", value)} required />
-        <TextField label="Slug" value={form.slug} onChange={(value) => updateField("slug", value)} required />
+        <TextField label="Nome do produto" value={form.name} onChange={(value) => updateField("name", value)} required />
+        <TextField label="Slug automático" value={form.slug} onChange={(value) => updateField("slug", slugify(value))} required />
         <SelectField label="Categoria" value={form.categoryId} onChange={(value) => updateField("categoryId", value)} options={categories.map((item) => [item.id, item.name])} />
         <TextField label="Marca" value={form.brand} onChange={(value) => updateField("brand", value)} />
         <TextField label="Modelo" value={form.model} onChange={(value) => updateField("model", value)} />
-        <TextField label="SKU/código interno" value={form.sku} onChange={(value) => updateField("sku", value)} />
-        <TextField label="Preço" value={form.price} onChange={(value) => updateField("price", value)} />
-        <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} />
+        <TextField label="SKU" value={form.sku} onChange={(value) => updateField("sku", value)} />
+        <TextField label="Preço em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 500" />
+        <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 425" />
         <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} />
-        <SelectField label="Status" value={form.status} onChange={(value) => updateField("status", value)} options={adminStatuses.map((item) => [item, item])} />
+        <SelectField label="Status do produto" value={form.status} onChange={(value) => updateField("status", value)} options={adminStatuses.map((item) => [item, item])} />
         <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
+        <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
+          <p className="font-bold text-slate-200">Cálculo automático</p>
+          <p className="mt-2 text-slate-400">10x sem juros: <strong className="text-white">{formatCurrency(installmentBase)}</strong></p>
+          <p className="mt-1 text-slate-400">À vista com 15% off: <strong className="text-lime-200">{formatCurrency(cashPrice || form.promoPrice)}</strong></p>
+        </div>
+        <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+          <input type="checkbox" checked={form.status !== "rascunho"} onChange={(event) => updateField("status", event.target.checked ? "disponível" : "rascunho")} />
+          Produto publicado
+        </label>
         <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
           <input type="checkbox" checked={form.featured} onChange={(event) => updateField("featured", event.target.checked)} />
           Produto em destaque
         </label>
       </section>
+
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
-        <TextareaField label="Descrição curta" value={form.shortDescription} onChange={(value) => updateField("shortDescription", value)} />
+        <TextareaField label="Descrição curta" value={form.shortDescription} onChange={(value) => updateField("shortDescription", value)} rows={3} />
         <TextareaField label="Descrição completa" value={form.fullDescription} onChange={(value) => updateField("fullDescription", value)} rows={6} />
-        <TextareaField label="Imagens" value={form.images} onChange={(value) => updateField("images", value)} placeholder="Uma URL por linha" />
-        <TextareaField label="Galeria" value={form.gallery} onChange={(value) => updateField("gallery", value)} placeholder="URLs extras, uma por linha" />
-        <TextareaField label="Variações" value={form.variations} onChange={(value) => updateField("variations", value)} placeholder="Ex.: Preto: R$ 425 no Pix / Branco: R$ 425 no Pix" />
+        <TextField label="Imagem principal" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="URL da imagem principal" />
+        <TextareaField label="Galeria de imagens por URL" value={form.gallery || form.images} onChange={(value) => updateField("gallery", value)} placeholder="Uma URL por linha" />
         <TextareaField label="Observações internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
       </section>
+
+      <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black">Variações do produto</h2>
+            <p className="mt-1 text-sm text-slate-400">Use para cores, versões e preços diferentes dentro do mesmo produto.</p>
+          </div>
+          <AdminButton type="button" variant="secondary" icon={Plus} onClick={addVariation}>Adicionar variação</AdminButton>
+        </div>
+        <div className="mt-5 grid gap-4">
+          {form.variations.map((variation, index) => (
+            <div key={`${variation.sku || variation.name}-${index}`} className="rounded-lg border border-white/10 bg-slate-950 p-4">
+              <div className="grid gap-4 lg:grid-cols-3">
+                <TextField label="Nome da variação" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} />
+                <TextField label="Cor" value={variation.color} onChange={(value) => updateVariation(index, "color", value)} />
+                <TextField label="SKU da variação" value={variation.sku} onChange={(value) => updateVariation(index, "sku", value)} />
+                <TextField label="Preço" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
+                <TextField label="Preço promocional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
+                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} />
+                <TextField label="Imagem da variação" value={variation.image} onChange={(value) => updateVariation(index, "image", value)} />
+                <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200">
+                  <input type="checkbox" checked={variation.active !== false} onChange={(event) => updateVariation(index, "active", event.target.checked)} />
+                  Status ativo
+                </label>
+                <div className="flex items-end">
+                  <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => removeVariation(index)}>Remover</AdminButton>
+                </div>
+              </div>
+            </div>
+          ))}
+          {!form.variations.length ? <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">Nenhuma variação cadastrada para este produto.</p> : null}
+        </div>
+      </section>
+
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <a href="/admin/produtos" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan">Cancelar</a>
         <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar alterações" : "Criar produto"}</AdminButton>
@@ -445,9 +554,9 @@ function ProductFormPage({ mode, productId, products, categories, onSave }) {
   );
 }
 
-function TextField({ label, value, onChange, type = "text", ...props }) {
+function TextField({ label, value, onChange, type = "text", className = "", ...props }) {
   return (
-    <label className="block text-sm font-bold text-slate-200">
+    <label className={`block text-sm font-bold text-slate-200 ${className}`}>
       {label}
       <input
         type={type}
@@ -486,8 +595,8 @@ function SelectField({ label, value, onChange, options }) {
   );
 }
 
-function CategoriesPage({ categories, products, onCreate, onUpdate, onDelete }) {
-  const [form, setForm] = useState({ name: "", slug: "", description: "", sortOrder: categories.length + 1, active: true });
+function CategoriesPage({ categories, products, onCreate, onUpdate, onDelete, error }) {
+  const [form, setForm] = useState({ name: "", slug: "", description: "", icon: "", sortOrder: categories.length + 1, active: true });
   const [editingId, setEditingId] = useState(null);
 
   function editCategory(category) {
@@ -503,18 +612,20 @@ function CategoriesPage({ categories, products, onCreate, onUpdate, onDelete }) 
       await onCreate(form);
     }
     setEditingId(null);
-    setForm({ name: "", slug: "", description: "", sortOrder: categories.length + 1, active: true });
+    setForm({ name: "", slug: "", description: "", icon: "", sortOrder: categories.length + 1, active: true });
   }
 
   return (
     <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
       <form onSubmit={submit} className="glass rounded-lg p-5 shadow-card">
         <h2 className="text-xl font-black">{editingId ? "Editar categoria" : "Nova categoria"}</h2>
+        {error ? <div className="mt-4 rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
         <div className="mt-5 grid gap-4">
           <TextField label="Nome" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value, slug: current.slug || slugify(value) }))} required />
-          <TextField label="Slug" value={form.slug} onChange={(value) => setForm((current) => ({ ...current, slug: value }))} required />
+          <TextField label="Slug" value={form.slug} onChange={(value) => setForm((current) => ({ ...current, slug: slugify(value) }))} required />
           <TextField label="Ordem" type="number" value={form.sortOrder} onChange={(value) => setForm((current) => ({ ...current, sortOrder: Number(value) }))} />
-          <TextareaField label="Descrição" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+          <TextareaField label="Descrição curta" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+          <TextField label="Ícone opcional" value={form.icon} onChange={(value) => setForm((current) => ({ ...current, icon: value }))} placeholder="Ex.: monitor, keyboard ou URL" />
           <label className="flex items-center gap-3 text-sm font-bold text-slate-200">
             <input type="checkbox" checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
             Categoria ativa
@@ -529,8 +640,9 @@ function CategoriesPage({ categories, products, onCreate, onUpdate, onDelete }) 
             <article key={category.id} className="glass rounded-lg p-5 shadow-card">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <p className="text-xl font-black">{category.name}</p>
-                  <p className="mt-2 text-sm text-slate-400">{total} produto(s) · slug: {category.slug}</p>
+                  <p className="text-xl font-black">{category.icon ? `${category.icon} ` : ""}{category.name}</p>
+                  <p className="mt-2 text-sm text-slate-400">{total} produto(s) · slug: {category.slug} · ordem {category.sortOrder}</p>
+                  <p className={`mt-2 text-xs font-bold ${category.active ? "text-lime-200" : "text-amber-200"}`}>{category.active ? "Ativa" : "Inativa"}</p>
                   {category.description ? <p className="mt-3 text-sm text-slate-300">{category.description}</p> : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -593,24 +705,22 @@ export function AdminApp() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const info = routeInfo(window.location.pathname);
   const mode = isSupabaseConfigured ? "Supabase" : "Local";
 
   async function loadAdminData() {
     setLoading(true);
+    setError("");
     try {
       const loadedCategories = await listCategories();
       const loadedProducts = await listProducts(loadedCategories);
       setCategories(loadedCategories);
       setProducts(loadedProducts);
       setNotice(isSupabaseConfigured ? "" : "Supabase não configurado. O painel está usando localStorage como fallback.");
-    } catch (error) {
-      console.error(error);
-      const fallbackCategories = await listCategories();
-      const fallbackProducts = await listProducts(fallbackCategories);
-      setCategories(fallbackCategories);
-      setProducts(fallbackProducts);
-      setNotice("Não foi possível acessar o Supabase. O painel carregou o fallback local.");
+    } catch (loadError) {
+      console.error(loadError);
+      setError("Não foi possível carregar os dados do painel. Tente novamente em instantes.");
     } finally {
       setLoading(false);
     }
@@ -623,64 +733,74 @@ export function AdminApp() {
     loadAdminData();
   }, [info.page]);
 
+  async function runAction(action, successMessage = "") {
+    setError("");
+    try {
+      await action();
+      await loadAdminData();
+      if (successMessage) setNotice(successMessage);
+      return true;
+    } catch (actionError) {
+      console.error(actionError);
+      setError(actionError.message || "Não foi possível concluir a ação.");
+      return false;
+    }
+  }
+
   async function saveProduct(id, product) {
-    if (id) await updateProduct(id, product, categories);
-    else await createProduct(product, categories);
-    await loadAdminData();
+    return runAction(async () => {
+      if (id) await updateProduct(id, product, categories);
+      else await createProduct(product, categories);
+    }, "Produto salvo com sucesso.");
   }
 
   async function removeProduct(id) {
-    await deleteProduct(id, categories);
-    await loadAdminData();
+    return runAction(async () => deleteProduct(id, categories), "Produto excluído.");
   }
 
   async function duplicateProduct(product) {
-    await createProduct(
-      {
-        ...product,
-        id: undefined,
-        name: `${product.name} cópia`,
-        slug: `${product.slug}-copia-${Date.now()}`,
-        status: "rascunho",
-        featured: false,
-      },
-      categories,
-    );
-    await loadAdminData();
+    return runAction(async () => {
+      await createProduct(
+        {
+          ...product,
+          id: undefined,
+          name: `${product.name} cópia`,
+          slug: `${product.slug}-copia-${Date.now()}`,
+          status: "rascunho",
+          featured: false,
+        },
+        categories,
+      );
+    }, "Produto duplicado como rascunho.");
   }
 
   async function changeProductStatus(product, status) {
-    await updateProductStatus(product.id, status, categories);
-    await loadAdminData();
+    return runAction(async () => updateProductStatus(product.id, status, categories), "Status atualizado.");
   }
 
   async function changeProductFeatured(product, featured) {
-    await updateProductFeatured(product.id, featured, categories);
-    await loadAdminData();
+    return runAction(async () => updateProductFeatured(product.id, featured, categories), "Destaque atualizado.");
   }
 
   async function addCategory(category) {
-    await createCategory(category);
-    await loadAdminData();
+    return runAction(async () => createCategory(category), "Categoria criada.");
   }
 
   async function editCategory(id, category) {
-    await updateCategory(id, category);
-    await loadAdminData();
+    return runAction(async () => updateCategory(id, category), "Categoria atualizada.");
   }
 
   async function removeCategory(id) {
-    await deleteCategory(id);
-    await loadAdminData();
+    return runAction(async () => deleteCategory(id), "Categoria excluída.");
   }
 
   if (info.page === "login") return <LoginPage />;
 
   const titles = {
     dashboard: ["Dashboard", "Resumo rápido do catálogo e da operação."],
-    products: ["Produtos", "Busca, filtros, publicação e ações rápidas."],
-    productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Rascunho preparado para Supabase."],
-    categories: ["Categorias", "Cadastro real ou local das categorias."],
+    products: ["Produtos", "Busca, filtros, estoque, publicação e ações rápidas."],
+    productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
+    categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
     arena: ["Arena Gamer", "Base visual para futuras reservas online."],
     settings: ["Configurações", "Status das integrações do painel."],
     placeholder: [info.title, "Área preparada para uma próxima etapa."],
@@ -689,6 +809,7 @@ export function AdminApp() {
 
   return (
     <AdminShell title={title} subtitle={subtitle} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} mode={mode} notice={notice}>
+      {error ? <div className="mb-5 rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
       {loading ? <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando dados do painel...</p> : null}
       {!loading && info.page === "dashboard" ? <Dashboard products={products} categories={categories} /> : null}
       {!loading && info.page === "products" ? (
@@ -701,8 +822,8 @@ export function AdminApp() {
           onFeatured={changeProductFeatured}
         />
       ) : null}
-      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} /> : null}
-      {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} /> : null}
+      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} error={error} /> : null}
+      {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
       {!loading && info.page === "arena" ? <ArenaPage /> : null}
       {!loading && info.page === "settings" ? <SettingsPage /> : null}
       {!loading && info.page === "placeholder" ? <PlaceholderPage title={info.title} /> : null}
