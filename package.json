@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "vite build && node scripts/create-admin-fallbacks.mjs",
+    "build": "node scripts/ensure-vite-base.mjs && vite build && node scripts/create-admin-fallbacks.mjs",
+    "check:vite-base": "node scripts/ensure-vite-base.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

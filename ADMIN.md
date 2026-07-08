@@ -115,6 +115,8 @@ Nesta fase o painel usa a chave `anon public` para operar as tabelas. Antes de u
 
 O build cria fallbacks fisicos em `dist/admin/` para evitar 404 em acesso direto ao painel.
 
+Importante: o projeto exige `base: "/"` em `vite.config.js` para o painel admin funcionar na Vercel. Se ficar `base: "./"`, rotas como `/admin/produtos` tentam carregar assets em `/admin/assets/` e quebram com 404. O script `scripts/ensure-vite-base.mjs` roda antes do build para corrigir isso automaticamente.
+
 O `vercel.json` mantem:
 
 - `/produtos` apontando para `/produtos/index.html`
