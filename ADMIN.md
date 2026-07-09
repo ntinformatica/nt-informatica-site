@@ -107,6 +107,38 @@ Ele cria:
 
 Tambem cria indices, triggers de `updated_at` e categorias iniciais.
 
+## Importar catalogo publico para Supabase
+
+O catalogo publico atual fica em `public/produtos/app.js`. Para gerar uma importacao segura para o Supabase:
+
+```bash
+npm run generate:supabase-import
+```
+
+Esse comando cria:
+
+```text
+supabase/import-public-products.sql
+```
+
+O SQL gerado:
+
+- insere ou atualiza categorias por `slug`;
+- insere ou atualiza produtos por `slug`;
+- nao apaga produtos existentes;
+- nao duplica produtos se o `slug` ja existir;
+- insere variacoes apenas quando ainda nao existir a mesma combinacao de produto, SKU, nome e cor;
+- preserva nome, categoria, descricao, precos, imagens, variacoes, destaque, status e estoque quando esses campos existem no catalogo publico.
+
+Para executar:
+
+1. Rode primeiro `supabase/schema.sql` no SQL Editor do Supabase.
+2. Rode `npm run generate:supabase-import`.
+3. Abra `supabase/import-public-products.sql`.
+4. Cole o conteudo no SQL Editor do Supabase.
+5. Execute.
+6. Confira as tabelas `categories`, `products` e `product_variations`.
+
 ## Observacao de seguranca
 
 Nesta fase o painel usa a chave `anon public` para operar as tabelas. Antes de usar em producao com varios usuarios, o ideal e implementar autenticacao real no Supabase, ativar RLS e criar politicas administrativas.
