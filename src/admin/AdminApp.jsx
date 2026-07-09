@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { businessName } from "../data/siteData";
-import { isSupabaseConfigured } from "../lib/supabase";
+import { isSupabaseConfigured, supabaseDiagnostics } from "../lib/supabase";
 import { adminRecentChanges, adminSessionKey, adminStatuses } from "./adminData";
 import { createCategory, deleteCategory, listCategories, updateCategory } from "./services/categoryService";
 import { slugify } from "./services/localStorageHelpers";
@@ -682,6 +682,8 @@ function SettingsPage() {
         <TextField label="Nome da empresa" value={businessName} onChange={() => {}} readOnly />
         <TextField label="URL do site" value="https://nt-informatica-site.vercel.app" onChange={() => {}} readOnly />
         <TextField label="Supabase" value={isSupabaseConfigured ? "Configurado" : "Usando fallback local"} onChange={() => {}} readOnly />
+        <TextField label="Host Supabase no build" value={supabaseDiagnostics.urlHost || "Nao configurado"} onChange={() => {}} readOnly />
+        <TextField label="URL Supabase valida" value={supabaseDiagnostics.validUrl ? "Sim" : "Nao"} onChange={() => {}} readOnly />
         <TextField label="Importador por link" value="Protótipo visual" onChange={() => {}} readOnly />
       </div>
     </section>
