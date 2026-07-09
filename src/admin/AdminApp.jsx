@@ -97,14 +97,43 @@ const emptyCodexAssistantVariation = {
 
 function parseMoney(value) {
   if (value === "" || value === null || value === undefined) return null;
-  const parsed = Number(String(value).replace(/\./g, "").replace(",", "."));
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+  const raw = String(value)
+    .trim()
+    .replace(/[R$\s]/g, "");
+  if (!raw) return null;
+
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  let normalized = raw;
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    normalized = lastComma > lastDot
+      ? raw.replace(/\./g, "").replace(",", ".")
+      : raw.replace(/,/g, "");
+  } else if (lastComma !== -1) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot !== -1) {
+    const [integerPart, decimalPart = ""] = raw.split(".");
+    normalized = decimalPart.length === 3 && integerPart.length <= 3
+      ? raw.replace(/\./g, "")
+      : raw;
+  }
+
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 function formatCurrency(value) {
   const parsed = parseMoney(value);
   if (parsed === null) return "Consulte";
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(parsed);
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(parsed);
 }
 
 function calculateCashPrice(value) {

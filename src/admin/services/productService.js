@@ -18,9 +18,41 @@ function textFromArray(value) {
 
 function moneyOrNull(value) {
   if (value === "" || value === null || value === undefined) return null;
-  const normalized = String(value).replace(/\./g, "").replace(",", ".");
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+  const raw = String(value)
+    .trim()
+    .replace(/[R$\s]/g, "");
+  if (!raw) return null;
+
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  let normalized = raw;
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    normalized = lastComma > lastDot
+      ? raw.replace(/\./g, "").replace(",", ".")
+      : raw.replace(/,/g, "");
+  } else if (lastComma !== -1) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot !== -1) {
+    const [integerPart, decimalPart = ""] = raw.split(".");
+    normalized = decimalPart.length === 3 && integerPart.length <= 3
+      ? raw.replace(/\./g, "")
+      : raw;
+  }
+
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function moneyForInput(value) {
+  const parsed = moneyOrNull(value);
+  if (parsed === null) return "";
+  return parsed.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 function normalizeVariation(variation = {}, index = 0) {
@@ -59,8 +91,8 @@ function fromSupabase(row, categories = [], variations = []) {
     category: category?.name || "Sem categoria",
     brand: row.brand || "",
     model: row.model || "",
-    price: row.price ?? "",
-    promoPrice: row.promo_price ?? "",
+    price: moneyForInput(row.price),
+    promoPrice: moneyForInput(row.promo_price),
     shortDescription: row.short_description || "",
     fullDescription: row.full_description || "",
     mainImage,
@@ -70,8 +102,8 @@ function fromSupabase(row, categories = [], variations = []) {
       id: variation.id,
       name: variation.name,
       color: variation.color || variation.value,
-      price: variation.price ?? "",
-      promoPrice: variation.promo_price ?? "",
+      price: moneyForInput(variation.price),
+      promoPrice: moneyForInput(variation.promo_price),
       stock: variation.stock ?? 0,
       sku: variation.sku || "",
       image: variation.image || variation.images?.[0] || "",
