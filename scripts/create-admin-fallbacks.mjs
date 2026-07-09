@@ -61,6 +61,7 @@ const adminFallbackRoutes = [
   "admin/produtos/editar",
   "admin/produtos/editar/123",
   "admin/categorias",
+  "admin/assistente-codex",
   "admin/arena",
   "admin/configuracoes",
   "admin/avaliacoes",

@@ -40,6 +40,7 @@ const menuItems = [
   ["Dashboard", "/admin", Home],
   ["Produtos", "/admin/produtos", Boxes],
   ["Categorias", "/admin/categorias", Layers3],
+  ["Assistente Codex", "/admin/assistente-codex", FilePlus2],
   ["Arena Gamer", "/admin/arena", Gamepad2],
   ["Avaliações", "/admin/avaliacoes", MessageSquareText],
   ["Conteúdo", "/admin/conteudo", ClipboardList],
@@ -80,6 +81,29 @@ const emptyVariation = {
   active: true,
 };
 
+const emptyCodexAssistantForm = {
+  name: "",
+  category: "",
+  brand: "",
+  model: "",
+  mainLink: "",
+  internalNotes: "",
+  stock: 0,
+  price: "",
+  promoPrice: "",
+  warranty: "",
+};
+
+const emptyCodexAssistantVariation = {
+  name: "",
+  color: "",
+  link: "",
+  price: "",
+  promoPrice: "",
+  stock: 0,
+  sku: "",
+};
+
 function parseMoney(value) {
   if (value === "" || value === null || value === undefined) return null;
   const parsed = Number(String(value).replace(/\./g, "").replace(",", "."));
@@ -106,6 +130,7 @@ function routeInfo(pathname) {
   }
   if (cleanPath === "/admin/produtos") return { page: "products" };
   if (cleanPath === "/admin/categorias") return { page: "categories" };
+  if (cleanPath === "/admin/assistente-codex") return { page: "codexAssistant" };
   if (cleanPath === "/admin/arena") return { page: "arena" };
   if (cleanPath === "/admin/configuracoes") return { page: "settings" };
   if (cleanPath === "/admin/avaliacoes") return { page: "placeholder", title: "Avaliações" };
@@ -554,6 +579,197 @@ function ProductFormPage({ mode, productId, products, categories, onSave, error 
   );
 }
 
+function buildCodexAssistantPrompt(form, variations) {
+  const variationLines = variations
+    .filter((variation) => variation.name || variation.color || variation.link || variation.sku)
+    .map((variation, index) => `
+Variacao ${index + 1}:
+- Nome da variacao: ${variation.name || "Nao informado"}
+- Cor: ${variation.color || "Nao informado"}
+- Link da variacao: ${variation.link || "Nao informado"}
+- Preco: ${variation.price || "Nao informado"}
+- Preco promocional: ${variation.promoPrice || "Nao informado"}
+- Estoque: ${variation.stock ?? 0}
+- SKU: ${variation.sku || "Nao informado"}`)
+    .join("\n");
+
+  return `Crie um SQL seguro de importacao para o Supabase da NT Informatica.
+
+IMPORTANTE:
+- Nao altere arquivos do site.
+- Nao faca git push.
+- Nao execute SQL automaticamente.
+- Apenas gere o SQL completo pronto para copiar e executar no Supabase SQL Editor.
+
+Tabelas que devem ser usadas:
+- products
+- product_variations
+- categories
+
+Regras obrigatorias:
+- Nao duplicar produto se ja existir slug.
+- Nao duplicar variacoes.
+- Criar ou preservar a categoria informada.
+- Criar o produto como disponivel.
+- Preservar categoria.
+- Gerar descricao curta, descricao completa, especificacoes e imagens com base nos links fornecidos.
+- Usar upsert/on conflict quando fizer sentido.
+- Manter o SQL seguro para executar mais de uma vez.
+
+Dados do produto:
+- Nome do produto: ${form.name || "Nao informado"}
+- Categoria: ${form.category || "Nao informado"}
+- Marca: ${form.brand || "Nao informado"}
+- Modelo: ${form.model || "Nao informado"}
+- Link principal do produto: ${form.mainLink || "Nao informado"}
+- Observacoes internas: ${form.internalNotes || "Nao informado"}
+- Estoque inicial: ${form.stock ?? 0}
+- Preco de venda: ${form.price || "Nao informado"}
+- Preco promocional: ${form.promoPrice || "Nao informado"}
+- Garantia: ${form.warranty || "Nao informado"}
+
+Variacoes:
+${variationLines || "Sem variacoes informadas."}
+
+Resultado esperado:
+- Retorne somente o SQL completo.
+- O SQL deve cadastrar/atualizar categoria, produto e variacoes.
+- O produto deve aparecer no catalogo publico por estar com status disponivel.`;
+}
+
+function CodexAssistantPage({ categories }) {
+  const [form, setForm] = useState(() => ({
+    ...emptyCodexAssistantForm,
+    category: categories[0]?.name || "",
+  }));
+  const [variations, setVariations] = useState([{ ...emptyCodexAssistantVariation }]);
+  const [prompt, setPrompt] = useState("");
+  const [copyStatus, setCopyStatus] = useState("");
+
+  useEffect(() => {
+    if (!form.category && categories[0]?.name) {
+      setForm((current) => ({ ...current, category: categories[0].name }));
+    }
+  }, [categories, form.category]);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateVariation(index, field, value) {
+    setVariations((current) => current.map((variation, itemIndex) => (
+      itemIndex === index ? { ...variation, [field]: value } : variation
+    )));
+  }
+
+  function addVariation() {
+    setVariations((current) => [...current, { ...emptyCodexAssistantVariation }]);
+  }
+
+  function removeVariation(index) {
+    setVariations((current) => current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function generatePrompt() {
+    setCopyStatus("");
+    setPrompt(buildCodexAssistantPrompt(form, variations));
+  }
+
+  async function copyPrompt() {
+    const text = prompt || buildCodexAssistantPrompt(form, variations);
+    setPrompt(text);
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyStatus("Prompt copiado.");
+    } catch {
+      setCopyStatus("Nao foi possivel copiar automaticamente. Selecione o texto e copie manualmente.");
+    }
+  }
+
+  return (
+    <div className="grid gap-6">
+      <section className="glass rounded-lg p-5 shadow-card">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.2em] text-nt-cyan">Cadastro assistido</p>
+            <h2 className="mt-2 text-2xl font-black">Assistente Codex</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
+              Gere um prompt pronto para o Codex criar um SQL de importacao. Nada e salvo no catalogo automaticamente nesta tela.
+            </p>
+          </div>
+          <AdminButton icon={FilePlus2} onClick={generatePrompt}>Gerar prompt para Codex</AdminButton>
+        </div>
+      </section>
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
+        <TextField label="Nome do produto" value={form.name} onChange={(value) => updateField("name", value)} />
+        <SelectField
+          label="Categoria"
+          value={form.category}
+          onChange={(value) => updateField("category", value)}
+          options={(categories.length ? categories : [{ name: "Sem categoria" }]).map((item) => [item.name, item.name])}
+        />
+        <TextField label="Marca" value={form.brand} onChange={(value) => updateField("brand", value)} />
+        <TextField label="Modelo" value={form.model} onChange={(value) => updateField("model", value)} />
+        <TextField label="Link principal do produto" value={form.mainLink} onChange={(value) => updateField("mainLink", value)} />
+        <TextField label="Estoque inicial" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} />
+        <TextField label="Preco de venda" value={form.price} onChange={(value) => updateField("price", value)} />
+        <TextField label="Preco promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} />
+        <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
+        <TextareaField label="Observacoes internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
+      </section>
+
+      <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black">Variacoes</h2>
+            <p className="mt-1 text-sm text-slate-400">Adicione cores, modelos ou links diferentes do mesmo produto.</p>
+          </div>
+          <AdminButton type="button" variant="secondary" icon={Plus} onClick={addVariation}>Adicionar variacao</AdminButton>
+        </div>
+        <div className="mt-5 grid gap-4">
+          {variations.map((variation, index) => (
+            <div key={index} className="rounded-lg border border-white/10 bg-slate-950 p-4">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h3 className="font-black">Variacao {index + 1}</h3>
+                <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => removeVariation(index)}>Remover</AdminButton>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-3">
+                <TextField label="Nome da variacao" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} />
+                <TextField label="Cor" value={variation.color} onChange={(value) => updateVariation(index, "color", value)} />
+                <TextField label="Link da variacao" value={variation.link} onChange={(value) => updateVariation(index, "link", value)} />
+                <TextField label="Preco" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
+                <TextField label="Preco promocional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
+                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} />
+                <TextField label="SKU" value={variation.sku} onChange={(value) => updateVariation(index, "sku", value)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black">Prompt gerado</h2>
+            <p className="mt-1 text-sm text-slate-400">Copie e cole este texto em uma conversa do Codex para gerar somente o SQL.</p>
+          </div>
+          <AdminButton type="button" variant="secondary" icon={ClipboardList} onClick={copyPrompt}>Copiar prompt</AdminButton>
+        </div>
+        {copyStatus ? <div className="rounded-md border border-lime-300/30 bg-lime-300/10 p-3 text-sm text-lime-100">{copyStatus}</div> : null}
+        <textarea
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          rows={18}
+          placeholder="Clique em Gerar prompt para Codex."
+          className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-4 py-3 font-mono text-sm leading-6 text-white outline-none focus:border-nt-cyan"
+        />
+      </section>
+    </div>
+  );
+}
+
 function TextField({ label, value, onChange, type = "text", className = "", ...props }) {
   return (
     <label className={`block text-sm font-bold text-slate-200 ${className}`}>
@@ -831,6 +1047,7 @@ export function AdminApp() {
     products: ["Produtos", "Busca, filtros, estoque, publicação e ações rápidas."],
     productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
+    codexAssistant: ["Assistente Codex", "Gere prompts para importacao segura de produtos via SQL."],
     arena: ["Arena Gamer", "Base visual para futuras reservas online."],
     settings: ["Configurações", "Status das integrações do painel."],
     placeholder: [info.title, "Área preparada para uma próxima etapa."],
@@ -854,6 +1071,7 @@ export function AdminApp() {
       ) : null}
       {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} error={error} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
+      {!loading && info.page === "codexAssistant" ? <CodexAssistantPage categories={categories} /> : null}
       {!loading && info.page === "arena" ? <ArenaPage /> : null}
       {!loading && info.page === "settings" ? <SettingsPage /> : null}
       {!loading && info.page === "placeholder" ? <PlaceholderPage title={info.title} /> : null}
