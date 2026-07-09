@@ -2431,7 +2431,10 @@ function productVariant(product, index = 0) {
 }
 
 function productImages(product, variant = productVariant(product)) {
-  return (variant?.images ?? product.images ?? []).map(assetPath);
+  const productGallery = (product.images ?? []).map(assetPath);
+  const variantGallery = (variant?.images ?? []).map(assetPath);
+  if (!variantGallery.length) return productGallery;
+  return [...new Set([...variantGallery, ...productGallery])];
 }
 
 function productField(product, variant, field) {
@@ -2483,7 +2486,7 @@ function renderProductMedia(product) {
   const images = productImages(product);
 
   if (!images.length) {
-    return `<div class="product-media" aria-hidden="true">${product.symbol}</div>`;
+    return `<div class="product-media product-placeholder" aria-hidden="true"><strong>NT</strong><span>${product.symbol || "Informática"}</span></div>`;
   }
 
   const [mainImage] = images;
@@ -2577,13 +2580,33 @@ async function shareProduct(button) {
 }
 
 function renderDetailThumbs(product, variant = productVariant(product)) {
-  return productImages(product, variant)
+  const images = productImages(product, variant);
+  if (!images.length) return "";
+
+  return images
     .map((image, index) => `
       <button class="${index === 0 ? "active" : ""}" type="button" data-image="${image}" aria-label="Ver foto ${index + 1}">
         <img src="${image}" alt="${product.name} - foto ${index + 1}" loading="lazy">
       </button>
     `)
     .join("");
+}
+
+function renderDetailMainImage(product, image) {
+  if (!image) {
+    return `
+      <div id="detailImageFrame" class="detail-photo-frame detail-photo-placeholder" role="img" aria-label="Produto sem imagem cadastrada">
+        <strong>NT</strong>
+        <span>Imagem em cadastro</span>
+      </div>
+    `;
+  }
+
+  return `
+    <button id="detailImageFrame" class="detail-photo-frame" type="button" data-image="${image}" aria-label="Ampliar imagem de ${product.name}">
+      <img id="detailMainImage" class="detail-photo" src="${image}" alt="${product.name}">
+    </button>
+  `;
 }
 
 function renderVariantSelector(product) {
@@ -2611,10 +2634,10 @@ function updateDetailVariant(product, index) {
   if (!variant) return;
 
   const images = productImages(product, variant);
-  const mainImage = document.querySelector("#detailMainImage");
-  if (mainImage && images[0]) {
-    mainImage.src = images[0];
-    mainImage.alt = `${product.name} - ${variant.name}`;
+  const gallery = document.querySelector(".detail-gallery");
+  if (gallery) {
+    const frame = document.querySelector("#detailImageFrame");
+    if (frame) frame.outerHTML = renderDetailMainImage(product, images[0]);
   }
 
   const thumbs = document.querySelector("#detailThumbs");
@@ -2652,7 +2675,7 @@ function renderProductDetail(product) {
   grid.innerHTML = `
     <article class="product-detail">
       <div class="detail-gallery">
-        ${mainImage ? `<img id="detailMainImage" class="detail-photo" src="${mainImage}" alt="${product.name}">` : `<div class="product-media" aria-hidden="true">${product.symbol}</div>`}
+        ${renderDetailMainImage(product, mainImage)}
         <div id="detailThumbs" class="detail-thumbs" aria-label="Fotos do produto">
           ${renderDetailThumbs(product, variant)}
         </div>
@@ -2672,7 +2695,34 @@ function renderProductDetail(product) {
         </div>
       </div>
     </article>
+`;
+}
+
+function openImageViewer(image, alt = "Imagem do produto") {
+  if (!image) return;
+  const viewer = document.createElement("div");
+  viewer.className = "image-viewer";
+  viewer.innerHTML = `
+    <button class="image-viewer-close" type="button" aria-label="Fechar imagem ampliada">Fechar</button>
+    <img src="${image}" alt="${alt}">
   `;
+  document.body.appendChild(viewer);
+  document.body.classList.add("viewer-open");
+
+  function closeViewer() {
+    viewer.remove();
+    document.body.classList.remove("viewer-open");
+    document.removeEventListener("keydown", handleKeyDown);
+  }
+
+  function handleKeyDown(event) {
+    if (event.key === "Escape") closeViewer();
+  }
+
+  viewer.addEventListener("click", (event) => {
+    if (event.target === viewer || event.target.closest(".image-viewer-close")) closeViewer();
+  });
+  document.addEventListener("keydown", handleKeyDown);
 }
 
 function setCategory(category, options = {}) {
@@ -2762,12 +2812,21 @@ grid.addEventListener("click", (event) => {
     return;
   }
 
+  const imageFrame = event.target.closest("#detailImageFrame[data-image]");
+  if (imageFrame) {
+    const mainImage = document.querySelector("#detailMainImage");
+    openImageViewer(imageFrame.dataset.image, mainImage?.alt);
+    return;
+  }
+
   const button = event.target.closest(".detail-thumbs button");
   if (!button) return;
 
   const image = button.dataset.image;
   const mainImage = document.querySelector("#detailMainImage");
   if (mainImage && image) mainImage.src = image;
+  const currentFrame = document.querySelector("#detailImageFrame");
+  if (currentFrame && image) currentFrame.dataset.image = image;
 
   document.querySelectorAll(".detail-thumbs button").forEach((thumb) => {
     thumb.classList.toggle("active", thumb === button);
