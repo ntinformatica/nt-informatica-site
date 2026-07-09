@@ -708,7 +708,8 @@ export function AdminApp() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const info = routeInfo(window.location.pathname);
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const info = routeInfo(currentPath);
   const mode = isSupabaseConfigured ? "Supabase" : "Local";
 
   async function loadAdminData() {
@@ -734,6 +735,33 @@ export function AdminApp() {
     }
     loadAdminData();
   }, [info.page]);
+
+  useEffect(() => {
+    function handlePopState() {
+      setCurrentPath(window.location.pathname);
+    }
+
+    function handleAdminLinkClick(event) {
+      const link = event.target.closest("a[href^='/admin']");
+      if (!link || link.target || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const url = new URL(link.href, window.location.origin);
+      if (url.origin !== window.location.origin) return;
+
+      event.preventDefault();
+      window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      setCurrentPath(url.pathname);
+      setMobileOpen(false);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    document.addEventListener("click", handleAdminLinkClick);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      document.removeEventListener("click", handleAdminLinkClick);
+    };
+  }, []);
 
   async function runAction(action, successMessage = "") {
     setError("");
