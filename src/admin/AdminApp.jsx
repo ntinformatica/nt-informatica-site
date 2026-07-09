@@ -82,26 +82,17 @@ const emptyVariation = {
 };
 
 const emptyCodexAssistantForm = {
-  name: "",
-  category: "",
-  brand: "",
-  model: "",
   mainLink: "",
-  internalNotes: "",
-  stock: 0,
-  price: "",
-  promoPrice: "",
-  warranty: "",
+  notes: "",
 };
 
 const emptyCodexAssistantVariation = {
   name: "",
-  color: "",
   link: "",
   price: "",
   promoPrice: "",
   stock: 0,
-  sku: "",
+  warranty: "",
 };
 
 function parseMoney(value) {
@@ -579,87 +570,159 @@ function ProductFormPage({ mode, productId, products, categories, onSave, error 
   );
 }
 
-function buildCodexAssistantPrompt(form, variations) {
-  const variationLines = variations
-    .filter((variation) => variation.name || variation.color || variation.link || variation.sku)
-    .map((variation, index) => `
-Variacao ${index + 1}:
-- Nome da variacao: ${variation.name || "Nao informado"}
-- Cor: ${variation.color || "Nao informado"}
-- Link da variacao: ${variation.link || "Nao informado"}
-- Preco: ${variation.price || "Nao informado"}
-- Preco promocional: ${variation.promoPrice || "Nao informado"}
-- Estoque: ${variation.stock ?? 0}
-- SKU: ${variation.sku || "Nao informado"}`)
-    .join("\n");
-
-  return `Crie um SQL seguro de importacao para o Supabase da NT Informatica.
-
-IMPORTANTE:
-- Nao altere arquivos do site.
-- Nao faca git push.
-- Nao execute SQL automaticamente.
-- Apenas gere o SQL completo pronto para copiar e executar no Supabase SQL Editor.
-
-Tabelas que devem ser usadas:
-- products
-- product_variations
-- categories
-
-Regras obrigatorias:
-- Nao duplicar produto se ja existir slug.
-- Nao duplicar variacoes.
-- Criar ou preservar a categoria informada.
-- Criar o produto como disponivel.
-- Preservar categoria.
-- Gerar descricao curta, descricao completa, especificacoes e imagens com base nos links fornecidos.
-- Usar upsert/on conflict quando fizer sentido.
-- Manter o SQL seguro para executar mais de uma vez.
-
-Dados do produto:
-- Nome do produto: ${form.name || "Nao informado"}
-- Categoria: ${form.category || "Nao informado"}
-- Marca: ${form.brand || "Nao informado"}
-- Modelo: ${form.model || "Nao informado"}
-- Link principal do produto: ${form.mainLink || "Nao informado"}
-- Observacoes internas: ${form.internalNotes || "Nao informado"}
-- Estoque inicial: ${form.stock ?? 0}
-- Preco de venda: ${form.price || "Nao informado"}
-- Preco promocional: ${form.promoPrice || "Nao informado"}
-- Garantia: ${form.warranty || "Nao informado"}
-
-Variacoes:
-${variationLines || "Sem variacoes informadas."}
-
-Resultado esperado:
-- Retorne somente o SQL completo.
-- O SQL deve cadastrar/atualizar categoria, produto e variacoes.
-- O produto deve aparecer no catalogo publico por estar com status disponivel.`;
+function hasVariationData(variation) {
+  return Boolean(
+    variation.name
+    || variation.link
+    || variation.price
+    || variation.promoPrice
+    || Number(variation.stock || 0)
+    || variation.warranty,
+  );
 }
 
-function CodexAssistantPage({ categories }) {
-  const [form, setForm] = useState(() => ({
-    ...emptyCodexAssistantForm,
-    category: categories[0]?.name || "",
-  }));
+function isValidHttpUrl(value) {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function validateCodexAssistantLinks(form, variations) {
+  const errors = [];
+  const links = [];
+
+  if (!form.mainLink.trim()) {
+    errors.push("Informe o link principal do produto.");
+  } else if (!isValidHttpUrl(form.mainLink.trim())) {
+    errors.push("O link principal deve começar com http:// ou https://.");
+  } else {
+    links.push(["Link principal", form.mainLink.trim()]);
+  }
+
+  variations.forEach((variation, index) => {
+    if (!hasVariationData(variation)) return;
+
+    if (!variation.link.trim()) {
+      errors.push(`A variação ${index + 1} tem dados preenchidos, mas está sem link.`);
+      return;
+    }
+
+    if (!isValidHttpUrl(variation.link.trim())) {
+      errors.push(`O link da variação ${index + 1} deve começar com http:// ou https://.`);
+      return;
+    }
+
+    links.push([`Variação ${index + 1}`, variation.link.trim()]);
+  });
+
+  const seen = new Map();
+  for (const [label, link] of links) {
+    const normalized = link.replace(/\/+$/, "").toLowerCase();
+    if (seen.has(normalized)) {
+      errors.push(`Link duplicado encontrado em ${seen.get(normalized)} e ${label}.`);
+    } else {
+      seen.set(normalized, label);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    success: errors.length === 0
+      ? `Links validados com sucesso. ${links.length} link(s) pronto(s) para o prompt.`
+      : "",
+  };
+}
+
+function buildCodexAssistantPrompt(form, variations) {
+  const validVariations = variations.filter(hasVariationData);
+  const variationLines = validVariations
+    .map((variation, index) => `
+Variacao ${index + 1}:
+- Nome da variacao informado pela loja: ${variation.name || "Nao informado"}
+- Link da variacao: ${variation.link || "Nao informado"}
+- Preco de venda: ${variation.price || "Nao informado"}
+- Preco promocional opcional: ${variation.promoPrice || "Nao informado"}
+- Estoque: ${variation.stock ?? 0}
+- Garantia opcional: ${variation.warranty || "Nao informado"}`)
+    .join("\n");
+
+  return `Acesse os links abaixo e gere um SQL seguro de importacao para o Supabase da NT Informatica.
+
+IMPORTANTE:
+- Nao altere arquivos do projeto.
+- Nao execute SQL.
+- Nao faca git push.
+- Apenas devolva o SQL completo pronto para colar no Supabase SQL Editor.
+
+Tabelas permitidas:
+- categories
+- products
+- product_variations
+
+Links e dados fornecidos pela loja:
+- Link principal do produto: ${form.mainLink || "Nao informado"}
+- Observacoes opcionais: ${form.notes || "Sem observacoes."}
+
+Variacoes informadas:
+${variationLines || "Sem variacoes informadas. Use o link principal como fonte unica."}
+
+Tarefas para o Codex:
+1. Acessar o link principal e os links de variacoes informados.
+2. Extrair automaticamente dos links:
+   - nome do produto;
+   - marca;
+   - modelo;
+   - categoria mais adequada;
+   - descricao curta;
+   - descricao completa;
+   - especificacoes tecnicas;
+   - imagem principal;
+   - galeria completa de imagens;
+   - imagens especificas de cada variacao;
+   - cores;
+   - capacidade, quando existir;
+   - caracteristicas relevantes.
+3. Preencher no SQL:
+   - products.main_image com a melhor imagem principal encontrada;
+   - products.images com a galeria completa de imagens;
+   - product_variations.image com a imagem correspondente de cada variacao;
+   - descriptions, slug, categoria, preco, estoque, garantia e demais campos disponiveis.
+4. Se algum link nao permitir extrair imagens automaticamente, informe isso claramente em comentario SQL e sugira preenchimento manual das imagens no SQL.
+5. Gerar SQL seguro usando apenas categories, products e product_variations.
+6. Nao duplicar produtos por slug.
+7. Nao duplicar categorias por slug.
+8. Nao duplicar variacoes pela combinacao produto + SKU + nome + cor.
+9. Atualizar produto existente quando necessario.
+10. Criar o produto como disponivel.
+11. Usar upsert/on conflict quando fizer sentido.
+12. O SQL precisa ser seguro para executar mais de uma vez.
+
+Resultado esperado:
+- Retorne apenas o SQL completo.
+- Nao inclua explicacoes fora do SQL.`;
+}
+
+function CodexAssistantPage() {
+  const [form, setForm] = useState(emptyCodexAssistantForm);
   const [variations, setVariations] = useState([{ ...emptyCodexAssistantVariation }]);
   const [prompt, setPrompt] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
-
-  useEffect(() => {
-    if (!form.category && categories[0]?.name) {
-      setForm((current) => ({ ...current, category: categories[0].name }));
-    }
-  }, [categories, form.category]);
+  const [validation, setValidation] = useState({ valid: false, errors: [], success: "" });
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
+    setValidation({ valid: false, errors: [], success: "" });
   }
 
   function updateVariation(index, field, value) {
     setVariations((current) => current.map((variation, itemIndex) => (
       itemIndex === index ? { ...variation, [field]: value } : variation
     )));
+    setValidation({ valid: false, errors: [], success: "" });
   }
 
   function addVariation() {
@@ -670,12 +733,20 @@ function CodexAssistantPage({ categories }) {
     setVariations((current) => current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index));
   }
 
+  function validateLinks() {
+    const result = validateCodexAssistantLinks(form, variations);
+    setValidation(result);
+    return result.valid;
+  }
+
   function generatePrompt() {
+    if (!validateLinks()) return;
     setCopyStatus("");
     setPrompt(buildCodexAssistantPrompt(form, variations));
   }
 
   async function copyPrompt() {
+    if (!prompt && !validateLinks()) return;
     const text = prompt || buildCodexAssistantPrompt(form, variations);
     setPrompt(text);
 
@@ -695,59 +766,70 @@ function CodexAssistantPage({ categories }) {
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-nt-cyan">Cadastro assistido</p>
             <h2 className="mt-2 text-2xl font-black">Assistente Codex</h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-              Gere um prompt pronto para o Codex criar um SQL de importacao. Nada e salvo no catalogo automaticamente nesta tela.
+              Informe apenas os links do fornecedor, preços e estoque. O Codex utilizará esses links para extrair automaticamente nome, marca, modelo, descrições, especificações, imagens e variações.
             </p>
           </div>
-          <AdminButton icon={FilePlus2} onClick={generatePrompt}>Gerar prompt para Codex</AdminButton>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <AdminButton variant="secondary" icon={CheckCircle2} onClick={validateLinks}>Validar links</AdminButton>
+            <AdminButton icon={FilePlus2} onClick={generatePrompt}>Gerar prompt para Codex</AdminButton>
+          </div>
         </div>
       </section>
 
-      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
-        <TextField label="Nome do produto" value={form.name} onChange={(value) => updateField("name", value)} />
-        <SelectField
-          label="Categoria"
-          value={form.category}
-          onChange={(value) => updateField("category", value)}
-          options={(categories.length ? categories : [{ name: "Sem categoria" }]).map((item) => [item.name, item.name])}
-        />
-        <TextField label="Marca" value={form.brand} onChange={(value) => updateField("brand", value)} />
-        <TextField label="Modelo" value={form.model} onChange={(value) => updateField("model", value)} />
-        <TextField label="Link principal do produto" value={form.mainLink} onChange={(value) => updateField("mainLink", value)} />
-        <TextField label="Estoque inicial" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} />
-        <TextField label="Preco de venda" value={form.price} onChange={(value) => updateField("price", value)} />
-        <TextField label="Preco promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} />
-        <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
-        <TextareaField label="Observacoes internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
+      <section className="grid gap-3 rounded-lg border border-white/10 bg-white/5 p-5 md:grid-cols-8">
+        {["Fornecedor", "Links", "Assistente Codex", "Prompt", "Codex extrai dados e imagens", "SQL", "Supabase", "NT Admin + Site Publico"].map((step, index) => (
+          <div key={step} className="rounded-md border border-white/10 bg-slate-950 p-3 text-center">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-nt-cyan">{index + 1}</p>
+            <p className="mt-2 text-sm font-black text-white">{step}</p>
+            {index < 7 ? <p className="mt-2 text-lg text-slate-500">↓</p> : null}
+          </div>
+        ))}
+      </section>
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
+        <TextField label="Link principal do produto" value={form.mainLink} onChange={(value) => updateField("mainLink", value)} required placeholder="https://..." />
+        <TextareaField label="Observações" value={form.notes} onChange={(value) => updateField("notes", value)} placeholder="Ex.: priorizar imagens reais, produto com duas cores, garantia da loja..." />
       </section>
 
       <section className="rounded-lg border border-white/10 bg-white/5 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-black">Variacoes</h2>
-            <p className="mt-1 text-sm text-slate-400">Adicione cores, modelos ou links diferentes do mesmo produto.</p>
+            <p className="mt-1 text-sm text-slate-400">Informe nome, link, preço, estoque e garantia quando houver variação.</p>
           </div>
-          <AdminButton type="button" variant="secondary" icon={Plus} onClick={addVariation}>Adicionar variacao</AdminButton>
+          <AdminButton type="button" variant="secondary" icon={Plus} onClick={addVariation}>Adicionar variação</AdminButton>
         </div>
         <div className="mt-5 grid gap-4">
           {variations.map((variation, index) => (
             <div key={index} className="rounded-lg border border-white/10 bg-slate-950 p-4">
               <div className="mb-4 flex items-center justify-between gap-3">
-                <h3 className="font-black">Variacao {index + 1}</h3>
+                <h3 className="font-black">Variação {index + 1}</h3>
                 <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => removeVariation(index)}>Remover</AdminButton>
               </div>
               <div className="grid gap-4 lg:grid-cols-3">
-                <TextField label="Nome da variacao" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} />
-                <TextField label="Cor" value={variation.color} onChange={(value) => updateVariation(index, "color", value)} />
-                <TextField label="Link da variacao" value={variation.link} onChange={(value) => updateVariation(index, "link", value)} />
-                <TextField label="Preco" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
-                <TextField label="Preco promocional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
+                <TextField label="Nome da variação" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} placeholder="Preto, Branco, Vermelho..." />
+                <TextField label="Link da variação" value={variation.link} onChange={(value) => updateVariation(index, "link", value)} placeholder="https://..." />
+                <TextField label="Preço de venda" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
+                <TextField label="Preço promocional opcional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
                 <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} />
-                <TextField label="SKU" value={variation.sku} onChange={(value) => updateVariation(index, "sku", value)} />
+                <TextField label="Garantia opcional" value={variation.warranty} onChange={(value) => updateVariation(index, "warranty", value)} />
               </div>
             </div>
           ))}
         </div>
       </section>
+
+      {(validation.errors.length || validation.success) ? (
+        <section className={`rounded-lg border p-5 ${validation.valid ? "border-lime-300/30 bg-lime-300/10 text-lime-100" : "border-red-400/40 bg-red-500/10 text-red-100"}`}>
+          <h2 className="text-lg font-black">{validation.valid ? "Links validados" : "Corrija os links"}</h2>
+          {validation.success ? <p className="mt-2 text-sm">{validation.success}</p> : null}
+          {validation.errors.length ? (
+            <ul className="mt-3 grid gap-2 text-sm">
+              {validation.errors.map((error) => <li key={error}>- {error}</li>)}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
