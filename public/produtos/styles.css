@@ -140,7 +140,7 @@ h1 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
-  margin-bottom: 34px;
+  margin-top: 18px;
 }
 
 .category-button,
@@ -222,6 +222,20 @@ h1 {
   grid-template-columns: repeat(auto-fill, minmax(260px, 360px));
   gap: 18px;
   justify-content: start;
+}
+
+.other-categories {
+  margin-top: 46px;
+  padding-top: 28px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.other-categories-head {
+  max-width: 680px;
+}
+
+.other-categories-head h2 {
+  font-size: clamp(24px, 3vw, 34px);
 }
 
 .product-card {
@@ -566,7 +580,7 @@ h1 {
     display: flex;
     gap: 10px;
     overflow-x: auto;
-    margin: 0 -16px 18px;
+    margin: 14px -16px 0;
     padding: 0 16px 8px;
     scroll-snap-type: x mandatory;
     scrollbar-width: thin;
@@ -617,6 +631,11 @@ h1 {
 
   #productCount {
     padding: 8px 12px;
+  }
+
+  .other-categories {
+    margin-top: 32px;
+    padding-top: 22px;
   }
 
   .product-detail {

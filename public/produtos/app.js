@@ -2420,7 +2420,6 @@ function isMobileViewport() {
 }
 
 function scrollToCatalogProducts() {
-  if (!isMobileViewport()) return;
   requestAnimationFrame(() => {
     document.querySelector(".catalog-head")?.scrollIntoView({
       behavior: "smooth",
