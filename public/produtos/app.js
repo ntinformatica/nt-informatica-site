@@ -1,6 +1,6 @@
 const whatsappNumber = "5547999309344";
 
-const categories = [
+let categories = [
   ["Monitores", "Telas para trabalho, estudo e jogos.", "../category-assets/monitores.svg"],
   ["Teclados", "Modelos gamer, mecânicos e de escritório.", "../category-assets/teclados.svg"],
   ["Mouses", "Precisão para jogos e produtividade.", "../category-assets/mouses.svg"],
@@ -15,7 +15,7 @@ const categories = [
   ["Acessórios gamer", "Itens para completar seu setup.", "../category-assets/acessorios.svg"],
 ];
 
-const products = [
+let products = [
   {
     id: "monitor-lg-ultragear-32gn600-b",
     name: "Monitor Gamer LG UltraGear 32GN600-B 32\" QHD 165Hz",
@@ -2357,6 +2357,42 @@ const grid = document.querySelector("#productGrid");
 const title = document.querySelector("#categoryTitle");
 const pageTitle = document.querySelector("#pageTitle");
 const count = document.querySelector("#productCount");
+const localCategories = categories;
+const localProducts = products;
+
+function showCatalogLoading() {
+  title.textContent = "Produtos";
+  pageTitle.textContent = "Produtos";
+  count.textContent = "Carregando";
+  grid.innerHTML = `
+    <article class="empty-category">
+      <strong>Carregando produtos</strong>
+      <p>Estamos buscando o catálogo atualizado da NT Informática.</p>
+    </article>
+  `;
+}
+
+function useLocalCatalogFallback(error) {
+  console.warn("Catalogo publico usando fallback local:", error);
+  categories = localCategories;
+  products = localProducts;
+}
+
+async function loadPublicCatalog() {
+  showCatalogLoading();
+
+  try {
+    const remoteCatalog = await window.NT_PUBLIC_CATALOG?.loadSupabaseCatalog();
+    if (!remoteCatalog?.categories?.length) {
+      throw new Error("Supabase nao retornou categorias publicas.");
+    }
+
+    categories = remoteCatalog.categories;
+    products = remoteCatalog.products || [];
+  } catch (error) {
+    useLocalCatalogFallback(error);
+  }
+}
 
 function assetPath(path) {
   if (!path || /^(https?:|data:|\/)/.test(path)) return path;
@@ -2377,6 +2413,11 @@ function categoryFromUrl() {
 
 function hasCategoryParam() {
   return new URLSearchParams(window.location.search).has("categoria");
+}
+
+function publicProductVisible(product) {
+  const status = String(product?.status || "disponivel").toLowerCase();
+  return !["rascunho", "despublicado", "inativo", "draft", "unpublished"].includes(status);
 }
 
 function productFromUrl() {
@@ -2642,7 +2683,7 @@ function setCategory(category, options = {}) {
   title.textContent = category;
   pageTitle.textContent = category;
 
-  const visible = products.filter((product) => product.category === category);
+  const visible = products.filter((product) => product.category === category && publicProductVisible(product));
   count.textContent = `${visible.length} produtos`;
 
   document.querySelectorAll(".category-button").forEach((button) => {
@@ -2687,17 +2728,19 @@ function setCategory(category, options = {}) {
   }
 }
 
-strip.innerHTML = categories
-  .map(([name, description, image]) => `
-    <button class="category-button" type="button" data-category="${name}">
-      <img class="category-media" src="${assetPath(image)}" alt="Categoria ${name}">
-      <span class="category-body">
-        <strong>${name}</strong>
-        <p>${description}</p>
-      </span>
-    </button>
-  `)
-  .join("");
+function renderCategoryButtons() {
+  strip.innerHTML = categories
+    .map(([name, description, image]) => `
+      <button class="category-button" type="button" data-category="${name}">
+        <img class="category-media" src="${assetPath(image)}" alt="Categoria ${name}">
+        <span class="category-body">
+          <strong>${name}</strong>
+          <p>${description}</p>
+        </span>
+      </button>
+    `)
+    .join("");
+}
 
 strip.addEventListener("click", (event) => {
   const button = event.target.closest(".category-button");
@@ -2731,9 +2774,16 @@ grid.addEventListener("click", (event) => {
   });
 });
 
-const selectedProduct = productFromUrl();
-if (selectedProduct) {
-  renderProductDetail(selectedProduct);
-} else {
-  setCategory(categoryFromUrl(), { scroll: hasCategoryParam() });
+async function initializeCatalog() {
+  await loadPublicCatalog();
+  renderCategoryButtons();
+
+  const selectedProduct = productFromUrl();
+  if (selectedProduct && publicProductVisible(selectedProduct)) {
+    renderProductDetail(selectedProduct);
+  } else {
+    setCategory(categoryFromUrl(), { scroll: hasCategoryParam() });
+  }
 }
+
+initializeCatalog();
