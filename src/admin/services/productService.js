@@ -177,25 +177,30 @@ async function saveVariations(productId, variations) {
 }
 
 export async function listProducts(categories = []) {
-  if (isSupabaseConfigured) {
-    try {
-      const [rows, variationRows] = await Promise.all([
-        supabaseRequest("/products?select=*&order=updated_at.desc"),
-        supabaseRequest("/product_variations?select=*&order=created_at.asc"),
-      ]);
-
-      return rows.map((row) => fromSupabase(
-        row,
-        categories,
-        variationRows.filter((variation) => variation.product_id === row.id),
-      ));
-    } catch (error) {
-      console.warn("Fallback local de produtos ativado:", error);
-      return readLocalProducts(categories);
-    }
+  if (!isSupabaseConfigured) {
+    return readLocalProducts(categories);
   }
 
-  return readLocalProducts(categories);
+  let rows = [];
+  try {
+    rows = await supabaseRequest("/products?select=*&order=updated_at.desc");
+  } catch (error) {
+    console.error("Erro ao carregar produtos do Supabase:", error);
+    throw new Error("Nao foi possivel carregar os produtos do Supabase.");
+  }
+
+  let variationRows = [];
+  try {
+    variationRows = await supabaseRequest("/product_variations?select=*&order=created_at.asc");
+  } catch (error) {
+    console.warn("Nao foi possivel carregar variacoes do Supabase. Produtos serao exibidos sem variacoes:", error);
+  }
+
+  return rows.map((row) => fromSupabase(
+    row,
+    categories,
+    variationRows.filter((variation) => variation.product_id === row.id),
+  ));
 }
 
 export async function createProduct(product, categories = []) {
@@ -208,7 +213,8 @@ export async function createProduct(product, categories = []) {
       const variations = await saveVariations(row.id, product.variations);
       return fromSupabase(row, categories, variations);
     } catch (error) {
-      console.warn("Criando produto no fallback local:", error);
+      console.error("Erro ao criar produto no Supabase:", error);
+      throw new Error("Nao foi possivel criar o produto no Supabase.");
     }
   }
 
@@ -235,7 +241,8 @@ export async function updateProduct(id, product, categories = []) {
       const variations = await saveVariations(id, product.variations);
       return fromSupabase(row, categories, variations);
     } catch (error) {
-      console.warn("Atualizando produto no fallback local:", error);
+      console.error("Erro ao atualizar produto no Supabase:", error);
+      throw new Error("Nao foi possivel atualizar o produto no Supabase.");
     }
   }
 
@@ -254,7 +261,8 @@ export async function deleteProduct(id, categories = []) {
       });
       return;
     } catch (error) {
-      console.warn("Excluindo produto no fallback local:", error);
+      console.error("Erro ao excluir produto no Supabase:", error);
+      throw new Error("Nao foi possivel excluir o produto no Supabase.");
     }
   }
 
@@ -270,7 +278,8 @@ export async function updateProductStatus(id, status, categories = []) {
       });
       return fromSupabase(row, categories);
     } catch (error) {
-      console.warn("Atualizando status no fallback local:", error);
+      console.error("Erro ao atualizar status no Supabase:", error);
+      throw new Error("Nao foi possivel atualizar o status no Supabase.");
     }
   }
 
@@ -288,7 +297,8 @@ export async function updateProductFeatured(id, featured, categories = []) {
       });
       return fromSupabase(row, categories);
     } catch (error) {
-      console.warn("Atualizando destaque no fallback local:", error);
+      console.error("Erro ao atualizar destaque no Supabase:", error);
+      throw new Error("Nao foi possivel atualizar o destaque no Supabase.");
     }
   }
 
