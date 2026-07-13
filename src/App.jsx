@@ -23,6 +23,7 @@
   Tv,
   Wrench,
 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import heroImage from "./assets/hero-nt-gaming.png";
 import arenaImage from "./assets/arena-gamer-banner.png";
 import { Button, WhatsAppButton, whatsappLink } from "./components/Button";
@@ -32,6 +33,8 @@ import { Header } from "./components/Header";
 import { TechPlaceholder } from "./components/Placeholder";
 import { Section } from "./components/Section";
 import { AdminApp } from "./admin/AdminApp";
+import { isSupabaseConfigured } from "./lib/supabase";
+import { listPublicAssembledPcs, pcCategories } from "./admin/services/assembledPcService";
 import {
   arenaFeatures,
   arenaBookingUrl,
@@ -40,7 +43,6 @@ import {
   contactInfo,
   contentCards,
   highlights,
-  pcs,
   productCategories,
   services,
   socialLinks,
@@ -54,6 +56,96 @@ const messages = {
   product: "Olá, tenho interesse em um produto da NT Informática, Celulares e Games.",
   contact: "Olá, gostaria de falar com a NT Informática, Celulares e Games.",
 };
+
+function parseMoney(value) {
+  if (value === "" || value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+  const raw = String(value).trim().replace(/[R$\s]/g, "");
+  if (!raw) return null;
+
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  let normalized = raw;
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    normalized = lastComma > lastDot
+      ? raw.replace(/\./g, "").replace(",", ".")
+      : raw.replace(/,/g, "");
+  } else if (lastComma !== -1) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot !== -1) {
+    const [integerPart, decimalPart = ""] = raw.split(".");
+    normalized = decimalPart.length === 3 && integerPart.length <= 3 ? raw.replace(/\./g, "") : raw;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatCurrency(value) {
+  const parsed = parseMoney(value);
+  if (parsed === null) return "Consulte";
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(parsed);
+}
+
+function cashValue(value) {
+  const parsed = parseMoney(value);
+  return parsed === null ? null : parsed * 0.85;
+}
+
+function pcPrice(pc) {
+  return parseMoney(pc.promoPrice || pc.price) ?? Number.POSITIVE_INFINITY;
+}
+
+function pcSummary(pc) {
+  return [
+    pc.processor,
+    pc.graphicsCard,
+    pc.memory,
+    pc.storage,
+  ].filter(Boolean).join(" | ");
+}
+
+function pcWhatsappMessage(pc) {
+  const url = `${window.location.origin}/computadores/${pc.slug}`;
+  return `Olá! Tenho interesse no computador ${pc.name}.
+Configuração:
+${pcSummary(pc) || "Configuração a consultar"}
+Preço: ${formatCurrency(pc.promoPrice || pc.price)}
+Link: ${url}`;
+}
+
+function sortPcs(items, sort = "relevance") {
+  return items
+    .map((pc, index) => ({ pc, index }))
+    .sort((first, second) => {
+      const firstAvailable = Number(first.pc.stock || 0) >= 1;
+      const secondAvailable = Number(second.pc.stock || 0) >= 1;
+      if (firstAvailable !== secondAvailable) return firstAvailable ? -1 : 1;
+
+      if (sort === "price-asc" || sort === "price-desc") {
+        const diff = pcPrice(first.pc) - pcPrice(second.pc);
+        if (diff !== 0) return sort === "price-asc" ? diff : -diff;
+      }
+
+      if (first.pc.featured !== second.pc.featured) return first.pc.featured ? -1 : 1;
+      return first.index - second.index;
+    })
+    .map((item) => item.pc);
+}
+
+function pcGallery(pc) {
+  const fromText = typeof pc.images === "string"
+    ? pc.images.split("\n").map((image) => image.trim()).filter(Boolean)
+    : Array.isArray(pc.images) ? pc.images : [];
+  return [...new Set([pc.mainImage, ...fromText].filter(Boolean))];
+}
 
 function LineSvgIcon({ size = 24, strokeWidth = 2, children, ...props }) {
   return (
@@ -186,6 +278,45 @@ const howItWorksSteps = [
   "Aprove o orçamento.",
   "Receba seu equipamento pronto.",
 ];
+
+function usePublicPcs() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadPcs() {
+      setLoading(true);
+      setError("");
+      try {
+        const pcsList = await listPublicAssembledPcs();
+        if (mounted) setItems(pcsList);
+      } catch (loadError) {
+        console.error(loadError);
+        if (mounted) {
+          setItems([]);
+          setError("Não foi possível carregar os computadores agora.");
+        }
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    loadPcs();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return {
+    pcs: items,
+    loading,
+    error,
+    localMode: !isSupabaseConfigured,
+  };
+}
 
 function Hero() {
   return (
@@ -379,31 +510,60 @@ function Products() {
 }
 
 function PcShowcase() {
+  const { pcs, loading, error, localMode } = usePublicPcs();
+  const visiblePcs = sortPcs(pcs.filter((pc) => Number(pc.stock || 0) >= 1)).slice(0, 3);
+
   return (
     <Section id="pcs" eyebrow="PCs à venda" title="Computadores prontos para vender, estudar, trabalhar e jogar.">
+      {loading ? <p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando computadores disponíveis...</p> : null}
+      {!loading && (error || localMode) ? (
+        <div className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">
+          {error || "Supabase não configurado. Os PCs reais aparecerão aqui assim que forem cadastrados e publicados."}
+        </div>
+      ) : null}
+      {!loading && !visiblePcs.length ? (
+        <Card>
+          <h3 className="text-2xl font-black text-white">Nenhum PC disponível no momento.</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-300">Estamos preparando novos computadores montados para pronta entrega. Consulte a loja pelo WhatsApp.</p>
+          <WhatsAppButton message="Olá! Gostaria de consultar PCs montados disponíveis na NT Informática." className="mt-5">Consultar no WhatsApp</WhatsAppButton>
+        </Card>
+      ) : null}
       <div className="grid gap-5 lg:grid-cols-3">
-        {pcs.map((pc) => (
-          <Card key={pc.name}>
-            <TechPlaceholder label="Foto do PC" icon={Monitor} />
+        {visiblePcs.map((pc) => {
+          const images = pcGallery(pc);
+          return (
+          <Card key={pc.id}>
+            {images[0] ? (
+              <img src={images[0]} alt={pc.name} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover" />
+            ) : (
+              <TechPlaceholder label="Foto do PC" icon={Monitor} />
+            )}
             <h3 className="mt-5 text-2xl font-black text-white">{pc.name}</h3>
             <dl className="mt-5 grid gap-3 text-sm">
               {[
-                ["Processador", pc.cpu],
-                ["Memória RAM", pc.ram],
+                ["Processador", pc.processor],
+                ["Memória RAM", pc.memory],
                 ["Armazenamento", pc.storage],
-                ["Placa de vídeo", pc.gpu],
+                ["Placa de vídeo", pc.graphicsCard],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-4 border-b border-white/10 pb-2">
                   <dt className="text-slate-400">{label}</dt>
-                  <dd className="text-right font-semibold text-white">{value}</dd>
+                  <dd className="text-right font-semibold text-white">{value || "Consulte"}</dd>
                 </div>
               ))}
             </dl>
-            <p className="mt-5 text-3xl font-black text-nt-cyan">{pc.price}</p>
-            <p className="mt-1 text-sm text-slate-300">{pc.installment} · {pc.pix}</p>
-            <WhatsAppButton message={messages.product} className="mt-5 w-full">Tenho interesse</WhatsAppButton>
+            <p className="mt-5 text-3xl font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
+            <p className="mt-1 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)} · Pix/dinheiro: {formatCurrency(cashValue(pc.price))}</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <Button href={`/computadores/${pc.slug}`} variant="secondary">Ver detalhes</Button>
+              <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button>
+            </div>
           </Card>
-        ))}
+        );
+        })}
+      </div>
+      <div className="mt-6">
+        <Button href="/computadores" variant="secondary" icon={Monitor}>Ver todos os computadores</Button>
       </div>
     </Section>
   );
@@ -452,6 +612,176 @@ function Testimonials() {
   );
 }
 
+function PcCard({ pc }) {
+  const images = pcGallery(pc);
+  const available = Number(pc.stock || 0) >= 1;
+
+  return (
+    <Card className="flex flex-col">
+      {images[0] ? (
+        <img src={images[0]} alt={pc.name} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover" />
+      ) : (
+        <TechPlaceholder label="Foto do PC" icon={Monitor} />
+      )}
+      <div className="mt-5 flex flex-1 flex-col">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-nt-cyan/30 bg-nt-cyan/10 px-3 py-1 text-xs font-bold text-nt-cyan">{pc.category || "PC montado"}</span>
+          <span className={`rounded-full border px-3 py-1 text-xs font-bold ${available ? "border-lime-300/30 bg-lime-300/10 text-lime-200" : "border-red-300/30 bg-red-300/10 text-red-200"}`}>
+            {available ? "Em estoque" : "Esgotado"}
+          </span>
+        </div>
+        <h3 className="mt-4 text-2xl font-black text-white">{pc.name}</h3>
+        <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-300">{pc.shortDescription || pcSummary(pc) || "Computador montado pela NT Informática."}</p>
+        <p className="mt-5 text-3xl font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
+        <p className="mt-1 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)} · Pix/dinheiro: {formatCurrency(cashValue(pc.price))}</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <Button href={`/computadores/${pc.slug}`} variant="secondary">Ver detalhes</Button>
+          {available ? (
+            <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button>
+          ) : (
+            <WhatsAppButton message={`Olá! Gostaria de consultar disponibilidade do computador ${pc.name}.`}>Consultar</WhatsAppButton>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function PcDetail({ pc }) {
+  const images = pcGallery(pc);
+  const [selectedImage, setSelectedImage] = useState(images[0] || "");
+  const available = Number(pc.stock || 0) >= 1;
+  const specs = [
+    ["Processador", pc.processor],
+    ["Placa-mãe", pc.motherboard],
+    ["Memória RAM", pc.memory],
+    ["Armazenamento", pc.storage],
+    ["Placa de vídeo", pc.graphicsCard],
+    ["Fonte", pc.powerSupply],
+    ["Gabinete", pc.caseModel],
+    ["Refrigeração", pc.cooling],
+    ["Sistema operacional", pc.operatingSystem],
+    ["Garantia", pc.warranty],
+  ].filter(([, value]) => Boolean(value));
+
+  useEffect(() => {
+    setSelectedImage(images[0] || "");
+  }, [pc.id]);
+
+  return (
+    <Section eyebrow={pc.category || "PC montado"} title={pc.name} description={pc.shortDescription}>
+      <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
+        <div>
+          {selectedImage ? (
+            <img src={selectedImage} alt={pc.name} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover shadow-card" />
+          ) : (
+            <TechPlaceholder label="Foto do PC" icon={Monitor} />
+          )}
+          {images.length > 1 ? (
+            <div className="mt-4 grid grid-cols-4 gap-3 sm:grid-cols-6">
+              {images.map((image) => (
+                <button key={image} type="button" onClick={() => setSelectedImage(image)} className={`overflow-hidden rounded-md border ${selectedImage === image ? "border-nt-cyan" : "border-white/10"}`}>
+                  <img src={image} alt="" className="aspect-square w-full object-cover" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <Card>
+          <span className={`inline-flex rounded-full border px-3 py-1 text-xs font-bold ${available ? "border-lime-300/30 bg-lime-300/10 text-lime-200" : "border-red-300/30 bg-red-300/10 text-red-200"}`}>
+            {available ? "Em estoque" : "Esgotado"}
+          </span>
+          <p className="mt-5 text-4xl font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
+          <p className="mt-2 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)}</p>
+          <p className="mt-1 text-sm text-lime-200">À vista no Pix/dinheiro com 15% off: {formatCurrency(cashValue(pc.price))}</p>
+          <p className="mt-5 text-sm leading-6 text-slate-300">{pc.fullDescription || pc.shortDescription || "Computador montado e revisado pela NT Informática."}</p>
+          <div className="mt-6 grid gap-3">
+            {available ? (
+              <Button href={whatsappLink(pcWhatsappMessage(pc))} className="w-full">Comprar via WhatsApp</Button>
+            ) : (
+              <WhatsAppButton message={`Olá! Gostaria de consultar disponibilidade do computador ${pc.name}.`} className="w-full">Consultar disponibilidade</WhatsAppButton>
+            )}
+            <Button href="/computadores" variant="secondary" className="w-full">Voltar para computadores</Button>
+          </div>
+        </Card>
+      </div>
+
+      <Card className="mt-8">
+        <h2 className="text-2xl font-black text-white">Especificações completas</h2>
+        <dl className="mt-5 grid gap-3 md:grid-cols-2">
+          {specs.map(([label, value]) => (
+            <div key={label} className="rounded-md border border-white/10 bg-white/5 p-4">
+              <dt className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{label}</dt>
+              <dd className="mt-2 font-semibold text-white">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </Card>
+    </Section>
+  );
+}
+
+function ComputersPage() {
+  const { pcs, loading, error, localMode } = usePublicPcs();
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("Todas");
+  const [sort, setSort] = useState("relevance");
+  const slug = decodeURIComponent(window.location.pathname.replace(/^\/computadores\/?/, "")).replace(/\/$/, "");
+  const selectedPc = slug ? pcs.find((pc) => pc.slug === slug || pc.id === slug) : null;
+
+  const filteredPcs = useMemo(() => sortPcs(pcs.filter((pc) => {
+    const matchSearch = [pc.name, pc.processor, pc.graphicsCard, pc.shortDescription].join(" ").toLowerCase().includes(search.toLowerCase());
+    const matchCategory = category === "Todas" || pc.category === category;
+    return matchSearch && matchCategory;
+  }), sort), [pcs, search, category, sort]);
+
+  return (
+    <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
+      <Header />
+      <main className="pt-20">
+        {loading ? (
+          <Section eyebrow="PCs Montados" title="Carregando computadores...">
+            <p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p>
+          </Section>
+        ) : selectedPc ? (
+          <PcDetail pc={selectedPc} />
+        ) : (
+          <Section eyebrow="PCs Montados" title="Computadores prontos da NT Informática" description="Filtre por categoria, compare configurações e chame no WhatsApp para comprar.">
+            {(error || localMode) ? (
+              <div className="mb-6 rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">
+                {error || "Supabase não configurado. Nenhum PC real será exibido no modo local."}
+              </div>
+            ) : null}
+            <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 lg:grid-cols-[1fr_0.55fr_0.45fr]">
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, processador ou placa de vídeo" className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan" />
+              <select value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
+                <option>Todas</option>
+                {pcCategories.map((item) => <option key={item}>{item}</option>)}
+              </select>
+              <select value={sort} onChange={(event) => setSort(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
+                <option value="relevance">Relevância</option>
+                <option value="price-asc">Menor preço</option>
+                <option value="price-desc">Maior preço</option>
+              </select>
+            </div>
+            <div className="mt-6 grid gap-5 lg:grid-cols-3">
+              {filteredPcs.map((pc) => <PcCard key={pc.id} pc={pc} />)}
+            </div>
+            {!filteredPcs.length ? (
+              <Card className="mt-6 text-center">
+                <h2 className="text-2xl font-black text-white">Nenhum computador encontrado.</h2>
+                <p className="mt-3 text-sm text-slate-300">Ajuste os filtros ou consulte a loja para montar uma configuração sob medida.</p>
+                <WhatsAppButton message="Olá! Gostaria de consultar computadores montados disponíveis ou montar uma configuração." className="mt-5">Consultar no WhatsApp</WhatsAppButton>
+              </Card>
+            ) : null}
+          </Section>
+        )}
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
 function Contact() {
   return (
     <Section id="contato" eyebrow="Contato" title="Chame a NT agora e fale direto pelo WhatsApp.">
@@ -489,6 +819,10 @@ function Contact() {
 export default function App() {
   if (window.location.pathname.startsWith("/admin")) {
     return <AdminApp />;
+  }
+
+  if (window.location.pathname.startsWith("/computadores")) {
+    return <ComputersPage />;
   }
 
   return (

@@ -60,12 +60,18 @@ const adminFallbackRoutes = [
   "admin/produtos/novo",
   "admin/produtos/editar",
   "admin/produtos/editar/123",
+  "admin/pcs",
+  "admin/pcs/novo",
+  "admin/pcs/editar",
+  "admin/pcs/editar/123",
   "admin/categorias",
   "admin/assistente-codex",
   "admin/arena",
   "admin/configuracoes",
   "admin/avaliacoes",
   "admin/conteudo",
+  "computadores",
+  "computadores/pc-exemplo",
 ];
 
 for (const route of adminFallbackRoutes) {
@@ -98,6 +104,27 @@ if (supabaseUrl && supabaseAnonKey && isValidSupabaseUrl(supabaseUrl)) {
       for (const id of [product.id, product.slug].filter(Boolean)) {
         writeFallback(`admin/produtos/editar/${encodeURIComponent(id)}`);
         dynamicEditFallbacks += 1;
+      }
+    }
+
+    const pcsResponse = await fetch(`${supabaseUrl}/rest/v1/assembled_pcs?select=id,slug`, {
+      headers: {
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+        Accept: "application/json",
+      },
+    });
+
+    if (!pcsResponse.ok) {
+      throw new Error(await pcsResponse.text());
+    }
+
+    const pcs = await pcsResponse.json();
+    for (const pc of pcs) {
+      for (const id of [pc.id, pc.slug].filter(Boolean)) {
+        writeFallback(`admin/pcs/editar/${encodeURIComponent(id)}`);
+        writeFallback(`computadores/${encodeURIComponent(pc.slug || id)}`);
+        dynamicEditFallbacks += 2;
       }
     }
   } catch (error) {

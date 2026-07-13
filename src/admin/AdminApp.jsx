@@ -12,6 +12,7 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
+  Monitor,
   Pencil,
   Plus,
   Search,
@@ -28,6 +29,15 @@ import { adminRecentChanges, adminSessionKey, adminStatuses } from "./adminData"
 import { createCategory, deleteCategory, listCategories, updateCategory } from "./services/categoryService";
 import { slugify } from "./services/localStorageHelpers";
 import {
+  createAssembledPc,
+  deleteAssembledPc,
+  listAssembledPcs,
+  pcCategories,
+  updateAssembledPc,
+  updateAssembledPcFeatured,
+  updateAssembledPcPublished,
+} from "./services/assembledPcService";
+import {
   createProduct,
   deleteProduct,
   listProducts,
@@ -40,6 +50,7 @@ import { createStockMovement, listStockMovements, previewStockMovement } from ".
 const menuItems = [
   ["Dashboard", "/admin", Home],
   ["Produtos", "/admin/produtos", Boxes],
+  ["PCs Montados", "/admin/pcs", Monitor],
   ["Categorias", "/admin/categorias", Layers3],
   ["Assistente Codex", "/admin/assistente-codex", FilePlus2],
   ["Arena Gamer", "/admin/arena", Gamepad2],
@@ -80,6 +91,33 @@ const emptyVariation = {
   sku: "",
   image: "",
   active: true,
+};
+
+const emptyPc = {
+  name: "",
+  slug: "",
+  category: "Gamer de entrada",
+  shortDescription: "",
+  fullDescription: "",
+  processor: "",
+  motherboard: "",
+  memory: "",
+  storage: "",
+  graphicsCard: "",
+  powerSupply: "",
+  caseModel: "",
+  cooling: "",
+  operatingSystem: "",
+  price: "",
+  promoPrice: "",
+  stock: 0,
+  warranty: "",
+  mainImage: "",
+  images: "",
+  gallery: "",
+  featured: false,
+  published: false,
+  internalNotes: "",
 };
 
 const emptyCodexAssistantForm = {
@@ -145,6 +183,11 @@ function calculateCashPrice(value) {
 function routeInfo(pathname) {
   const cleanPath = pathname.replace(/\/$/, "") || "/admin";
   if (cleanPath === "/admin/login") return { page: "login" };
+  if (cleanPath === "/admin/pcs/novo") return { page: "pcForm", mode: "new" };
+  if (cleanPath.startsWith("/admin/pcs/editar/")) {
+    return { page: "pcForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/pcs/editar/", "")) };
+  }
+  if (cleanPath === "/admin/pcs") return { page: "pcs" };
   if (cleanPath === "/admin/produtos/novo") return { page: "productForm", mode: "new" };
   if (cleanPath.startsWith("/admin/produtos/editar/")) {
     return { page: "productForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/produtos/editar/", "")) };
@@ -168,6 +211,14 @@ function normalizeProductForm(product, categories) {
     categoryId: category?.id || product?.categoryId || firstCategory?.id || "",
     category: category?.name || product?.category || firstCategory?.name || "",
     variations: Array.isArray(product?.variations) ? product.variations : [],
+  };
+}
+
+function normalizePcForm(pc) {
+  return {
+    ...emptyPc,
+    ...pc,
+    category: pc?.category || emptyPc.category,
   };
 }
 
@@ -302,12 +353,14 @@ function SummaryCard({ label, value, icon: Icon, tone = "cyan" }) {
   );
 }
 
-function Dashboard({ products, categories }) {
+function Dashboard({ products, categories, pcs }) {
   const totals = {
     products: products.length,
     featured: products.filter((item) => item.featured).length,
     soldOut: products.filter((item) => item.status === "esgotado").length,
     categories: categories.length,
+    pcs: pcs.length,
+    pcsPublished: pcs.filter((item) => item.published).length,
   };
 
   return (
@@ -317,7 +370,8 @@ function Dashboard({ products, categories }) {
         <SummaryCard label="Produtos em destaque" value={totals.featured} icon={Star} tone="green" />
         <SummaryCard label="Produtos esgotados" value={totals.soldOut} icon={X} tone="red" />
         <SummaryCard label="Categorias cadastradas" value={totals.categories} icon={Layers3} />
-        <SummaryCard label="Reservas da Arena" value="0" icon={CalendarDays} tone="amber" />
+        <SummaryCard label="PCs montados" value={totals.pcs} icon={Monitor} tone="amber" />
+        <SummaryCard label="PCs publicados" value={totals.pcsPublished} icon={CheckCircle2} tone="green" />
         <SummaryCard label="Últimas alterações" value={adminRecentChanges.length} icon={BarChart3} />
       </div>
       <section className="glass rounded-lg p-5 shadow-card">
@@ -784,6 +838,189 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
   );
 }
 
+function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("Todas");
+  const [published, setPublished] = useState("Todos");
+  const [featured, setFeatured] = useState("Todos");
+
+  const filteredPcs = useMemo(() => pcs.filter((pc) => {
+    const matchSearch = pc.name.toLowerCase().includes(search.toLowerCase());
+    const matchCategory = category === "Todas" || pc.category === category;
+    const matchPublished = published === "Todos" || (published === "Publicado" ? pc.published : !pc.published);
+    const matchFeatured = featured === "Todos" || (featured === "Destaque" ? pc.featured : !pc.featured);
+    return matchSearch && matchCategory && matchPublished && matchFeatured;
+  }), [pcs, search, category, published, featured]);
+
+  return (
+    <>
+      <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 xl:grid-cols-[1.2fr_0.75fr_0.65fr_0.65fr_auto]">
+        <label className="relative">
+          <Search className="pointer-events-none absolute left-3 top-3 text-slate-500" size={18} />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar PC por nome" className="w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
+        </label>
+        <select value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
+          <option>Todas</option>
+          {pcCategories.map((item) => <option key={item}>{item}</option>)}
+        </select>
+        <select value={published} onChange={(event) => setPublished(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
+          <option>Todos</option>
+          <option>Publicado</option>
+          <option>Despublicado</option>
+        </select>
+        <select value={featured} onChange={(event) => setFeatured(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
+          <option>Todos</option>
+          <option>Destaque</option>
+          <option>Sem destaque</option>
+        </select>
+        <a href="/admin/pcs/novo" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white transition hover:bg-nt-cyan">
+          <Plus size={17} />
+          Novo PC
+        </a>
+      </div>
+
+      <section className="mt-6 overflow-hidden rounded-lg border border-white/10 bg-[#0b111d] shadow-card">
+        <div className="hidden grid-cols-[1.2fr_0.7fr_0.55fr_0.45fr_0.55fr_1.35fr] border-b border-white/10 px-5 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400 lg:grid">
+          <span>Computador</span>
+          <span>Categoria</span>
+          <span>Status</span>
+          <span>Estoque</span>
+          <span>Preço</span>
+          <span>Ações</span>
+        </div>
+        <div className="divide-y divide-white/10">
+          {filteredPcs.map((pc) => (
+            <article key={pc.id} className="grid gap-4 p-5 lg:grid-cols-[1.2fr_0.7fr_0.55fr_0.45fr_0.55fr_1.35fr] lg:items-center">
+              <div>
+                <p className="font-black">{pc.name}</p>
+                <p className="mt-1 text-sm text-slate-400">{pc.processor || "Processador não informado"} · {pc.graphicsCard || "Vídeo não informado"}</p>
+                {pc.featured ? <span className="mt-2 inline-flex rounded-full bg-lime-300/10 px-3 py-1 text-xs font-bold text-lime-200">Destaque</span> : null}
+              </div>
+              <p className="text-sm text-slate-300">{pc.category}</p>
+              <span className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${pc.published ? "border-lime-300/30 bg-lime-300/10 text-lime-200" : "border-amber-300/30 bg-amber-300/10 text-amber-100"}`}>
+                {pc.published ? "Publicado" : "Despublicado"}
+              </span>
+              <p className="font-bold">{pc.stock ?? 0}</p>
+              <p className="font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
+              <div className="flex flex-wrap gap-2">
+                <a href={`/admin/pcs/editar/${pc.id}`} className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:border-nt-cyan">
+                  <Pencil size={15} /> Editar
+                </a>
+                <AdminButton variant="secondary" onClick={() => onDuplicate(pc)}>Duplicar</AdminButton>
+                <AdminButton variant="secondary" onClick={() => onPublished(pc, !pc.published)}>
+                  {pc.published ? "Despublicar" : "Publicar"}
+                </AdminButton>
+                <AdminButton variant="secondary" onClick={() => onFeatured(pc, !pc.featured)}>
+                  {pc.featured ? "Remover destaque" : "Destacar"}
+                </AdminButton>
+                <AdminButton variant="danger" onClick={() => onDelete(pc.id)} icon={Trash2}>Excluir</AdminButton>
+              </div>
+            </article>
+          ))}
+          {!filteredPcs.length ? (
+            <div className="p-8 text-center">
+              <p className="text-lg font-black">Nenhum PC montado cadastrado ainda.</p>
+              <p className="mt-2 text-sm text-slate-400">Cadastre computadores reais da loja para aparecerem na Home e em /computadores.</p>
+              <a href="/admin/pcs/novo" className="mt-5 inline-flex min-h-10 items-center justify-center rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white hover:bg-nt-cyan">
+                Cadastrar primeiro PC
+              </a>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function PcFormPage({ mode, pcId, pcs, onSave, error }) {
+  const existingPc = pcs.find((pc) => pc.id === pcId);
+  const isEdit = mode === "edit";
+  const [form, setForm] = useState(() => normalizePcForm(isEdit ? existingPc : emptyPc));
+  const installmentBase = form.price || form.promoPrice;
+  const cashPrice = calculateCashPrice(form.price);
+
+  useEffect(() => {
+    setForm(normalizePcForm(isEdit ? existingPc : emptyPc));
+  }, [pcId, pcs, isEdit, existingPc]);
+
+  function updateField(field, value) {
+    setForm((current) => {
+      const next = { ...current, [field]: value };
+      if (field === "name" && !isEdit) next.slug = slugify(value);
+      return next;
+    });
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    const saved = await onSave(isEdit ? existingPc.id : null, form);
+    if (saved) window.location.href = "/admin/pcs";
+  }
+
+  if (isEdit && !existingPc) {
+    return (
+      <div className="glass rounded-lg p-6">
+        <h2 className="text-2xl font-black">PC não encontrado</h2>
+        <a href="/admin/pcs" className="mt-4 inline-flex text-sm font-bold text-nt-cyan">Voltar para PCs</a>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="grid gap-6">
+      {error ? <div className="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
+        <TextField label="Nome comercial do PC" value={form.name} onChange={(value) => updateField("name", value)} required />
+        <TextField label="Slug automático" value={form.slug} onChange={(value) => updateField("slug", slugify(value))} required />
+        <SelectField label="Categoria" value={form.category} onChange={(value) => updateField("category", value)} options={pcCategories.map((item) => [item, item])} />
+        <TextField label="Preço em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 2500" />
+        <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 2125" />
+        <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} min="0" step="1" />
+        <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
+        <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
+          <p className="font-bold text-slate-200">Cálculo automático</p>
+          <p className="mt-2 text-slate-400">10x sem juros: <strong className="text-white">{formatCurrency(installmentBase)}</strong></p>
+          <p className="mt-1 text-slate-400">À vista com 15% off: <strong className="text-lime-200">{formatCurrency(cashPrice || form.promoPrice)}</strong></p>
+        </div>
+        <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+          <input type="checkbox" checked={form.published} onChange={(event) => updateField("published", event.target.checked)} />
+          PC publicado
+        </label>
+        <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+          <input type="checkbox" checked={form.featured} onChange={(event) => updateField("featured", event.target.checked)} />
+          Destacar na Home
+        </label>
+      </section>
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
+        <TextField label="Processador" value={form.processor} onChange={(value) => updateField("processor", value)} />
+        <TextField label="Placa-mãe" value={form.motherboard} onChange={(value) => updateField("motherboard", value)} />
+        <TextField label="Memória RAM" value={form.memory} onChange={(value) => updateField("memory", value)} />
+        <TextField label="Armazenamento" value={form.storage} onChange={(value) => updateField("storage", value)} />
+        <TextField label="Placa de vídeo" value={form.graphicsCard} onChange={(value) => updateField("graphicsCard", value)} />
+        <TextField label="Fonte" value={form.powerSupply} onChange={(value) => updateField("powerSupply", value)} />
+        <TextField label="Gabinete" value={form.caseModel} onChange={(value) => updateField("caseModel", value)} />
+        <TextField label="Refrigeração" value={form.cooling} onChange={(value) => updateField("cooling", value)} />
+        <TextField label="Sistema operacional" value={form.operatingSystem} onChange={(value) => updateField("operatingSystem", value)} />
+      </section>
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
+        <TextareaField label="Descrição curta" value={form.shortDescription} onChange={(value) => updateField("shortDescription", value)} rows={3} />
+        <TextareaField label="Descrição completa" value={form.fullDescription} onChange={(value) => updateField("fullDescription", value)} rows={6} />
+        <TextField label="Imagem principal por URL" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="https://..." />
+        <TextareaField label="Galeria de imagens por URL" value={form.gallery || form.images} onChange={(value) => updateField("gallery", value)} placeholder="Uma URL por linha" />
+        <TextareaField label="Observações internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
+      </section>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <a href="/admin/pcs" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan">Cancelar</a>
+        <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar alterações" : "Criar PC"}</AdminButton>
+      </div>
+    </form>
+  );
+}
+
 function hasVariationData(variation) {
   return Boolean(
     variation.name
@@ -1216,6 +1453,7 @@ function PlaceholderPage({ title }) {
 export function AdminApp() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [pcs, setPcs] = useState([]);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
@@ -1230,8 +1468,10 @@ export function AdminApp() {
     try {
       const loadedCategories = await listCategories();
       const loadedProducts = await listProducts(loadedCategories);
+      const loadedPcs = await listAssembledPcs();
       setCategories(loadedCategories);
       setProducts(loadedProducts);
+      setPcs(loadedPcs);
       setNotice(isSupabaseConfigured ? "" : "Supabase não configurado. O painel está usando localStorage como fallback.");
     } catch (loadError) {
       console.error(loadError);
@@ -1328,6 +1568,38 @@ export function AdminApp() {
     return runAction(async () => createStockMovement({ product, ...movement }), "Estoque atualizado com sucesso.");
   }
 
+  async function savePc(id, pc) {
+    return runAction(async () => {
+      if (id) await updateAssembledPc(id, pc);
+      else await createAssembledPc(pc);
+    }, "PC salvo com sucesso.");
+  }
+
+  async function removePc(id) {
+    return runAction(async () => deleteAssembledPc(id), "PC excluído.");
+  }
+
+  async function duplicatePc(pc) {
+    return runAction(async () => {
+      await createAssembledPc({
+        ...pc,
+        id: undefined,
+        name: `${pc.name} cópia`,
+        slug: `${pc.slug}-copia-${Date.now()}`,
+        published: false,
+        featured: false,
+      });
+    }, "PC duplicado como despublicado.");
+  }
+
+  async function changePcPublished(pc, published) {
+    return runAction(async () => updateAssembledPcPublished(pc.id, published), "Publicação do PC atualizada.");
+  }
+
+  async function changePcFeatured(pc, featured) {
+    return runAction(async () => updateAssembledPcFeatured(pc.id, featured), "Destaque do PC atualizado.");
+  }
+
   async function addCategory(category) {
     return runAction(async () => createCategory(category), "Categoria criada.");
   }
@@ -1346,6 +1618,8 @@ export function AdminApp() {
     dashboard: ["Dashboard", "Resumo rápido do catálogo e da operação."],
     products: ["Produtos", "Busca, filtros, estoque, publicação e ações rápidas."],
     productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
+    pcs: ["PCs Montados", "Computadores prontos da loja para Home e página pública."],
+    pcForm: [info.mode === "edit" ? "Editar PC" : "Novo PC", "Cadastro completo de computadores montados."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
     codexAssistant: ["Assistente Codex", "Gere prompts para importacao segura de produtos via SQL."],
     arena: ["Arena Gamer", "Base visual para futuras reservas online."],
@@ -1358,7 +1632,7 @@ export function AdminApp() {
     <AdminShell title={title} subtitle={subtitle} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} mode={mode} notice={notice}>
       {error ? <div className="mb-5 rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
       {loading ? <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando dados do painel...</p> : null}
-      {!loading && info.page === "dashboard" ? <Dashboard products={products} categories={categories} /> : null}
+      {!loading && info.page === "dashboard" ? <Dashboard products={products} categories={categories} pcs={pcs} /> : null}
       {!loading && info.page === "products" ? (
         <ProductsPage
           products={products}
@@ -1371,6 +1645,8 @@ export function AdminApp() {
         />
       ) : null}
       {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} error={error} /> : null}
+      {!loading && info.page === "pcs" ? <PcsPage pcs={pcs} onDelete={removePc} onDuplicate={duplicatePc} onPublished={changePcPublished} onFeatured={changePcFeatured} /> : null}
+      {!loading && info.page === "pcForm" ? <PcFormPage mode={info.mode} pcId={info.id} pcs={pcs} onSave={savePc} error={error} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
       {!loading && info.page === "codexAssistant" ? <CodexAssistantPage categories={categories} /> : null}
       {!loading && info.page === "arena" ? <ArenaPage /> : null}

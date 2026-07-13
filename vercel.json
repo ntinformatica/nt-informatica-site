@@ -21,6 +21,18 @@
       "destination": "/produtos/index.html"
     },
     {
+      "source": "/computadores",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/computadores/",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/computadores/:path*",
+      "destination": "/index.html"
+    },
+    {
       "source": "/admin",
       "destination": "/index.html"
     },
@@ -30,6 +42,10 @@
     },
     {
       "source": "/admin/produtos/editar/:id",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin/pcs/editar/:id",
       "destination": "/index.html"
     },
     {
