@@ -1,16 +1,26 @@
 ﻿import {
+  Cable,
   CalendarCheck,
   CheckCircle2,
   Clock,
+  Cpu,
+  Fan,
   Gamepad2,
+  HardDrive,
   Headphones,
+  Keyboard,
   MapPin,
   MessageCircle,
+  MemoryStick,
   Monitor,
+  Mouse,
+  PcCase,
   PlayCircle,
+  Server,
   ShoppingBag,
   Sparkles,
   Star,
+  Tv,
   Wrench,
 } from "lucide-react";
 import heroImage from "./assets/hero-nt-gaming.png";
@@ -43,6 +53,103 @@ const messages = {
   budget: "Olá, gostaria de solicitar um orçamento para assistência técnica.",
   product: "Olá, tenho interesse em um produto da NT Informática, Celulares e Games.",
   contact: "Olá, gostaria de falar com a NT Informática, Celulares e Games.",
+};
+
+function LineSvgIcon({ size = 24, strokeWidth = 2, children, ...props }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      {...props}
+    >
+      {children}
+    </svg>
+  );
+}
+
+function PsuIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <circle cx="9" cy="12" r="3" />
+      <path d="M9 9v6M6 12h6" />
+      <path d="M15 9h3M15 12h3M15 15h3" />
+    </LineSvgIcon>
+  );
+}
+
+function GpuIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <rect x="3" y="7" width="15" height="10" rx="2" />
+      <circle cx="8" cy="12" r="2" />
+      <circle cx="13" cy="12" r="2" />
+      <path d="M18 10h3v4h-3M6 17v2M14 17v2" />
+    </LineSvgIcon>
+  );
+}
+
+function AirCoolerIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <rect x="8" y="4" width="8" height="16" rx="1.5" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 9v6M9 12h6M5 7h3M5 11h3M5 15h3M16 7h3M16 11h3M16 15h3" />
+    </LineSvgIcon>
+  );
+}
+
+function WaterCoolerIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <rect x="3" y="6" width="10" height="12" rx="2" />
+      <circle cx="8" cy="12" r="2.5" />
+      <path d="M13 9c3 0 3-3 6-3M13 15c3 0 3 3 6 3" />
+      <circle cx="20" cy="6" r="1.5" />
+      <circle cx="20" cy="18" r="1.5" />
+    </LineSvgIcon>
+  );
+}
+
+function HubIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <rect x="7" y="8" width="10" height="8" rx="2" />
+      <path d="M12 8V4M12 16v4M7 12H3M17 12h4" />
+      <circle cx="12" cy="4" r="1.5" />
+      <circle cx="12" cy="20" r="1.5" />
+      <circle cx="3" cy="12" r="1.5" />
+      <circle cx="21" cy="12" r="1.5" />
+    </LineSvgIcon>
+  );
+}
+
+const homeCategoryIcons = {
+  Monitores: Monitor,
+  Teclados: Keyboard,
+  Mouses: Mouse,
+  Headsets: Headphones,
+  Gabinetes: PcCase,
+  Fontes: PsuIcon,
+  SSDs: HardDrive,
+  "Memórias RAM": MemoryStick,
+  "Placas de Vídeo": GpuIcon,
+  Processadores: Cpu,
+  "Air Coolers": AirCoolerIcon,
+  "Water Coolers": WaterCoolerIcon,
+  "Fans e Ventoinhas RGB": Fan,
+  "Controladoras e Hubs": HubIcon,
+  Controles: Gamepad2,
+  Consoles: Server,
+  "Game Stick": Tv,
+  "Carregadores e Cabos": Cable,
 };
 
 const whyChooseCards = [
@@ -247,8 +354,9 @@ function Products() {
   return (
     <Section id="produtos" eyebrow="Produtos" title="Escolha uma categoria para abrir a vitrine." description="Cada segmento abre uma página própria com os produtos daquela linha, deixando a loja mais organizada para o cliente.">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] lg:gap-4">
-        {productCategories.map(({ name, description, icon: Icon }) => {
+        {productCategories.map(({ name, description, icon }) => {
           const categoryUrl = `/produtos?categoria=${encodeURIComponent(name)}`;
+          const Icon = homeCategoryIcons[name] || icon || ShoppingBag;
 
           return (
             <a
@@ -256,11 +364,11 @@ function Products() {
               href={categoryUrl}
               className="glass motion-card flex min-h-[132px] flex-col rounded-lg p-3 text-left shadow-card transition hover:border-nt-cyan/60 sm:min-h-[142px] sm:p-4"
             >
-              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md border border-nt-cyan/20 bg-nt-cyan/10 text-nt-cyan sm:h-10 sm:w-10">
-                <Icon size={20} strokeWidth={2.4} />
+              <div className="mb-2 flex h-14 w-14 items-center justify-center rounded-md border border-nt-cyan/20 bg-nt-cyan/10 text-nt-cyan sm:h-16 sm:w-16">
+                <Icon size={38} strokeWidth={1.9} />
               </div>
-              <h3 className="text-sm font-black leading-tight text-white sm:text-base">{name}</h3>
-              <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-300 sm:text-[13px]">{description}</p>
+              <h3 className="text-[13px] font-black leading-tight text-white sm:text-sm">{name}</h3>
+              <p className="mt-1.5 line-clamp-2 text-[11px] leading-4 text-slate-300 sm:text-xs">{description}</p>
               <span className="mt-auto pt-3 text-xs font-bold text-nt-cyan">Ver produtos</span>
             </a>
           );
