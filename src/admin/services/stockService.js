@@ -10,7 +10,7 @@ function normalizeType(type) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-  if (normalized === "saida") return "saída";
+  if (normalized === "saida") return "saida";
   if (normalized === "ajuste") return "ajuste";
   return "entrada";
 }
@@ -25,8 +25,17 @@ function calculateNewStock(previousStock, type, quantity) {
   const amount = normalizeQuantity(quantity);
 
   if (type === "entrada") return current + Math.max(amount, 0);
-  if (type === "saída") return Math.max(current - Math.max(amount, 0), 0);
+  if (type === "saida") return current - Math.max(amount, 0);
   return Math.max(amount, 0);
+}
+
+function totalProductStock(product, variationId, newVariationStock) {
+  if (!variationId || !product.variations?.length) return newVariationStock;
+
+  return product.variations.reduce((total, variation) => {
+    if (variation.id === variationId) return total + newVariationStock;
+    return total + normalizeQuantity(variation.stock);
+  }, 0);
 }
 
 function normalizeMovement(row) {
@@ -56,7 +65,8 @@ export function previewStockMovement(previousStock, type, quantity) {
   const normalizedType = normalizeType(type);
   const current = normalizeQuantity(previousStock);
   const amount = normalizeQuantity(quantity);
-  return calculateNewStock(current, normalizedType, amount);
+  const next = calculateNewStock(current, normalizedType, amount);
+  return Math.max(next, 0);
 }
 
 export async function listStockMovements(productId) {
@@ -80,13 +90,24 @@ export async function createStockMovement({ product, variationId = "", type, qua
 
   const normalizedType = normalizeType(type);
   const amount = normalizeQuantity(quantity);
-  if (amount < 0 || (normalizedType !== "ajuste" && amount === 0)) {
-    throw new Error("Informe uma quantidade valida para movimentar o estoque.");
+  if (amount <= 0) {
+    throw new Error("Informe uma quantidade valida.");
   }
 
   const variation = variationId ? product.variations?.find((item) => item.id === variationId) : null;
+  if (variationId && !variation) {
+    throw new Error("Variacao nao encontrada para movimentar estoque.");
+  }
+
   const previousStock = normalizeQuantity(variation ? variation.stock : product.stock);
   const newStock = calculateNewStock(previousStock, normalizedType, amount);
+  if (newStock < 0) {
+    throw new Error("Estoque insuficiente.");
+  }
+
+  const newProductStock = variation?.id
+    ? totalProductStock(product, variation.id, newStock)
+    : newStock;
   const movementQuantity = normalizedType === "ajuste" ? newStock - previousStock : amount;
 
   const payload = {
@@ -106,12 +127,12 @@ export async function createStockMovement({ product, variationId = "", type, qua
         method: "PATCH",
         body: JSON.stringify({ stock: newStock, updated_at: new Date().toISOString() }),
       });
-    } else {
-      await supabaseRequest(`/products?id=eq.${encodeURIComponent(product.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ stock: newStock, updated_at: new Date().toISOString() }),
-      });
     }
+
+    await supabaseRequest(`/products?id=eq.${encodeURIComponent(product.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ stock: newProductStock, updated_at: new Date().toISOString() }),
+    });
 
     const [movement] = await supabaseRequest("/stock_movements", {
       method: "POST",
@@ -123,9 +144,10 @@ export async function createStockMovement({ product, variationId = "", type, qua
   const products = readJson(adminStorageKey, []);
   const nextProducts = products.map((item) => {
     if (item.id !== product.id) return item;
-    if (!variation?.id) return { ...item, stock: newStock, updatedAt: new Date().toISOString() };
+    if (!variation?.id) return { ...item, stock: newProductStock, updatedAt: new Date().toISOString() };
     return {
       ...item,
+      stock: newProductStock,
       variations: (item.variations || []).map((itemVariation) => (
         itemVariation.id === variation.id ? { ...itemVariation, stock: newStock } : itemVariation
       )),

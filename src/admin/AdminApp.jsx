@@ -430,7 +430,7 @@ function StockMovementModal({ product, open, onClose, onMove }) {
             onChange={(value) => updateField("variationId", value)}
             options={[
               ["", "Produto principal"],
-              ...(product.variations || []).map((variation) => [variation.id, `${variation.name || variation.color || "Variação"} - estoque ${variation.stock ?? 0}`]),
+              ...(product.variations || []).map((variation) => [variation.id, `${variation.name || variation.color || "Variacao"} - estoque ${variation.stock ?? 0}`]),
             ]}
           />
           <SelectField
@@ -439,7 +439,7 @@ function StockMovementModal({ product, open, onClose, onMove }) {
             onChange={(value) => updateField("type", value)}
             options={[
               ["entrada", "Entrada"],
-              ["saída", "Saída"],
+              ["saida", "Saida"],
               ["ajuste", "Ajuste"],
             ]}
           />
@@ -448,20 +448,21 @@ function StockMovementModal({ product, open, onClose, onMove }) {
             type="number"
             value={form.quantity}
             onChange={(value) => updateField("quantity", Number(value))}
-            min="0"
+            min="1"
+            step="1"
           />
           <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
-            <p className="font-bold text-slate-200">Prévia da movimentação</p>
+            <p className="font-bold text-slate-200">Previa da movimentacao</p>
             <p className="mt-2 text-slate-400">Antes: <strong className="text-white">{currentStock}</strong></p>
             <p className="mt-1 text-slate-400">Depois: <strong className="text-lime-200">{previewStock}</strong></p>
           </div>
-          <TextField label="Motivo" value={form.reason} onChange={(value) => updateField("reason", value)} placeholder="Compra, venda, correção, inventário..." required />
-          <TextField label="Observações" value={form.notes} onChange={(value) => updateField("notes", value)} placeholder="Detalhes internos opcionais" />
+          <TextField label="Motivo" value={form.reason} onChange={(value) => updateField("reason", value)} placeholder="Compra, venda, correcao, inventario..." />
+          <TextField label="Observacoes" value={form.notes} onChange={(value) => updateField("notes", value)} placeholder="Detalhes internos opcionais" />
         </div>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
           <AdminButton type="button" variant="secondary" onClick={onClose}>Cancelar</AdminButton>
-          <AdminButton type="submit" icon={ClipboardList}>Salvar movimentação</AdminButton>
+          <AdminButton type="submit" icon={ClipboardList}>Salvar movimentacao</AdminButton>
         </div>
       </form>
     </div>
@@ -700,7 +701,7 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
         <TextField label="SKU" value={form.sku} onChange={(value) => updateField("sku", value)} />
         <TextField label="Preço em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 500" />
         <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 425" />
-        <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} readOnly={isEdit} />
+        <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} min="0" step="1" />
         <SelectField label="Status do produto" value={form.status} onChange={(value) => updateField("status", value)} options={adminStatuses.map((item) => [item, item])} />
         <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
         <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
@@ -743,7 +744,7 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
                 <TextField label="SKU da variação" value={variation.sku} onChange={(value) => updateVariation(index, "sku", value)} />
                 <TextField label="Preço" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
                 <TextField label="Preço promocional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
-                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} readOnly={isEdit} />
+                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} min="0" step="1" />
                 <TextField label="Imagem da variação" value={variation.image} onChange={(value) => updateVariation(index, "image", value)} />
                 <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200">
                   <input type="checkbox" checked={variation.active !== false} onChange={(event) => updateVariation(index, "active", event.target.checked)} />
@@ -1324,7 +1325,7 @@ export function AdminApp() {
   }
 
   async function moveProductStock(product, movement) {
-    return runAction(async () => createStockMovement({ product, ...movement }), "Movimentação de estoque registrada.");
+    return runAction(async () => createStockMovement({ product, ...movement }), "Estoque atualizado com sucesso.");
   }
 
   async function addCategory(category) {
