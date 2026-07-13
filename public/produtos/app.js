@@ -2441,6 +2441,33 @@ function productField(product, variant, field) {
   return variant?.[field] ?? product[field];
 }
 
+function stockStatus(product, variant = productVariant(product)) {
+  const status = String(productField(product, variant, "status") || "").toLowerCase();
+  const rawStock = productField(product, variant, "stock");
+  const hasStock = rawStock !== undefined && rawStock !== null && rawStock !== "";
+  const stock = Number(rawStock);
+
+  if (status.includes("sob encomenda")) {
+    return { label: "Sob encomenda", className: "stock-order", available: hasStock ? stock > 0 : true };
+  }
+  if (status.includes("esgotado") || (hasStock && stock <= 0)) {
+    return { label: "Esgotado", className: "stock-out", available: false };
+  }
+  if (hasStock && stock <= 2) {
+    return { label: "Últimas unidades", className: "stock-low", available: true };
+  }
+  return { label: "Em estoque", className: "stock-in", available: true };
+}
+
+function renderStockStatus(product, variant = productVariant(product)) {
+  const status = stockStatus(product, variant);
+  return `<span class="stock-badge ${status.className}">${status.label}</span>`;
+}
+
+function buyButtonLabel(product, variant = productVariant(product)) {
+  return stockStatus(product, variant).available ? "Comprar" : "Consulte disponibilidade";
+}
+
 function whatsappHref(product, variant = productVariant(product)) {
   const text = productField(product, variant, "whatsappMessage") ?? `Olá, NT Informática. Tenho interesse em ${product.name}.`;
   return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(text)}`;
@@ -2649,8 +2676,14 @@ function updateDetailVariant(product, index) {
   const terms = document.querySelector("#detailTerms");
   if (terms) terms.innerHTML = renderTerms(product, variant);
 
+  const stock = document.querySelector("#detailStock");
+  if (stock) stock.outerHTML = renderStockStatus(product, variant).replace("<span", "<span id=\"detailStock\"");
+
   const buyButton = document.querySelector("#detailBuyButton");
-  if (buyButton) buyButton.href = whatsappHref(product, variant);
+  if (buyButton) {
+    buyButton.href = whatsappHref(product, variant);
+    buyButton.textContent = buyButtonLabel(product, variant);
+  }
 
   const selectedVariantName = document.querySelector("#selectedVariantName");
   if (selectedVariantName) selectedVariantName.textContent = variant.name;
@@ -2686,10 +2719,11 @@ function renderProductDetail(product) {
         <p>${product.description}</p>
         ${renderVariantSelector(product)}
         ${renderProductSpecs(product)}
+        ${renderStockStatus(product, variant).replace("<span", "<span id=\"detailStock\"")}
         <div id="detailPrice">${renderPrice(product, variant)}</div>
         <div id="detailTerms">${renderTerms(product, variant)}</div>
         <div class="detail-actions">
-          <a id="detailBuyButton" class="buy-button" href="${whatsappHref(product, variant)}" target="_blank" rel="noreferrer">Comprar</a>
+          <a id="detailBuyButton" class="buy-button" href="${whatsappHref(product, variant)}" target="_blank" rel="noreferrer">${buyButtonLabel(product, variant)}</a>
           <button class="share-button" type="button" data-share-url="${absoluteProductHref(product)}" data-share-title="${product.name}">Compartilhar</button>
           <a class="secondary-button" href="${categoryHref(product.category)}">Voltar para ${product.category}</a>
         </div>
@@ -2764,10 +2798,11 @@ function setCategory(category, options = {}) {
           <small>${product.category}</small>
           <h3>${product.id ? `<a href="${productHref(product)}">${product.name}</a>` : product.name}</h3>
           <p>${product.summary ?? product.description}</p>
+          ${renderStockStatus(product)}
           ${renderPrice(product)}
           ${renderTerms(product)}
           ${product.id ? `<a class="secondary-button" href="${productHref(product)}">Ver detalhes</a>` : ""}
-          <a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">Comprar</a>
+          <a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>
         </div>
       </article>
     `)

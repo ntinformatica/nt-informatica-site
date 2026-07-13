@@ -35,6 +35,7 @@ import {
   updateProductFeatured,
   updateProductStatus,
 } from "./services/productService";
+import { createStockMovement, listStockMovements, previewStockMovement } from "./services/stockService";
 
 const menuItems = [
   ["Dashboard", "/admin", Home],
@@ -369,12 +370,148 @@ function ImportModal({ open, onClose }) {
   );
 }
 
-function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, onFeatured }) {
+function StockMovementModal({ product, open, onClose, onMove }) {
+  const [form, setForm] = useState({
+    variationId: "",
+    type: "entrada",
+    quantity: 1,
+    reason: "",
+    notes: "",
+  });
+
+  useEffect(() => {
+    if (open) {
+      setForm({
+        variationId: "",
+        type: "entrada",
+        quantity: 1,
+        reason: "",
+        notes: "",
+      });
+    }
+  }, [open, product?.id]);
+
+  if (!open || !product) return null;
+
+  const selectedVariation = form.variationId
+    ? product.variations?.find((variation) => variation.id === form.variationId)
+    : null;
+  const currentStock = Number(selectedVariation ? selectedVariation.stock : product.stock) || 0;
+  const previewStock = previewStockMovement(currentStock, form.type, form.quantity);
+
+  function updateField(field, value) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    const success = await onMove(product, form);
+    if (success) onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4">
+      <form onSubmit={handleSubmit} className="w-full max-w-2xl rounded-lg border border-white/10 bg-[#0b111d] p-6 text-white shadow-card">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-bold uppercase tracking-[0.2em] text-nt-cyan">Controle de estoque</p>
+            <h2 className="mt-2 text-2xl font-black">{product.name}</h2>
+            <p className="mt-1 text-sm text-slate-400">Estoque atual: <strong className="text-white">{currentStock}</strong></p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md p-2 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="Fechar">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <SelectField
+            label="Item"
+            value={form.variationId}
+            onChange={(value) => updateField("variationId", value)}
+            options={[
+              ["", "Produto principal"],
+              ...(product.variations || []).map((variation) => [variation.id, `${variation.name || variation.color || "Variação"} - estoque ${variation.stock ?? 0}`]),
+            ]}
+          />
+          <SelectField
+            label="Tipo"
+            value={form.type}
+            onChange={(value) => updateField("type", value)}
+            options={[
+              ["entrada", "Entrada"],
+              ["saída", "Saída"],
+              ["ajuste", "Ajuste"],
+            ]}
+          />
+          <TextField
+            label={form.type === "ajuste" ? "Novo estoque" : "Quantidade"}
+            type="number"
+            value={form.quantity}
+            onChange={(value) => updateField("quantity", Number(value))}
+            min="0"
+          />
+          <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
+            <p className="font-bold text-slate-200">Prévia da movimentação</p>
+            <p className="mt-2 text-slate-400">Antes: <strong className="text-white">{currentStock}</strong></p>
+            <p className="mt-1 text-slate-400">Depois: <strong className="text-lime-200">{previewStock}</strong></p>
+          </div>
+          <TextField label="Motivo" value={form.reason} onChange={(value) => updateField("reason", value)} placeholder="Compra, venda, correção, inventário..." required />
+          <TextField label="Observações" value={form.notes} onChange={(value) => updateField("notes", value)} placeholder="Detalhes internos opcionais" />
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <AdminButton type="button" variant="secondary" onClick={onClose}>Cancelar</AdminButton>
+          <AdminButton type="submit" icon={ClipboardList}>Salvar movimentação</AdminButton>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function StockHistory({ movements }) {
+  if (!movements?.length) {
+    return (
+      <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">
+        Nenhuma movimentação de estoque registrada para este produto.
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-white/10">
+      <div className="hidden grid-cols-[0.45fr_0.45fr_0.6fr_0.6fr_1fr] border-b border-white/10 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400 lg:grid">
+        <span>Tipo</span>
+        <span>Qtd.</span>
+        <span>Antes</span>
+        <span>Depois</span>
+        <span>Motivo</span>
+      </div>
+      <div className="divide-y divide-white/10">
+        {movements.map((movement) => (
+          <article key={movement.id} className="grid gap-2 px-4 py-3 text-sm lg:grid-cols-[0.45fr_0.45fr_0.6fr_0.6fr_1fr]">
+            <span className="font-bold capitalize text-slate-100">{movement.type}</span>
+            <span>{movement.quantity}</span>
+            <span>{movement.previousStock}</span>
+            <span className="font-bold text-lime-200">{movement.newStock}</span>
+            <span className="text-slate-300">
+              {movement.reason || "Sem motivo informado"}
+              <small className="mt-1 block text-slate-500">{new Date(movement.createdAt).toLocaleString("pt-BR")}</small>
+              {movement.notes ? <small className="mt-1 block text-slate-400">{movement.notes}</small> : null}
+            </span>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, onFeatured, onStockMove }) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
   const [status, setStatus] = useState("Todos");
   const [featured, setFeatured] = useState("Todos");
   const [importOpen, setImportOpen] = useState(false);
+  const [stockProduct, setStockProduct] = useState(null);
 
   const filteredProducts = useMemo(() => products.filter((product) => {
     const matchSearch = product.name.toLowerCase().includes(search.toLowerCase());
@@ -444,6 +581,7 @@ function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, o
                 <AdminButton variant="secondary" onClick={() => onFeatured(product, !product.featured)}>
                   {product.featured ? "Remover destaque" : "Destacar"}
                 </AdminButton>
+                <AdminButton variant="secondary" onClick={() => setStockProduct(product)} icon={ClipboardList}>Movimentar estoque</AdminButton>
                 <AdminButton variant="danger" onClick={() => onDelete(product.id)} icon={Trash2}>Excluir</AdminButton>
               </div>
             </article>
@@ -460,20 +598,50 @@ function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, o
         </div>
       </section>
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <StockMovementModal product={stockProduct} open={Boolean(stockProduct)} onClose={() => setStockProduct(null)} onMove={onStockMove} />
     </>
   );
 }
 
-function ProductFormPage({ mode, productId, products, categories, onSave, error }) {
+function ProductFormPage({ mode, productId, products, categories, onSave, onStockMove, error }) {
   const existingProduct = products.find((product) => product.id === productId);
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
+  const [stockModalOpen, setStockModalOpen] = useState(false);
+  const [stockMovements, setStockMovements] = useState([]);
   const installmentBase = form.price || form.promoPrice;
   const cashPrice = calculateCashPrice(form.price);
 
   useEffect(() => {
     setForm(normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
   }, [productId, products, categories, isEdit]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadHistory() {
+      if (!isEdit || !existingProduct?.id) {
+        setStockMovements([]);
+        return;
+      }
+      const movements = await listStockMovements(existingProduct.id);
+      if (mounted) setStockMovements(movements);
+    }
+
+    loadHistory();
+    return () => {
+      mounted = false;
+    };
+  }, [isEdit, existingProduct?.id]);
+
+  async function handleStockMove(product, movement) {
+    const success = await onStockMove(product, movement);
+    if (success) {
+      const movements = await listStockMovements(product.id);
+      setStockMovements(movements);
+    }
+    return success;
+  }
 
   function updateField(field, value) {
     setForm((current) => {
@@ -532,7 +700,7 @@ function ProductFormPage({ mode, productId, products, categories, onSave, error 
         <TextField label="SKU" value={form.sku} onChange={(value) => updateField("sku", value)} />
         <TextField label="Preço em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 500" />
         <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 425" />
-        <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} />
+        <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} readOnly={isEdit} />
         <SelectField label="Status do produto" value={form.status} onChange={(value) => updateField("status", value)} options={adminStatuses.map((item) => [item, item])} />
         <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
         <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
@@ -575,7 +743,7 @@ function ProductFormPage({ mode, productId, products, categories, onSave, error 
                 <TextField label="SKU da variação" value={variation.sku} onChange={(value) => updateVariation(index, "sku", value)} />
                 <TextField label="Preço" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
                 <TextField label="Preço promocional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
-                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} />
+                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} readOnly={isEdit} />
                 <TextField label="Imagem da variação" value={variation.image} onChange={(value) => updateVariation(index, "image", value)} />
                 <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200">
                   <input type="checkbox" checked={variation.active !== false} onChange={(event) => updateVariation(index, "active", event.target.checked)} />
@@ -591,10 +759,26 @@ function ProductFormPage({ mode, productId, products, categories, onSave, error 
         </div>
       </section>
 
+      {isEdit ? (
+        <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-black">Histórico de estoque</h2>
+              <p className="mt-1 text-sm text-slate-400">Movimente estoque com motivo para manter a auditoria do produto.</p>
+            </div>
+            <AdminButton type="button" variant="secondary" icon={ClipboardList} onClick={() => setStockModalOpen(true)}>Movimentar estoque</AdminButton>
+          </div>
+          <div className="mt-5">
+            <StockHistory movements={stockMovements} />
+          </div>
+        </section>
+      ) : null}
+
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <a href="/admin/produtos" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan">Cancelar</a>
         <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar alterações" : "Criar produto"}</AdminButton>
       </div>
+      <StockMovementModal product={existingProduct} open={stockModalOpen} onClose={() => setStockModalOpen(false)} onMove={handleStockMove} />
     </form>
   );
 }
@@ -1139,6 +1323,10 @@ export function AdminApp() {
     return runAction(async () => updateProductFeatured(product.id, featured, categories), "Destaque atualizado.");
   }
 
+  async function moveProductStock(product, movement) {
+    return runAction(async () => createStockMovement({ product, ...movement }), "Movimentação de estoque registrada.");
+  }
+
   async function addCategory(category) {
     return runAction(async () => createCategory(category), "Categoria criada.");
   }
@@ -1178,9 +1366,10 @@ export function AdminApp() {
           onDuplicate={duplicateProduct}
           onStatus={changeProductStatus}
           onFeatured={changeProductFeatured}
+          onStockMove={moveProductStock}
         />
       ) : null}
-      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} error={error} /> : null}
+      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} error={error} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
       {!loading && info.page === "codexAssistant" ? <CodexAssistantPage categories={categories} /> : null}
       {!loading && info.page === "arena" ? <ArenaPage /> : null}
