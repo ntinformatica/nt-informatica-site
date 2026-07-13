@@ -246,24 +246,22 @@ function Services() {
 function Products() {
   return (
     <Section id="produtos" eyebrow="Produtos" title="Escolha uma categoria para abrir a vitrine." description="Cada segmento abre uma página própria com os produtos daquela linha, deixando a loja mais organizada para o cliente.">
-      <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 sm:pb-0 lg:grid-cols-4">
-        {productCategories.map(({ name, description, image }) => {
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] lg:gap-4">
+        {productCategories.map(({ name, description, icon: Icon }) => {
           const categoryUrl = `/produtos?categoria=${encodeURIComponent(name)}`;
 
           return (
             <a
               key={name}
               href={categoryUrl}
-              className="glass motion-card min-w-[150px] snap-start overflow-hidden rounded-lg text-left shadow-card transition hover:border-nt-cyan/60 sm:min-w-0"
+              className="glass motion-card flex min-h-[132px] flex-col rounded-lg p-3 text-left shadow-card transition hover:border-nt-cyan/60 sm:min-h-[142px] sm:p-4"
             >
-              <div className="relative overflow-hidden border-b border-white/10">
-                <img src={image} alt={`Categoria ${name}`} className="h-24 w-full object-cover sm:h-auto sm:aspect-[4/3]" />
+              <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-md border border-nt-cyan/20 bg-nt-cyan/10 text-nt-cyan sm:h-10 sm:w-10">
+                <Icon size={20} strokeWidth={2.4} />
               </div>
-              <div className="p-3 sm:p-5">
-                <h3 className="text-sm font-black leading-tight text-white sm:text-lg">{name}</h3>
-                <p className="mt-2 hidden text-sm leading-6 text-slate-300 sm:block">{description}</p>
-                <span className="mt-3 inline-flex text-xs font-bold text-nt-cyan sm:mt-5 sm:text-sm">Ver produtos</span>
-              </div>
+              <h3 className="text-sm font-black leading-tight text-white sm:text-base">{name}</h3>
+              <p className="mt-2 line-clamp-3 text-xs leading-5 text-slate-300 sm:text-[13px]">{description}</p>
+              <span className="mt-auto pt-3 text-xs font-bold text-nt-cyan">Ver produtos</span>
             </a>
           );
         })}

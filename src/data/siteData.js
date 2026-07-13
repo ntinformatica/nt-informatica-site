@@ -112,18 +112,24 @@ services.push({
 });
 
 export const productCategories = [
-  { name: "Monitores", image: "category-assets/monitores.svg", icon: Monitor, description: "Telas para trabalho, estudo e jogos." },
-  { name: "Teclados", image: "category-assets/teclados.svg", icon: Keyboard, description: "Modelos gamer, mecânicos e de escritório." },
-  { name: "Mouses", image: "category-assets/mouses.svg", icon: Mouse, description: "Precisão para jogos e produtividade." },
-  { name: "Headsets", image: "category-assets/headsets.svg", icon: Headphones, description: "Áudio, microfone e conforto para jogar." },
-  { name: "Gabinetes", image: "category-assets/gabinetes.svg", icon: Monitor, description: "Visual gamer e boa refrigeração." },
-  { name: "SSDs", image: "category-assets/ssds.svg", icon: HardDrive, description: "Mais velocidade para PC e notebook." },
-  { name: "Memórias RAM", image: "category-assets/memorias.svg", icon: Cpu, description: "Upgrades para desempenho e multitarefa." },
-  { name: "Fontes", image: "category-assets/fontes.svg", icon: ShieldCheck, description: "Energia estável para seu computador." },
-  { name: "Controles", image: "category-assets/controles.svg", icon: Gamepad2, description: "Controles para PC, consoles e games." },
-  { name: "Carregadores e cabos", image: "category-assets/carregadores.svg", icon: Smartphone, description: "Carregadores, fontes, HDMI, USB e adaptadores." },
-  { name: "Kits e combos", image: "category-assets/kits.svg", icon: Keyboard, description: "Combos gamer e kits para escritório." },
-  { name: "Acessórios gamer", image: "category-assets/acessorios.svg", icon: Gamepad2, description: "Itens para completar seu setup." },
+  { name: "Monitores", image: "category-assets/monitores.svg", icon: Monitor, description: "Modelos gamer, Full HD, QHD e alta taxa de atualização." },
+  { name: "Teclados", image: "category-assets/teclados.svg", icon: Keyboard, description: "Teclados mecânicos, gamer e para uso diário." },
+  { name: "Mouses", image: "category-assets/mouses.svg", icon: Mouse, description: "Mouses gamer, sem fio e modelos para produtividade." },
+  { name: "Headsets", image: "category-assets/headsets.svg", icon: Headphones, description: "Áudio imersivo, microfone e conforto para jogar." },
+  { name: "Gabinetes", image: "category-assets/gabinetes.svg", icon: Monitor, description: "Gabinetes com vidro, airflow e visual gamer." },
+  { name: "Fontes", image: "category-assets/fontes.svg", icon: ShieldCheck, description: "Fontes para upgrades, PCs gamer e estabilidade." },
+  { name: "SSDs", image: "category-assets/ssds.svg", icon: HardDrive, description: "SSDs SATA e NVMe para mais velocidade." },
+  { name: "Memórias RAM", image: "category-assets/memorias.svg", icon: Cpu, description: "Memórias DDR4, DDR5 e upgrades de desempenho." },
+  { name: "Placas de Vídeo", image: "category-assets/acessorios.svg", icon: Cpu, description: "GPUs para jogos, edição e upgrades." },
+  { name: "Processadores", image: "category-assets/acessorios.svg", icon: Cpu, description: "CPUs para montar, atualizar e ganhar desempenho." },
+  { name: "Air Coolers", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Refrigeração eficiente para processadores." },
+  { name: "Water Coolers", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Refrigeração líquida para setups potentes." },
+  { name: "Fans e Ventoinhas RGB", image: "category-assets/acessorios.svg", icon: CirclePlay, description: "Refrigeração, visual RGB e opções reversas." },
+  { name: "Controladoras e Hubs", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Controle de fans, PWM, RGB e ARGB." },
+  { name: "Controles", image: "category-assets/controles.svg", icon: Gamepad2, description: "Controles para PC, consoles e jogos mobile." },
+  { name: "Consoles", image: "category-assets/controles.svg", icon: Tv, description: "Videogames, acessórios e opções para jogar." },
+  { name: "Game Stick", image: "category-assets/controles.svg", icon: Gamepad2, description: "Games retrô em formato compacto e prático." },
+  { name: "Carregadores e Cabos", image: "category-assets/carregadores.svg", icon: Smartphone, description: "Carregadores, cabos, HDMI, USB e adaptadores." },
 ];
 
 export const products = [
