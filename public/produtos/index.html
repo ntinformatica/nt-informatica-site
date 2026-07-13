@@ -42,7 +42,17 @@
           <p class="eyebrow">Categoria selecionada</p>
           <h2 id="categoryTitle">Monitores</h2>
         </div>
-        <span id="productCount">0 produtos</span>
+        <div class="catalog-actions">
+          <label class="sort-control">
+            <span>Ordenar por</span>
+            <select id="productSort">
+              <option value="relevance">Relevância / ordem padrão</option>
+              <option value="price-asc">Menor preço</option>
+              <option value="price-desc">Maior preço</option>
+            </select>
+          </label>
+          <span id="productCount">0 produtos</span>
+        </div>
       </section>
 
       <section class="product-grid" id="productGrid" aria-label="Produtos da categoria"></section>

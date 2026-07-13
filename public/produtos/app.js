@@ -2379,8 +2379,12 @@ const title = document.querySelector("#categoryTitle");
 const pageTitle = document.querySelector("#pageTitle");
 const count = document.querySelector("#productCount");
 const searchInput = document.querySelector("#productSearch");
+const sortSelect = document.querySelector("#productSort");
 const localCategories = categories;
 const localProducts = products;
+let currentCategory = "";
+let currentSearch = "";
+let currentSort = "relevance";
 
 function showCatalogLoading() {
   title.textContent = "Produtos";
@@ -2510,6 +2514,10 @@ function productFromUrl() {
   return products.find((product) => product.id === requested);
 }
 
+function activeProductVariants(product) {
+  return (product.variants ?? []).filter((variant) => variant.active !== false);
+}
+
 function variantStock(variant) {
   const stock = Number(variant?.stock ?? 0);
   return Number.isFinite(stock) ? stock : 0;
@@ -2520,7 +2528,7 @@ function variantAvailable(variant) {
 }
 
 function visualProductVariants(product) {
-  const variants = product.variants ?? [];
+  const variants = activeProductVariants(product);
   return variants
     .map((variant, index) => ({ variant, index }))
     .sort((first, second) => {
@@ -2534,6 +2542,71 @@ function visualProductVariants(product) {
 
 function productVariant(product, index = 0) {
   return visualProductVariants(product)[index] ?? null;
+}
+
+function productAvailable(product) {
+  const variants = activeProductVariants(product);
+  if (variants.length) return variants.some(variantAvailable);
+  const stock = Number(product.stock ?? 0);
+  return Number.isFinite(stock) && stock >= 1;
+}
+
+function parsePriceValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+
+  const raw = String(value)
+    .replace(/[^\d,.-]/g, "")
+    .trim();
+  if (!raw) return null;
+
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  let normalized = raw;
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    normalized = lastComma > lastDot
+      ? raw.replace(/\./g, "").replace(",", ".")
+      : raw.replace(/,/g, "");
+  } else if (lastComma !== -1) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot !== -1) {
+    const [integerPart, decimalPart = ""] = raw.split(".");
+    normalized = decimalPart.length === 3 && integerPart.length <= 3
+      ? raw.replace(/\./g, "")
+      : raw;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function productSortPrice(product) {
+  const variant = productVariant(product);
+  const promoPrice = parsePriceValue(productField(product, variant, "cashPrice"));
+  const regularPrice = parsePriceValue(productField(product, variant, "price"));
+  return promoPrice ?? regularPrice ?? Number.POSITIVE_INFINITY;
+}
+
+function sortProducts(items) {
+  return items
+    .map((product, index) => ({ product, index }))
+    .sort((first, second) => {
+      const firstAvailable = productAvailable(first.product);
+      const secondAvailable = productAvailable(second.product);
+      if (firstAvailable !== secondAvailable) return firstAvailable ? -1 : 1;
+
+      if (currentSort === "price-asc" || currentSort === "price-desc") {
+        const firstPrice = productSortPrice(first.product);
+        const secondPrice = productSortPrice(second.product);
+        if (firstPrice !== secondPrice) {
+          return currentSort === "price-asc" ? firstPrice - secondPrice : secondPrice - firstPrice;
+        }
+      }
+
+      return first.index - second.index;
+    })
+    .map((item) => item.product);
 }
 
 function productImages(product, variant = productVariant(product)) {
@@ -2881,7 +2954,8 @@ function renderProductCards(items) {
 }
 
 function renderSearchResults(query) {
-  const results = searchProducts(query);
+  currentSearch = query;
+  const results = sortProducts(searchProducts(query));
   const cleanQuery = query.trim();
   const url = new URL(window.location.href);
   url.searchParams.delete("produto");
@@ -2913,6 +2987,8 @@ function renderSearchResults(query) {
 
 function setCategory(category, options = {}) {
   if (searchInput && !options.keepSearch) searchInput.value = "";
+  currentCategory = category;
+  if (!options.keepSearch) currentSearch = "";
   const url = new URL(window.location.href);
   url.searchParams.set("categoria", category);
   url.searchParams.delete("produto");
@@ -2921,7 +2997,7 @@ function setCategory(category, options = {}) {
   title.textContent = category;
   pageTitle.textContent = category;
 
-  const visible = productsInCategory(category);
+  const visible = sortProducts(productsInCategory(category));
   count.textContent = formatProductCount(visible.length);
 
   document.querySelectorAll(".category-button").forEach((button) => {
@@ -2974,10 +3050,20 @@ strip.addEventListener("click", (event) => {
 searchInput?.addEventListener("input", (event) => {
   const query = event.target.value;
   if (!query.trim()) {
+    currentSearch = "";
     setCategory(categoryFromUrl(), { keepSearch: true });
     return;
   }
   renderSearchResults(query);
+});
+
+sortSelect?.addEventListener("change", (event) => {
+  currentSort = event.target.value;
+  if (currentSearch.trim()) {
+    renderSearchResults(currentSearch);
+    return;
+  }
+  setCategory(currentCategory || categoryFromUrl(), { keepSearch: true });
 });
 
 grid.addEventListener("click", (event) => {
