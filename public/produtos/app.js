@@ -15,6 +15,27 @@ let categories = [
   ["Acessórios gamer", "Itens para completar seu setup.", "../category-assets/acessorios.svg"],
 ];
 
+const requiredCategories = [
+  ["Monitores", "Telas para trabalho, estudo e jogos.", "../category-assets/monitores.svg"],
+  ["Teclados", "Modelos gamer, mecanicos e de escritorio.", "../category-assets/teclados.svg"],
+  ["Mouses", "Precisao para jogos e produtividade.", "../category-assets/mouses.svg"],
+  ["Headsets", "Audio, microfone e conforto para jogar.", "../category-assets/headsets.svg"],
+  ["Gabinetes", "Visual gamer e boa refrigeracao.", "../category-assets/gabinetes.svg"],
+  ["Fontes", "Energia estavel para seu computador.", "../category-assets/fontes.svg"],
+  ["SSDs", "Mais velocidade para PC e notebook.", "../category-assets/ssds.svg"],
+  ["Memórias RAM", "Upgrades para desempenho e multitarefa.", "../category-assets/memorias.svg"],
+  ["Placas de Vídeo", "Performance grafica para jogos e criacao.", "../category-assets/acessorios.svg"],
+  ["Processadores", "CPUs para upgrades e montagens.", "../category-assets/acessorios.svg"],
+  ["Air Coolers", "Refrigeracao a ar para processadores.", "../category-assets/acessorios.svg"],
+  ["Water Coolers", "Refrigeracao liquida para setups potentes.", "../category-assets/acessorios.svg"],
+  ["Fans e Ventoinhas RGB", "Ventilacao e iluminacao para gabinetes.", "../category-assets/acessorios.svg"],
+  ["Controladoras e Hubs", "Controle de fans, RGB e conexoes.", "../category-assets/acessorios.svg"],
+  ["Controles", "Controles para PC, consoles e games.", "../category-assets/controles.svg"],
+  ["Consoles", "Videogames e equipamentos para jogar.", "../category-assets/controles.svg"],
+  ["Game Stick", "Opcoes compactas para jogos retro.", "../category-assets/controles.svg"],
+  ["Carregadores e Cabos", "Carregadores, fontes, HDMI, USB e adaptadores.", "../category-assets/carregadores.svg"],
+];
+
 let products = [
   {
     id: "monitor-lg-ultragear-32gn600-b",
@@ -2357,6 +2378,7 @@ const grid = document.querySelector("#productGrid");
 const title = document.querySelector("#categoryTitle");
 const pageTitle = document.querySelector("#pageTitle");
 const count = document.querySelector("#productCount");
+const searchInput = document.querySelector("#productSearch");
 const localCategories = categories;
 const localProducts = products;
 
@@ -2378,6 +2400,65 @@ function useLocalCatalogFallback(error) {
   products = localProducts;
 }
 
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function categoryKey(value) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function ensureCatalogCategories() {
+  const merged = new Map();
+  requiredCategories.forEach((category) => {
+    merged.set(categoryKey(category[0]), category);
+  });
+  categories.forEach((category) => {
+    const key = categoryKey(category[0]);
+    if (!merged.has(key)) merged.set(key, category);
+  });
+  categories = Array.from(merged.values());
+}
+
+function productMatchesCategory(product, category) {
+  return categoryKey(product.category) === categoryKey(category);
+}
+
+function productsInCategory(category) {
+  return products.filter((product) => productMatchesCategory(product, category) && publicProductVisible(product));
+}
+
+function categoryProductCount(category) {
+  return productsInCategory(category).length;
+}
+
+function formatProductCount(total) {
+  return `${total} ${total === 1 ? "produto" : "produtos"}`;
+}
+
+function productSearchText(product) {
+  return [
+    product.name,
+    product.category,
+    product.summary,
+    product.description,
+    product.symbol,
+    ...(product.specs || []),
+  ].join(" ");
+}
+
+function searchProducts(query) {
+  const normalizedQuery = normalizeText(query);
+  if (!normalizedQuery) return [];
+  return products.filter((product) => (
+    publicProductVisible(product) && normalizeText(productSearchText(product)).includes(normalizedQuery)
+  ));
+}
+
 async function loadPublicCatalog() {
   showCatalogLoading();
 
@@ -2392,6 +2473,8 @@ async function loadPublicCatalog() {
   } catch (error) {
     useLocalCatalogFallback(error);
   }
+
+  ensureCatalogCategories();
 }
 
 function assetPath(path) {
@@ -2408,7 +2491,8 @@ function assetPath(path) {
 function categoryFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get("categoria");
-  return categories.some(([name]) => name === requested) ? requested : categories[0][0];
+  const category = categories.find(([name]) => categoryKey(name) === categoryKey(requested));
+  return category ? category[0] : categories[0][0];
 }
 
 function hasCategoryParam() {
@@ -2695,7 +2779,7 @@ function renderProductDetail(product) {
   count.textContent = "Detalhes";
 
   document.querySelectorAll(".category-button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.category === product.category);
+    button.classList.toggle("active", categoryKey(button.dataset.category) === categoryKey(product.category));
   });
 
   grid.innerHTML = `
@@ -2752,19 +2836,72 @@ function openImageViewer(image, alt = "Imagem do produto") {
   document.addEventListener("keydown", handleKeyDown);
 }
 
+function renderProductCards(items) {
+  return items
+    .map((product) => `
+      <article class="product-card">
+        ${renderProductMedia(product)}
+        <div class="product-body">
+          <small>${product.category}</small>
+          <h3>${product.id ? `<a href="${productHref(product)}">${product.name}</a>` : product.name}</h3>
+          <p>${product.summary ?? product.description}</p>
+          ${renderStockStatus(product)}
+          ${renderPrice(product)}
+          ${renderTerms(product)}
+          ${product.id ? `<a class="secondary-button" href="${productHref(product)}">Ver detalhes</a>` : ""}
+          <a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>
+        </div>
+      </article>
+    `)
+    .join("");
+}
+
+function renderSearchResults(query) {
+  const results = searchProducts(query);
+  const cleanQuery = query.trim();
+  const url = new URL(window.location.href);
+  url.searchParams.delete("produto");
+  url.searchParams.delete("categoria");
+  window.history.replaceState({}, "", url);
+
+  title.textContent = cleanQuery ? "Resultados da pesquisa" : categoryFromUrl();
+  pageTitle.textContent = cleanQuery ? "Resultados da pesquisa" : categoryFromUrl();
+  count.textContent = formatProductCount(results.length);
+
+  document.querySelectorAll(".category-button").forEach((button) => {
+    button.classList.remove("active");
+  });
+
+  if (!results.length) {
+    grid.innerHTML = `
+      <article class="empty-category">
+        <strong>Nenhum produto encontrado</strong>
+        <p>Revise a pesquisa ou escolha uma categoria para continuar navegando.</p>
+      </article>
+    `;
+    scrollToCatalogProducts();
+    return;
+  }
+
+  grid.innerHTML = renderProductCards(results);
+  scrollToCatalogProducts();
+}
+
 function setCategory(category, options = {}) {
+  if (searchInput && !options.keepSearch) searchInput.value = "";
   const url = new URL(window.location.href);
   url.searchParams.set("categoria", category);
+  url.searchParams.delete("produto");
   window.history.replaceState({}, "", url);
 
   title.textContent = category;
   pageTitle.textContent = category;
 
-  const visible = products.filter((product) => product.category === category && publicProductVisible(product));
-  count.textContent = `${visible.length} produtos`;
+  const visible = productsInCategory(category);
+  count.textContent = formatProductCount(visible.length);
 
   document.querySelectorAll(".category-button").forEach((button) => {
-    button.classList.toggle("active", button.dataset.category === category);
+    button.classList.toggle("active", categoryKey(button.dataset.category) === categoryKey(category));
   });
   keepActiveCategoryVisible(category);
 
@@ -2783,23 +2920,7 @@ function setCategory(category, options = {}) {
     return;
   }
 
-  grid.innerHTML = visible
-    .map((product) => `
-      <article class="product-card">
-        ${renderProductMedia(product)}
-        <div class="product-body">
-          <small>${product.category}</small>
-          <h3>${product.id ? `<a href="${productHref(product)}">${product.name}</a>` : product.name}</h3>
-          <p>${product.summary ?? product.description}</p>
-          ${renderStockStatus(product)}
-          ${renderPrice(product)}
-          ${renderTerms(product)}
-          ${product.id ? `<a class="secondary-button" href="${productHref(product)}">Ver detalhes</a>` : ""}
-          <a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>
-        </div>
-      </article>
-    `)
-    .join("");
+  grid.innerHTML = renderProductCards(visible);
 
   if (options.scroll) {
     scrollToCatalogProducts();
@@ -2810,10 +2931,10 @@ function renderCategoryButtons() {
   strip.innerHTML = categories
     .map(([name, description, image]) => `
       <button class="category-button" type="button" data-category="${name}">
-        <img class="category-media" src="${assetPath(image)}" alt="Categoria ${name}">
+        <img class="category-media" src="${assetPath(image)}" alt="" aria-hidden="true">
         <span class="category-body">
           <strong>${name}</strong>
-          <p>${description}</p>
+          <p>${formatProductCount(categoryProductCount(name))}</p>
         </span>
       </button>
     `)
@@ -2824,6 +2945,15 @@ strip.addEventListener("click", (event) => {
   const button = event.target.closest(".category-button");
   if (!button) return;
   setCategory(button.dataset.category, { scroll: true });
+});
+
+searchInput?.addEventListener("input", (event) => {
+  const query = event.target.value;
+  if (!query.trim()) {
+    setCategory(categoryFromUrl(), { keepSearch: true });
+    return;
+  }
+  renderSearchResults(query);
 });
 
 grid.addEventListener("click", (event) => {
