@@ -60,6 +60,15 @@ function buildUrl(path) {
   return `${supabaseUrl}/rest/v1${cleanPath}`;
 }
 
+function buildStorageUrl(path) {
+  if (!assertSupabaseUrl()) {
+    throw new Error("URL do Supabase invalida. Use o Project URL no formato https://xxxx.supabase.co.");
+  }
+
+  const cleanPath = path.startsWith("/") ? path : `/${path}`;
+  return `${supabaseUrl}/storage/v1${cleanPath}`;
+}
+
 export async function supabaseRequest(path, options = {}) {
   if (!isSupabaseConfigured) {
     throw new Error("Supabase nao configurado.");
@@ -94,4 +103,80 @@ export async function supabaseRequest(path, options = {}) {
 
   if (response.status === 204) return null;
   return response.json();
+}
+
+export function storagePublicUrl(bucket, path) {
+  if (!assertSupabaseUrl()) {
+    throw new Error("URL do Supabase invalida. Use o Project URL no formato https://xxxx.supabase.co.");
+  }
+
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+}
+
+export function storagePathFromPublicUrl(bucket, publicUrl) {
+  if (!publicUrl || !assertSupabaseUrl()) return "";
+
+  try {
+    const parsed = new URL(publicUrl);
+    const prefix = `/storage/v1/object/public/${bucket}/`;
+    if (!parsed.pathname.startsWith(prefix)) return "";
+    return decodeURIComponent(parsed.pathname.slice(prefix.length));
+  } catch {
+    return "";
+  }
+}
+
+export function uploadStorageFile(bucket, path, file, onProgress) {
+  if (!isSupabaseConfigured) {
+    return Promise.reject(new Error("Supabase Storage nao configurado."));
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", buildStorageUrl(`/object/${bucket}/${path}`));
+    request.setRequestHeader("apikey", supabaseAnonKey);
+    request.setRequestHeader("Authorization", `Bearer ${supabaseAnonKey}`);
+    request.setRequestHeader("x-upsert", "false");
+    request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve({
+          path,
+          publicUrl: storagePublicUrl(bucket, path),
+        });
+        return;
+      }
+
+      reject(new Error(request.responseText || `Falha no envio da imagem (${request.status}).`));
+    };
+
+    request.onerror = () => reject(new Error("Falha de conexão ao enviar imagem."));
+    request.send(file);
+  });
+}
+
+export async function deleteStorageFile(bucket, path) {
+  if (!isSupabaseConfigured || !path) return false;
+
+  const response = await fetch(buildStorageUrl(`/object/${bucket}`), {
+    method: "DELETE",
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ prefixes: [path] }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text() || "Falha ao remover imagem do Storage.");
+  }
+
+  return true;
 }

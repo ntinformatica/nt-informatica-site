@@ -24,7 +24,13 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { businessName } from "../data/siteData";
-import { isSupabaseConfigured, supabaseDiagnostics } from "../lib/supabase";
+import {
+  deleteStorageFile,
+  isSupabaseConfigured,
+  storagePathFromPublicUrl,
+  supabaseDiagnostics,
+  uploadStorageFile,
+} from "../lib/supabase";
 import { adminRecentChanges, adminSessionKey, adminStatuses } from "./adminData";
 import { createCategory, deleteCategory, listCategories, updateCategory } from "./services/categoryService";
 import { slugify } from "./services/localStorageHelpers";
@@ -119,6 +125,41 @@ const emptyPc = {
   published: false,
   internalNotes: "",
 };
+
+const pcImageBucket = "assembled-pcs";
+const maxPcImageSize = 8 * 1024 * 1024;
+const allowedPcImageTypes = ["image/jpeg", "image/png", "image/webp"];
+
+function textToList(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  return String(value)
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function listToText(value) {
+  return [...new Set((value || []).filter(Boolean))].join("\n");
+}
+
+function extensionFromFile(file) {
+  const fallback = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+  const extension = file.name.split(".").pop()?.toLowerCase();
+  return ["jpg", "jpeg", "png", "webp"].includes(extension) ? extension : fallback;
+}
+
+function uniqueImagePath(folder, file) {
+  const safeFolder = slugify(folder || `pc-${Date.now()}`) || `pc-${Date.now()}`;
+  const randomPart = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${safeFolder}/${Date.now()}-${randomPart}.${extensionFromFile(file)}`;
+}
+
+function validatePcImage(file) {
+  if (!allowedPcImageTypes.includes(file.type)) return "Formato de arquivo não permitido.";
+  if (file.size > maxPcImageSize) return "Arquivo acima do limite de 8 MB.";
+  return "";
+}
 
 const emptyCodexAssistantForm = {
   mainLink: "",
@@ -1008,16 +1049,215 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
         <TextareaField label="Descrição curta" value={form.shortDescription} onChange={(value) => updateField("shortDescription", value)} rows={3} />
         <TextareaField label="Descrição completa" value={form.fullDescription} onChange={(value) => updateField("fullDescription", value)} rows={6} />
-        <TextField label="Imagem principal por URL" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="https://..." />
-        <TextareaField label="Galeria de imagens por URL" value={form.gallery || form.images} onChange={(value) => updateField("gallery", value)} placeholder="Uma URL por linha" />
         <TextareaField label="Observações internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
       </section>
+
+      <PcImageUploader form={form} updateField={updateField} />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <a href="/admin/pcs" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan">Cancelar</a>
         <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar alterações" : "Criar PC"}</AdminButton>
       </div>
     </form>
+  );
+}
+
+function PcImageUploader({ form, updateField }) {
+  const [progress, setProgress] = useState(0);
+  const [message, setMessage] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const gallery = useMemo(() => {
+    const list = [...new Set([form.mainImage, ...textToList(form.gallery || form.images)].filter(Boolean))];
+    return list;
+  }, [form.mainImage, form.gallery, form.images]);
+
+  function applyImages(nextImages, mainImage = nextImages[0] || "") {
+    const cleanImages = [...new Set(nextImages.filter(Boolean))];
+    updateField("mainImage", mainImage || cleanImages[0] || "");
+    updateField("gallery", listToText(cleanImages.filter((image) => image !== (mainImage || cleanImages[0]))));
+  }
+
+  async function uploadFiles(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+
+    if (!isSupabaseConfigured) {
+      setMessage("Supabase Storage não configurado.");
+      return;
+    }
+
+    setUploading(true);
+    setProgress(0);
+    setMessage("");
+
+    try {
+      const uploadedUrls = [];
+      const folder = form.slug || form.name || `pc-${Date.now()}`;
+
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index];
+        const validationError = validatePcImage(file);
+        if (validationError) {
+          setMessage(validationError);
+          continue;
+        }
+
+        const result = await uploadStorageFile(
+          pcImageBucket,
+          uniqueImagePath(folder, file),
+          file,
+          (itemProgress) => setProgress(Math.round(((index + itemProgress / 100) / files.length) * 100)),
+        );
+        uploadedUrls.push(result.publicUrl);
+      }
+
+      if (uploadedUrls.length) {
+        const nextImages = [...gallery, ...uploadedUrls];
+        applyImages(nextImages, form.mainImage || uploadedUrls[0]);
+        setMessage(uploadedUrls.length === 1 ? "Imagem enviada com sucesso." : "Imagens enviadas com sucesso.");
+      }
+    } catch (uploadError) {
+      console.error(uploadError);
+      setMessage(uploadError.message || "Falha no envio da imagem.");
+    } finally {
+      setUploading(false);
+      setProgress(0);
+    }
+  }
+
+  async function removeImage(image) {
+    const nextImages = gallery.filter((item) => item !== image);
+    applyImages(nextImages, form.mainImage === image ? nextImages[0] : form.mainImage);
+
+    const storagePath = storagePathFromPublicUrl(pcImageBucket, image);
+    if (!storagePath) {
+      setMessage("Imagem removida do cadastro.");
+      return;
+    }
+
+    try {
+      await deleteStorageFile(pcImageBucket, storagePath);
+      setMessage("Imagem removida do cadastro e do Storage.");
+    } catch (removeError) {
+      console.warn(removeError);
+      setMessage("Imagem removida do cadastro, mas não foi possível excluir do Storage.");
+    }
+  }
+
+  function moveImage(image, direction) {
+    const index = gallery.indexOf(image);
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || targetIndex >= gallery.length) return;
+
+    const nextImages = [...gallery];
+    [nextImages[index], nextImages[targetIndex]] = [nextImages[targetIndex], nextImages[index]];
+    applyImages(nextImages, form.mainImage);
+  }
+
+  function setAsMain(image) {
+    const nextImages = [image, ...gallery.filter((item) => item !== image)];
+    applyImages(nextImages, image);
+    setMessage("Imagem definida como principal.");
+  }
+
+  function handleDrop(event) {
+    event.preventDefault();
+    setDragging(false);
+    uploadFiles(event.dataTransfer.files);
+  }
+
+  function updateExternalGallery(value) {
+    updateField("gallery", value);
+    if (!form.mainImage && textToList(value)[0]) updateField("mainImage", textToList(value)[0]);
+  }
+
+  return (
+    <section className="grid gap-5 rounded-lg border border-white/10 bg-white/5 p-5">
+      <div>
+        <h2 className="text-xl font-black text-white">Imagem principal</h2>
+        <p className="mt-1 text-sm text-slate-400">Envie fotos reais do computador montado. Formatos: JPG, PNG ou WebP até 8 MB.</p>
+      </div>
+
+      <div
+        onDragOver={(event) => {
+          event.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={handleDrop}
+        className={`rounded-lg border border-dashed p-5 transition ${dragging ? "border-nt-cyan bg-nt-cyan/10" : "border-slate-700 bg-slate-950"}`}
+      >
+        <div className="grid gap-5 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
+          <div className="overflow-hidden rounded-lg border border-white/10 bg-white/5">
+            {form.mainImage ? (
+              <img src={form.mainImage} alt="Imagem principal do PC" className="aspect-[4/3] w-full object-cover" />
+            ) : (
+              <div className="grid aspect-[4/3] place-items-center p-6 text-center text-sm text-slate-400">
+                Nenhuma imagem principal selecionada.
+              </div>
+            )}
+          </div>
+          <div>
+            <p className="text-sm leading-6 text-slate-300">Arraste uma imagem aqui ou selecione no computador. O upload é enviado automaticamente para o bucket <strong>assembled-pcs</strong>.</p>
+            <label className="mt-4 inline-flex min-h-10 cursor-pointer items-center justify-center rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white transition hover:bg-nt-cyan">
+              Selecionar imagem
+              <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(event) => uploadFiles(event.target.files)} />
+            </label>
+            {uploading ? (
+              <div className="mt-4">
+                <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                  <div className="h-full bg-nt-cyan transition-all" style={{ width: `${progress}%` }} />
+                </div>
+                <p className="mt-2 text-xs font-bold text-nt-cyan">{progress}% enviado</p>
+              </div>
+            ) : null}
+            {message ? <p className="mt-4 rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-200">{message}</p> : null}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black text-white">Galeria do PC</h2>
+            <p className="mt-1 text-sm text-slate-400">Adicione várias fotos, defina a principal e ajuste a ordem.</p>
+          </div>
+          <label className="inline-flex min-h-10 cursor-pointer items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan">
+            Selecionar várias imagens
+            <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => uploadFiles(event.target.files)} />
+          </label>
+        </div>
+
+        {gallery.length ? (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {gallery.map((image, index) => (
+              <article key={image} className="rounded-lg border border-white/10 bg-slate-950 p-3">
+                <img src={image} alt="" className="aspect-square w-full rounded-md object-cover" />
+                {image === form.mainImage ? <p className="mt-3 rounded-full bg-lime-300/10 px-3 py-1 text-center text-xs font-bold text-lime-200">Principal</p> : null}
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <AdminButton type="button" variant="secondary" className="px-2 text-xs" onClick={() => setAsMain(image)}>Principal</AdminButton>
+                  <AdminButton type="button" variant="danger" className="px-2 text-xs" onClick={() => removeImage(image)}>Remover</AdminButton>
+                  <AdminButton type="button" variant="secondary" className="px-2 text-xs" disabled={index === 0} onClick={() => moveImage(image, -1)}>Subir</AdminButton>
+                  <AdminButton type="button" variant="secondary" className="px-2 text-xs" disabled={index === gallery.length - 1} onClick={() => moveImage(image, 1)}>Descer</AdminButton>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="mt-4 rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">Nenhuma imagem na galeria.</p>
+        )}
+      </div>
+
+      <details open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)} className="rounded-lg border border-slate-700 bg-slate-950 p-4">
+        <summary className="cursor-pointer text-sm font-bold text-slate-200">Opções avançadas: usar URL externa</summary>
+        <div className="mt-4 grid gap-4">
+          <TextField label="URL externa da imagem principal" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="https://..." />
+          <TextareaField label="URLs externas da galeria" value={form.gallery || form.images} onChange={updateExternalGallery} placeholder="Uma URL por linha" />
+        </div>
+      </details>
+    </section>
   );
 }
 
