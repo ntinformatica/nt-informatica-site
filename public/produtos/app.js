@@ -2510,8 +2510,30 @@ function productFromUrl() {
   return products.find((product) => product.id === requested);
 }
 
+function variantStock(variant) {
+  const stock = Number(variant?.stock ?? 0);
+  return Number.isFinite(stock) ? stock : 0;
+}
+
+function variantAvailable(variant) {
+  return variantStock(variant) >= 1;
+}
+
+function visualProductVariants(product) {
+  const variants = product.variants ?? [];
+  return variants
+    .map((variant, index) => ({ variant, index }))
+    .sort((first, second) => {
+      const firstAvailable = variantAvailable(first.variant);
+      const secondAvailable = variantAvailable(second.variant);
+      if (firstAvailable !== secondAvailable) return firstAvailable ? -1 : 1;
+      return first.index - second.index;
+    })
+    .map((item) => item.variant);
+}
+
 function productVariant(product, index = 0) {
-  return product.variants?.[index] ?? null;
+  return visualProductVariants(product)[index] ?? null;
 }
 
 function productImages(product, variant = productVariant(product)) {
@@ -2715,16 +2737,18 @@ function renderDetailMainImage(product, image) {
 
 function renderVariantSelector(product) {
   if (!product.variants?.length) return "";
+  const variants = visualProductVariants(product);
 
   return `
     <div class="variant-selector" aria-label="Escolha a cor">
-      <span>Cor: <strong id="selectedVariantName">${product.variants[0].name}</strong></span>
+      <span>Cor: <strong id="selectedVariantName">${variants[0].name}</strong></span>
       <div class="variant-options">
-        ${product.variants
+        ${variants
           .map((variant, index) => `
             <button class="variant-button ${index === 0 ? "active" : ""}" type="button" data-variant-index="${index}" aria-label="Selecionar cor ${variant.name}">
               <span class="variant-swatch" style="background:${variant.swatch ?? "#38bdf8"}"></span>
               ${variant.name}
+              ${variantAvailable(variant) ? "" : "<small>Esgotado</small>"}
             </button>
           `)
           .join("")}

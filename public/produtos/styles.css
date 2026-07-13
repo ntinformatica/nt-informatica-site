@@ -719,6 +719,16 @@ body.viewer-open {
   color: #fff;
 }
 
+.variant-button small {
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: #fecaca;
+  background: rgba(220, 38, 38, 0.18);
+  font-size: 10px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
 .variant-swatch {
   width: 16px;
   height: 16px;
