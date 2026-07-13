@@ -2442,21 +2442,14 @@ function productField(product, variant, field) {
 }
 
 function stockStatus(product, variant = productVariant(product)) {
-  const status = String(productField(product, variant, "status") || "").toLowerCase();
   const rawStock = productField(product, variant, "stock");
-  const hasStock = rawStock !== undefined && rawStock !== null && rawStock !== "";
-  const stock = Number(rawStock);
+  const stock = Number(rawStock ?? 0);
 
-  if (status.includes("sob encomenda")) {
-    return { label: "Sob encomenda", className: "stock-order", available: hasStock ? stock > 0 : true };
+  if (Number.isFinite(stock) && stock >= 1) {
+    return { label: "🟢 Em estoque", className: "stock-in", available: true };
   }
-  if (status.includes("esgotado") || (hasStock && stock <= 0)) {
-    return { label: "Esgotado", className: "stock-out", available: false };
-  }
-  if (hasStock && stock <= 2) {
-    return { label: "Últimas unidades", className: "stock-low", available: true };
-  }
-  return { label: "Em estoque", className: "stock-in", available: true };
+
+  return { label: "🔴 Esgotado", className: "stock-out", available: false };
 }
 
 function renderStockStatus(product, variant = productVariant(product)) {
