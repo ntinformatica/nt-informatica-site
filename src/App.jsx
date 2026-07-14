@@ -826,15 +826,27 @@ function Contact() {
           </div>
           <WhatsAppButton message={messages.contact} className="mt-8 w-full text-base">Chamar no WhatsApp agora</WhatsAppButton>
         </Card>
-        <a href={socialLinks.googleMaps} target="_blank" rel="noreferrer" className="min-h-[360px] overflow-hidden rounded-lg border border-slate-700 bg-grid bg-[length:28px_28px]">
-          <div className="flex h-full min-h-[360px] items-center justify-center bg-gradient-to-br from-nt-blue/20 to-black/30 p-8 text-center">
-            <div>
-              <MapPin className="mx-auto mb-4 text-nt-cyan" size={42} />
-              <p className="text-xl font-black text-white">Abrir localização no Google Maps</p>
-              <p className="mt-2 max-w-md text-sm leading-6 text-slate-300">{contactInfo.address}</p>
-            </div>
+        <div className="relative min-h-[360px] overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+          <iframe
+            title="Mapa da NT Informática, Celulares e Games"
+            src="https://www.google.com/maps?q=Rua%20Johann%20Sachse%2C%202891%2C%20Sala%201%2C%20Badenfurt%2C%20Blumenau%20-%20SC&output=embed"
+            className="h-full min-h-[360px] w-full"
+            loading="lazy"
+            allowFullScreen
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-slate-950 via-slate-950/85 to-transparent p-5">
+            <a
+              href={socialLinks.googleMaps}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-md bg-nt-blue px-5 py-3 text-sm font-black text-white shadow-glow transition hover:-translate-y-0.5 hover:bg-nt-cyan"
+            >
+              <MapPin size={18} />
+              Abrir localização no Google Maps
+            </a>
           </div>
-        </a>
+        </div>
       </div>
     </Section>
   );
