@@ -17,6 +17,7 @@ let categories = [
   ["Acessórios", "Adaptadores, suportes, cabos, perifericos e utilidades para seu setup.", "../category-assets/acessorios.svg"],
   ["Placas-mãe", "Modelos Intel e AMD para upgrades e montagem de computadores.", "../category-assets/acessorios.svg"],
   ["Cadeiras", "Cadeiras gamer e office para conforto no trabalho e nas partidas.", "../category-assets/acessorios.svg"],
+  ["Kit Periféricos", "Kits completos para seu setup.", "../category-assets/kits.svg"],
 ];
 
 const requiredCategories = [
@@ -40,6 +41,7 @@ const requiredCategories = [
   ["Acessórios", "Adaptadores, suportes, cabos, perifericos e utilidades para seu setup.", "../category-assets/acessorios.svg"],
   ["Placas-mãe", "Modelos Intel e AMD para upgrades e montagem de computadores.", "../category-assets/acessorios.svg"],
   ["Cadeiras", "Cadeiras gamer e office para conforto no trabalho e nas partidas.", "../category-assets/acessorios.svg"],
+  ["Kit Periféricos", "Kits completos para seu setup.", "../category-assets/kits.svg"],
 ];
 
 let products = [

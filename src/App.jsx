@@ -245,6 +245,20 @@ function ChairIcon(props) {
   );
 }
 
+function PeripheralKitIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <rect x="3" y="6" width="12" height="7" rx="1.5" />
+      <path d="M5.5 8.5h.01M8 8.5h.01M10.5 8.5h.01M13 8.5h.01" />
+      <path d="M5.5 11h7.5" />
+      <rect x="17" y="7" width="4" height="7" rx="2" />
+      <path d="M19 7v2.5" />
+      <path d="M8 16h4M10 13v3" />
+      <path d="M6 19h12" />
+    </LineSvgIcon>
+  );
+}
+
 const homeCategoryIcons = {
   Monitores: Monitor,
   Teclados: Keyboard,
@@ -266,6 +280,7 @@ const homeCategoryIcons = {
   Acessórios: Wrench,
   "Placas-mãe": MotherboardIcon,
   Cadeiras: ChairIcon,
+  "Kit Periféricos": PeripheralKitIcon,
 };
 
 const whyChooseCards = [

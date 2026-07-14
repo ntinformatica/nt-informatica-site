@@ -132,6 +132,7 @@ export const productCategories = [
   { name: "Acessórios", slug: "acessorios", image: "category-assets/acessorios.svg", icon: Wrench, description: "Adaptadores, suportes, cabos, periféricos e utilidades para seu setup." },
   { name: "Placas-mãe", slug: "placas-mae", image: "category-assets/acessorios.svg", icon: Cpu, description: "Modelos Intel e AMD para upgrades e montagem de computadores." },
   { name: "Cadeiras", slug: "cadeiras", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Cadeiras gamer e office para conforto no trabalho e nas partidas." },
+  { name: "Kit Periféricos", slug: "kit-perifericos", image: "category-assets/kits.svg", icon: Keyboard, description: "Kits completos para seu setup" },
 ];
 
 export const products = [
