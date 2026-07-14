@@ -252,13 +252,15 @@ async function loadArenaData() {
     }
 
     const [stations, settings, packages] = await Promise.all([
-      supabaseRequest("/arena_stations?select=*&active=eq.true&availability_status=eq.disponivel&order=sort_order.asc,name.asc"),
+      supabaseRequest("/arena_stations?select=*&active=eq.true&order=sort_order.asc,name.asc"),
       supabaseRequest("/arena_settings?select=*&order=created_at.asc&limit=1"),
       supabaseRequest("/arena_packages?select=*&active=eq.true&order=sort_order.asc,duration_minutes.asc"),
     ]);
 
     state.localMode = false;
-    state.stations = (stations || []).map(fromStation);
+    state.stations = (stations || [])
+      .map(fromStation)
+      .filter((station) => !["manutencao", "inativo"].includes(station.availabilityStatus));
     state.settings = fromSettings(settings?.[0]);
     state.packages = (packages || []).map(fromPackage);
     if (!state.packages.length) state.packages = fallbackPackages;
