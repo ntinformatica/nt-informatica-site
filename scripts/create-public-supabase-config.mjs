@@ -49,6 +49,7 @@ for (const configPath of configPaths) {
   writeFileSync(
     configPath,
     `window.NT_SUPABASE_CONFIG = ${JSON.stringify(config, null, 2)};\n`,
+    "utf8",
   );
 }
 

@@ -559,18 +559,18 @@ function PcShowcase() {
   const visiblePcs = sortPcs(pcs.filter((pc) => Number(pc.stock || 0) >= 1)).slice(0, 3);
 
   return (
-    <Section id="pcs" eyebrow="PCs ? venda" title="Computadores prontos para vender, estudar, trabalhar e jogar.">
-      {loading ? <p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando computadores dispon?veis...</p> : null}
+    <Section id="pcs" eyebrow="PCs à venda" title="Computadores prontos para vender, estudar, trabalhar e jogar.">
+      {loading ? <p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando computadores disponíveis...</p> : null}
       {!loading && (error || localMode) ? (
         <div className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">
-          {error || "Supabase n?o configurado. Os PCs reais aparecer?o aqui assim que forem cadastrados e publicados."}
+          {error || "Supabase não configurado. Os PCs reais aparecerão aqui assim que forem cadastrados e publicados."}
         </div>
       ) : null}
       {!loading && !visiblePcs.length ? (
         <Card>
-          <h3 className="text-2xl font-black text-white">Nenhum PC dispon?vel no momento.</h3>
+          <h3 className="text-2xl font-black text-white">Nenhum PC disponível no momento.</h3>
           <p className="mt-3 text-sm leading-6 text-slate-300">Estamos preparando novos computadores montados para pronta entrega. Consulte a loja pelo WhatsApp.</p>
-          <WhatsAppButton message="Ol?! Gostaria de consultar PCs montados dispon?veis na NT Inform?tica." className="mt-5">Consultar no WhatsApp</WhatsAppButton>
+          <WhatsAppButton message="Olá! Gostaria de consultar PCs montados disponíveis na NT Informática." className="mt-5">Consultar no WhatsApp</WhatsAppButton>
         </Card>
       ) : null}
       <div className="grid gap-5 lg:grid-cols-3">
@@ -645,15 +645,15 @@ function PcCard({ pc }) {
           {pc.featured ? <span className="rounded-full border border-yellow-300/30 bg-yellow-300/10 px-3 py-1 text-xs font-bold text-yellow-100">Destaque</span> : null}
         </div>
         <h3 className="mt-4 text-2xl font-black text-white">{pc.name}</h3>
-        <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-300">{pc.shortDescription || pcSummary(pc) || "Computador montado pela NT Inform?tica."}</p>
+        <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-300">{pc.shortDescription || pcSummary(pc) || "Computador montado pela NT Informática."}</p>
         <dl className="mt-4 grid gap-2 text-sm">
           {summaryItems.map((item) => <div key={item} className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-slate-200">{item}</div>)}
         </dl>
         <p className="mt-5 text-3xl font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
-        <p className="mt-1 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)} ? Pix/dinheiro: {formatCurrency(cashValue(pc.price))}</p>
+        <p className="mt-1 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)} · Pix/dinheiro: {formatCurrency(cashValue(pc.price))}</p>
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Button href={'/computadores/' + pc.slug} variant="secondary">Ver detalhes</Button>
-          {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button> : <WhatsAppButton message={'Ol?! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
+          {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
         </div>
       </div>
     </Card>
@@ -670,21 +670,21 @@ function PcDetail({ pc }) {
   const specs = [
     ["Processador", pc.processor],
     ["Cooler do processador", pc.processorCooler],
-    ["Placa-m?e", pc.motherboard],
-    ["Mem?ria RAM", pc.memory],
+    ["Placa-mãe", pc.motherboard],
+    ["Memória RAM", pc.memory],
     ["SSD / armazenamento", pc.storage],
     ["HD adicional", pc.hardDrive],
-    ["Placa de v?deo", pc.graphicsCard],
+    ["Placa de vídeo", pc.graphicsCard],
     ["Fonte", pc.powerSupply],
     ["Gabinete", pc.caseModel],
     ["Ventoinhas", pc.fans],
-    ["Refrigera??o", pc.cooling],
+    ["Refrigeração", pc.cooling],
     ["Sistema operacional", pc.operatingSystem],
-    ["Windows", pc.windowsIncluded ? (pc.windowsVersion || "Incluso") : "N?o informado"],
-    ["Office", pc.officeIncluded ? "Incluso" : "N?o informado"],
-    ["Wi-Fi", pc.wifi ? "Sim" : "N?o informado"],
-    ["Bluetooth", pc.bluetooth ? "Sim" : "N?o informado"],
-    ["RGB", pc.rgb ? "Sim" : "N?o informado"],
+    ["Windows", pc.windowsIncluded ? (pc.windowsVersion || "Incluso") : "Não informado"],
+    ["Office", pc.officeIncluded ? "Incluso" : "Não informado"],
+    ["Wi-Fi", pc.wifi ? "Sim" : "Não informado"],
+    ["Bluetooth", pc.bluetooth ? "Sim" : "Não informado"],
+    ["RGB", pc.rgb ? "Sim" : "Não informado"],
     ["Garantia", pc.warranty || (pc.warrantyMonths ? String(pc.warrantyMonths) + " meses" : "")],
   ].filter(([, value]) => Boolean(value));
 
@@ -712,25 +712,25 @@ function PcDetail({ pc }) {
           </div>
           <p className="mt-5 text-4xl font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
           <p className="mt-2 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)}</p>
-          <p className="mt-1 text-sm text-lime-200">? vista no Pix/dinheiro com 15% off: {formatCurrency(cashValue(pc.price))}</p>
-          <p className="mt-5 text-sm leading-6 text-slate-300">{pc.fullDescription || pc.shortDescription || "Computador montado e revisado pela NT Inform?tica."}</p>
+          <p className="mt-1 text-sm text-lime-200">À vista no Pix/dinheiro com 15% off: {formatCurrency(cashValue(pc.price))}</p>
+          <p className="mt-5 text-sm leading-6 text-slate-300">{pc.fullDescription || pc.shortDescription || "Computador montado e revisado pela NT Informática."}</p>
           <div className="mt-6 grid gap-3">
-            {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))} className="w-full">Comprar via WhatsApp</Button> : <WhatsAppButton message={'Ol?! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'} className="w-full">Consultar disponibilidade</WhatsAppButton>}
+            {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))} className="w-full">Comprar via WhatsApp</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'} className="w-full">Consultar disponibilidade</WhatsAppButton>}
             <Button href="/computadores" variant="secondary" className="w-full">Voltar para computadores</Button>
           </div>
         </Card>
       </div>
       <Card className="mt-8">
-        <h2 className="text-2xl font-black text-white">Especifica??es completas</h2>
+        <h2 className="text-2xl font-black text-white">Especificações completas</h2>
         <dl className="mt-5 grid gap-3 md:grid-cols-2">
           {specs.map(([label, value]) => <div key={label} className="rounded-md border border-white/10 bg-white/5 p-4"><dt className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{label}</dt><dd className="mt-2 font-semibold text-white">{value}</dd></div>)}
         </dl>
       </Card>
       {(targetUses.length || recommendedGames.length || qualityChecks.length) ? (
         <div className="mt-8 grid gap-5 lg:grid-cols-3">
-          {targetUses.length ? <Card><h2 className="text-xl font-black text-white">Indicado para</h2><ul className="mt-4 grid gap-2 text-sm text-slate-300">{targetUses.map((item) => <li key={item}>? {item}</li>)}</ul></Card> : null}
-          {recommendedGames.length ? <Card><h2 className="text-xl font-black text-white">Jogos recomendados</h2><ul className="mt-4 grid gap-2 text-sm text-slate-300">{recommendedGames.map((item) => <li key={item}>? {item}</li>)}</ul></Card> : null}
-          {qualityChecks.length ? <Card><h2 className="text-xl font-black text-white">Padr?o NT</h2><ul className="mt-4 grid gap-2 text-sm text-slate-300">{qualityChecks.map((item) => <li key={item}>? {item}</li>)}</ul></Card> : null}
+          {targetUses.length ? <Card><h2 className="text-xl font-black text-white">Indicado para</h2><ul className="mt-4 grid gap-2 text-sm text-slate-300">{targetUses.map((item) => <li key={item}>- {item}</li>)}</ul></Card> : null}
+          {recommendedGames.length ? <Card><h2 className="text-xl font-black text-white">Jogos recomendados</h2><ul className="mt-4 grid gap-2 text-sm text-slate-300">{recommendedGames.map((item) => <li key={item}>- {item}</li>)}</ul></Card> : null}
+          {qualityChecks.length ? <Card><h2 className="text-xl font-black text-white">Padrão NT</h2><ul className="mt-4 grid gap-2 text-sm text-slate-300">{qualityChecks.map((item) => <li key={item}>- {item}</li>)}</ul></Card> : null}
         </div>
       ) : null}
     </Section>
@@ -758,17 +758,17 @@ function ComputersPage() {
       <Header />
       <main className="pt-20">
         {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : selectedPc ? <PcDetail pc={selectedPc} /> : (
-          <Section eyebrow="PCs Montados" title="Computadores prontos da NT Inform?tica" description="Filtre por tipo, compare configura??es e chame no WhatsApp para comprar.">
-            {(error || localMode) ? <div className="mb-6 rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">{error || "Supabase n?o configurado. Nenhum PC real ser? exibido no modo local."}</div> : null}
+          <Section eyebrow="PCs Montados" title="Computadores prontos da NT Informática" description="Filtre por tipo, compare configurações e chame no WhatsApp para comprar.">
+            {(error || localMode) ? <div className="mb-6 rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">{error || "Supabase não configurado. Nenhum PC real será exibido no modo local."}</div> : null}
             <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 lg:grid-cols-[1fr_0.5fr_0.5fr_0.45fr]">
-              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, c?digo, processador, mem?ria ou placa de v?deo" className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan" />
+              <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, código, processador, memória ou placa de vídeo" className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan" />
               <select value={pcType} onChange={(event) => setPcType(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan"><option value="Todos">Todos os tipos</option>{pcTypeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
               <select value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan"><option>Todas</option>{pcCategories.map((item) => <option key={item}>{item}</option>)}</select>
-              <select value={sort} onChange={(event) => setSort(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan"><option value="relevance">Relev?ncia</option><option value="price-asc">Menor pre?o</option><option value="price-desc">Maior pre?o</option></select>
+              <select value={sort} onChange={(event) => setSort(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan"><option value="relevance">Relevância</option><option value="price-asc">Menor preço</option><option value="price-desc">Maior preço</option></select>
             </div>
-            <p className="mt-4 text-sm text-slate-400">{filteredPcs.length} computador(es) encontrado(s). Dispon?veis aparecem primeiro.</p>
+            <p className="mt-4 text-sm text-slate-400">{filteredPcs.length} computador(es) encontrado(s). Disponíveis aparecem primeiro.</p>
             <div className="mt-6 grid gap-5 lg:grid-cols-3">{filteredPcs.map((pc) => <PcCard key={pc.id} pc={pc} />)}</div>
-            {!filteredPcs.length ? <Card className="mt-6 text-center"><h2 className="text-2xl font-black text-white">Nenhum computador encontrado.</h2><p className="mt-3 text-sm text-slate-300">Ajuste os filtros ou consulte a loja para montar uma configura??o sob medida.</p><WhatsAppButton message="Ol?! Gostaria de consultar computadores montados dispon?veis ou montar uma configura??o." className="mt-5">Consultar no WhatsApp</WhatsAppButton></Card> : null}
+            {!filteredPcs.length ? <Card className="mt-6 text-center"><h2 className="text-2xl font-black text-white">Nenhum computador encontrado.</h2><p className="mt-3 text-sm text-slate-300">Ajuste os filtros ou consulte a loja para montar uma configuração sob medida.</p><WhatsAppButton message="Olá! Gostaria de consultar computadores montados disponíveis ou montar uma configuração." className="mt-5">Consultar no WhatsApp</WhatsAppButton></Card> : null}
           </Section>
         )}
       </main>

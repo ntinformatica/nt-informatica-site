@@ -8,6 +8,6 @@ const source = readFileSync(configPath, "utf8");
 const fixed = source.replace(/base:\s*["']\.\/["']/, 'base: "/"');
 
 if (fixed !== source) {
-  writeFileSync(configPath, fixed);
+  writeFileSync(configPath, fixed, "utf8");
   console.log('vite.config.js corrigido para base: "/"');
 }

@@ -1028,7 +1028,7 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
         const matchPublished = published === "Todos" || (published === "Publicado" ? pc.published : !pc.published);
         const matchFeatured = featured === "Todos" || (featured === "Destaque" ? pc.featured : !pc.featured);
         const stock = Number(pc.stock || 0);
-        const matchStock = stockStatus === "Todos" || (stockStatus === "Dispon?vel" ? stock > 0 : stock <= 0);
+        const matchStock = stockStatus === "Todos" || (stockStatus === "Disponível" ? stock > 0 : stock <= 0);
         return matchSearch && matchCategory && matchType && matchPublished && matchFeatured && matchStock;
       })
       .sort((a, b) => {
@@ -1050,7 +1050,7 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
       <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 xl:grid-cols-[1.2fr_0.65fr_0.65fr_0.55fr_0.55fr_0.55fr_auto]">
         <label className="relative xl:col-span-2">
           <Search className="pointer-events-none absolute left-3 top-3 text-slate-500" size={18} />
-          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, c?digo, processador, v?deo..." className="w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
+          <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome, código, processador, vídeo..." className="w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
         </label>
         <select value={category} onChange={(event) => setCategory(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
           <option>Todas</option>
@@ -1072,15 +1072,15 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
         </select>
         <select value={stockStatus} onChange={(event) => setStockStatus(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
           <option>Todos</option>
-          <option>Dispon?vel</option>
+          <option>Disponível</option>
           <option>Esgotado</option>
         </select>
         <select value={sort} onChange={(event) => setSort(event.target.value)} className="rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan">
           <option value="recentes">Mais recentes</option>
           <option value="nome">Nome</option>
           <option value="estoque">Maior estoque</option>
-          <option value="preco-menor">Menor pre?o</option>
-          <option value="preco-maior">Maior pre?o</option>
+          <option value="preco-menor">Menor preço</option>
+          <option value="preco-maior">Maior preço</option>
         </select>
         <a href="/admin/pcs/novo" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white transition hover:bg-nt-cyan">
           <Plus size={17} />
@@ -1094,8 +1094,8 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
           <span>Tipo</span>
           <span>Status</span>
           <span>Estoque</span>
-          <span>Pre?o</span>
-          <span>A??es</span>
+          <span>Preço</span>
+          <span>Ações</span>
         </div>
         <div className="divide-y divide-white/10">
           {filteredPcs.map((pc) => {
@@ -1106,8 +1106,8 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
                   {pc.mainImage ? <img src={pc.mainImage} alt="" className="h-16 w-20 rounded-md border border-white/10 object-cover" /> : <div className="grid h-16 w-20 place-items-center rounded-md border border-white/10 bg-white/5 text-xs text-slate-500">PC</div>}
                   <div>
                     <p className="font-black">{pc.name}</p>
-                    <p className="mt-1 text-sm text-slate-400">{pc.internalCode ? pc.internalCode + " ? " : ""}{pc.processor || "Processador n?o informado"} ? {pc.graphicsCard || "V?deo n?o informado"}</p>
-                    <p className="mt-1 text-xs text-slate-500">{pc.memory || "RAM a consultar"} ? {pc.storage || "Armazenamento a consultar"}</p>
+                    <p className="mt-1 text-sm text-slate-400">{pc.internalCode ? pc.internalCode + " · " : ""}{pc.processor || "Processador não informado"} · {pc.graphicsCard || "Vídeo não informado"}</p>
+                    <p className="mt-1 text-xs text-slate-500">{pc.memory || "RAM a consultar"} · {pc.storage || "Armazenamento a consultar"}</p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {pc.featured ? <span className="inline-flex rounded-full bg-lime-300/10 px-3 py-1 text-xs font-bold text-lime-200">Destaque</span> : null}
                       <span className="inline-flex rounded-full bg-nt-cyan/10 px-3 py-1 text-xs font-bold text-nt-cyan">{pc.category || "Sem categoria"}</span>
@@ -1120,7 +1120,7 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
                     {pc.published ? "Publicado" : "Rascunho"}
                   </span>
                   <span className={'w-fit rounded-full border px-3 py-1 text-xs font-bold ' + (available ? "border-lime-300/30 bg-lime-300/10 text-lime-200" : "border-red-300/30 bg-red-300/10 text-red-200")}>
-                    {available ? "Dispon?vel" : "Esgotado"}
+                    {available ? "Disponível" : "Esgotado"}
                   </span>
                 </div>
                 <p className="font-bold">{pc.stock ?? 0}</p>
@@ -1188,10 +1188,10 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
     if (!form.name.trim()) return "Informe o nome comercial do PC.";
     if (!form.slug.trim()) return "Informe o slug do PC.";
     if (!form.processor.trim()) return "Informe o processador.";
-    if (!form.memory.trim()) return "Informe a mem?ria RAM.";
+    if (!form.memory.trim()) return "Informe a memória RAM.";
     if (!form.storage.trim()) return "Informe o armazenamento principal.";
-    if (parseMoney(form.price) === null) return "Informe o pre?o em 10x sem juros.";
-    if (Number(form.stock) < 0 || !Number.isInteger(Number(form.stock))) return "O estoque precisa ser um n?mero inteiro maior ou igual a zero.";
+    if (parseMoney(form.price) === null) return "Informe o preço em 10x sem juros.";
+    if (Number(form.stock) < 0 || !Number.isInteger(Number(form.stock))) return "O estoque precisa ser um número inteiro maior ou igual a zero.";
     if (form.published && !form.mainImage) return "Para publicar, envie ou informe uma imagem principal.";
     return "";
   }
@@ -1216,7 +1216,7 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
   if (isEdit && !existingPc) {
     return (
       <div className="glass rounded-lg p-6">
-        <h2 className="text-2xl font-black">PC n?o encontrado</h2>
+        <h2 className="text-2xl font-black">PC não encontrado</h2>
         <a href="/admin/pcs" className="mt-4 inline-flex text-sm font-bold text-nt-cyan">Voltar para PCs</a>
       </div>
     );
@@ -1228,14 +1228,14 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
         <div className="lg:col-span-2">
-          <h2 className="text-xl font-black text-white">Identifica??o</h2>
-          <p className="mt-1 text-sm text-slate-400">Dados comerciais, categoria e status de publica??o.</p>
+          <h2 className="text-xl font-black text-white">Identificação</h2>
+          <p className="mt-1 text-sm text-slate-400">Dados comerciais, categoria e status de publicação.</p>
         </div>
         <TextField label="Nome comercial do PC" value={form.name} onChange={(value) => updateField("name", value)} required />
-        <TextField label="Slug autom?tico" value={form.slug} onChange={(value) => updateField("slug", slugify(value))} required />
-        <TextField label="C?digo interno" value={form.internalCode} onChange={(value) => updateField("internalCode", value)} placeholder="Ex.: PC-GAMER-001" />
+        <TextField label="Slug automático" value={form.slug} onChange={(value) => updateField("slug", slugify(value))} required />
+        <TextField label="Código interno" value={form.internalCode} onChange={(value) => updateField("internalCode", value)} placeholder="Ex.: PC-GAMER-001" />
         <SelectField label="Tipo do PC" value={form.pcType} onChange={(value) => updateField("pcType", value)} options={pcTypeOptions} />
-        <SelectField label="Categoria p?blica" value={form.category} onChange={(value) => updateField("category", value)} options={pcCategories.map((item) => [item, item])} />
+        <SelectField label="Categoria pública" value={form.category} onChange={(value) => updateField("category", value)} options={pcCategories.map((item) => [item, item])} />
         <SelectField label="Status interno" value={form.status} onChange={(value) => updateField("status", value)} options={[["rascunho", "Rascunho"], ["publicado", "Publicado"], ["esgotado", "Esgotado"], ["desativado", "Desativado"]]} />
         <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
           <input type="checkbox" checked={form.published} onChange={(event) => updateField("published", event.target.checked)} />
@@ -1249,31 +1249,31 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
         <div>
-          <h2 className="text-xl font-black text-white">Descri??o comercial</h2>
-          <p className="mt-1 text-sm text-slate-400">Texto que aparece no card, detalhe p?blico e WhatsApp.</p>
+          <h2 className="text-xl font-black text-white">Descrição comercial</h2>
+          <p className="mt-1 text-sm text-slate-400">Texto que aparece no card, detalhe público e WhatsApp.</p>
         </div>
-        <TextareaField label="Descri??o curta" value={form.shortDescription} onChange={(value) => updateField("shortDescription", value)} rows={3} />
-        <TextareaField label="Descri??o completa" value={form.fullDescription} onChange={(value) => updateField("fullDescription", value)} rows={6} />
+        <TextareaField label="Descrição curta" value={form.shortDescription} onChange={(value) => updateField("shortDescription", value)} rows={3} />
+        <TextareaField label="Descrição completa" value={form.fullDescription} onChange={(value) => updateField("fullDescription", value)} rows={6} />
       </section>
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
         <div className="lg:col-span-2">
-          <h2 className="text-xl font-black text-white">Configura??o t?cnica</h2>
+          <h2 className="text-xl font-black text-white">Configuração técnica</h2>
           <p className="mt-1 text-sm text-slate-400">Componentes principais e diferenciais do computador montado.</p>
         </div>
         <TextField label="Processador" value={form.processor} onChange={(value) => updateField("processor", value)} required />
         <TextField label="Cooler do processador" value={form.processorCooler} onChange={(value) => updateField("processorCooler", value)} />
-        <TextField label="Placa-m?e" value={form.motherboard} onChange={(value) => updateField("motherboard", value)} />
-        <TextField label="Mem?ria RAM" value={form.memory} onChange={(value) => updateField("memory", value)} required />
+        <TextField label="Placa-mãe" value={form.motherboard} onChange={(value) => updateField("motherboard", value)} />
+        <TextField label="Memória RAM" value={form.memory} onChange={(value) => updateField("memory", value)} required />
         <TextField label="SSD / armazenamento principal" value={form.storage} onChange={(value) => updateField("storage", value)} required />
         <TextField label="HD adicional" value={form.hardDrive} onChange={(value) => updateField("hardDrive", value)} />
-        <TextField label="Placa de v?deo" value={form.graphicsCard} onChange={(value) => updateField("graphicsCard", value)} />
+        <TextField label="Placa de vídeo" value={form.graphicsCard} onChange={(value) => updateField("graphicsCard", value)} />
         <TextField label="Fonte" value={form.powerSupply} onChange={(value) => updateField("powerSupply", value)} />
         <TextField label="Gabinete" value={form.caseModel} onChange={(value) => updateField("caseModel", value)} />
         <TextField label="Ventoinhas" value={form.fans} onChange={(value) => updateField("fans", value)} />
-        <TextField label="Refrigera??o geral" value={form.cooling} onChange={(value) => updateField("cooling", value)} />
+        <TextField label="Refrigeração geral" value={form.cooling} onChange={(value) => updateField("cooling", value)} />
         <TextField label="Sistema operacional" value={form.operatingSystem} onChange={(value) => updateField("operatingSystem", value)} />
-        <TextField label="Vers?o do Windows" value={form.windowsVersion} onChange={(value) => updateField("windowsVersion", value)} />
+        <TextField label="Versão do Windows" value={form.windowsVersion} onChange={(value) => updateField("windowsVersion", value)} />
         <div className="grid gap-3 rounded-md border border-slate-700 bg-slate-950 p-4 sm:grid-cols-2 lg:col-span-2">
           {[ ["wifi", "Wi-Fi"], ["bluetooth", "Bluetooth"], ["rgb", "RGB"], ["windowsIncluded", "Windows incluso"], ["officeIncluded", "Office incluso"] ].map(([field, label]) => (
             <label key={field} className="flex items-center gap-3 text-sm font-bold text-slate-200">
@@ -1286,17 +1286,17 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
         <div className="lg:col-span-2">
-          <h2 className="text-xl font-black text-white">Pre?o, estoque e garantia</h2>
+          <h2 className="text-xl font-black text-white">Preço, estoque e garantia</h2>
         </div>
-        <TextField label="Pre?o em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 2500" required />
-        <TextField label="Pre?o promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 2125" />
+        <TextField label="Preço em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 2500" required />
+        <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 2125" />
         <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} min="0" step="1" />
         <TextField label="Garantia em meses" type="number" value={form.warrantyMonths} onChange={(value) => updateField("warrantyMonths", Number(value))} min="0" step="1" />
         <TextField label="Texto de garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} placeholder="Ex.: 3 meses pela loja" />
         <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
-          <p className="font-bold text-slate-200">C?lculo autom?tico</p>
+          <p className="font-bold text-slate-200">Cálculo automático</p>
           <p className="mt-2 text-slate-400">10x sem juros: <strong className="text-white">{formatCurrency(installmentBase)}</strong></p>
-          <p className="mt-1 text-slate-400">? vista com 15% off: <strong className="text-lime-200">{formatCurrency(cashPrice || form.promoPrice)}</strong></p>
+          <p className="mt-1 text-slate-400">À vista com 15% off: <strong className="text-lime-200">{formatCurrency(cashPrice || form.promoPrice)}</strong></p>
         </div>
       </section>
 
@@ -1314,7 +1314,7 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
         </div>
         <TextareaField label="Jogos recomendados" value={form.recommendedGames} onChange={(value) => updateField("recommendedGames", value)} rows={5} placeholder="Um por linha" />
         <div className="lg:col-span-2">
-          <p className="mb-3 text-sm font-bold text-slate-200">Padr?o de qualidade NT</p>
+          <p className="mb-3 text-sm font-bold text-slate-200">Padrão de qualidade NT</p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
             {pcQualityCheckOptions.map((item) => (
               <label key={item} className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200">
@@ -1329,13 +1329,13 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
       <PcImageUploader form={form} updateField={updateField} />
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
-        <h2 className="text-xl font-black text-white">Observa??es internas</h2>
-        <TextareaField label="Observa??es internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} rows={4} />
+        <h2 className="text-xl font-black text-white">Observações internas</h2>
+        <TextareaField label="Observações internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} rows={4} />
       </section>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         <a href="/admin/pcs" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan">Cancelar</a>
-        <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar altera??es" : "Criar PC"}</AdminButton>
+        <AdminButton type="submit" icon={FilePlus2}>{isEdit ? "Salvar alterações" : "Criar PC"}</AdminButton>
       </div>
     </form>
   );
@@ -3012,7 +3012,7 @@ function SettingsPage() {
         <TextField label="URL do site" value="https://nt-informatica-site.vercel.app" onChange={() => {}} readOnly />
         <TextField label="Supabase" value={isSupabaseConfigured ? "Configurado" : "Usando fallback local"} onChange={() => {}} readOnly />
         <TextField label="Host Supabase no build" value={supabaseDiagnostics.urlHost || "Nao configurado"} onChange={() => {}} readOnly />
-        <TextField label="URL Supabase valida" value={supabaseDiagnostics.validUrl ? "Sim" : "Nao"} onChange={() => {}} readOnly />
+        <TextField label="URL Supabase valida" value={supabaseDiagnostics.validUrl ? "Sim" : "Não"} onChange={() => {}} readOnly />
         <TextField label="Importador por link" value="Protótipo visual" onChange={() => {}} readOnly />
       </div>
     </section>

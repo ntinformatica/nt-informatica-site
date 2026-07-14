@@ -1137,19 +1137,19 @@ begin
     for update;
 
   if not found then
-    raise exception 'Reserva nÃ£o encontrada.';
+    raise exception 'Reserva não encontrada.';
   end if;
 
   if v_reservation.status = 'cancelado' then
-    raise exception 'NÃ£o Ã© possÃ­vel iniciar uma reserva cancelada.';
+    raise exception 'Não é possível iniciar uma reserva cancelada.';
   end if;
 
   if v_reservation.status = 'bloqueado' then
-    raise exception 'NÃ£o Ã© possÃ­vel iniciar um bloqueio de horÃ¡rio.';
+    raise exception 'Não é possível iniciar um bloqueio de horário.';
   end if;
 
   if v_reservation.session_status = 'encerrada' then
-    raise exception 'SessÃ£o jÃ¡ encerrada.';
+    raise exception 'Sessão já encerrada.';
   end if;
 
   if exists (
@@ -1159,7 +1159,7 @@ begin
         and reservation.id <> v_reservation.id
         and reservation.session_status in ('em_andamento', 'pausada')
   ) then
-    raise exception 'JÃ¡ existe uma sessÃ£o em andamento neste equipamento.';
+    raise exception 'Já existe uma sessão em andamento neste equipamento.';
   end if;
 
   if exists (
@@ -1168,7 +1168,7 @@ begin
       where station.id = v_reservation.station_id
         and (station.active = false or station.availability_status in ('manutencao', 'inativo'))
   ) then
-    raise exception 'Equipamento indisponÃ­vel.';
+    raise exception 'Equipamento indisponível.';
   end if;
 
   if v_reservation.payment_type = 'plano' and not v_reservation.credits_processed then
@@ -1209,11 +1209,11 @@ begin
     for update;
 
   if not found then
-    raise exception 'Reserva nÃ£o encontrada.';
+    raise exception 'Reserva não encontrada.';
   end if;
 
   if v_reservation.session_status <> 'em_andamento' then
-    raise exception 'Somente sessÃµes em andamento podem ser pausadas.';
+    raise exception 'Somente sessões em andamento podem ser pausadas.';
   end if;
 
   update public.arena_reservations
@@ -1241,11 +1241,11 @@ begin
     for update;
 
   if not found then
-    raise exception 'Reserva nÃ£o encontrada.';
+    raise exception 'Reserva não encontrada.';
   end if;
 
   if v_reservation.session_status <> 'pausada' then
-    raise exception 'Somente sessÃµes pausadas podem ser retomadas.';
+    raise exception 'Somente sessões pausadas podem ser retomadas.';
   end if;
 
   if v_reservation.session_paused_at is not null then
@@ -1283,7 +1283,7 @@ begin
     for update;
 
   if not found then
-    raise exception 'Reserva nÃ£o encontrada.';
+    raise exception 'Reserva não encontrada.';
   end if;
 
   if v_reservation.session_status = 'encerrada' then
@@ -1292,7 +1292,7 @@ begin
   end if;
 
   if v_reservation.session_started_at is null then
-    raise exception 'SessÃ£o ainda nÃ£o foi iniciada.';
+    raise exception 'Sessão ainda não foi iniciada.';
   end if;
 
   if v_reservation.payment_type = 'plano' and not v_reservation.credits_processed then
@@ -1356,11 +1356,11 @@ declare
   v_row public.arena_station_maintenance;
 begin
   if p_status not in ('agendada', 'em_andamento', 'concluida', 'cancelada') then
-    raise exception 'Status de manutenÃ§Ã£o invÃ¡lido.';
+    raise exception 'Status de manutenção inválido.';
   end if;
 
   if p_station_id is null then
-    raise exception 'Equipamento obrigatÃ³rio.';
+    raise exception 'Equipamento obrigatório.';
   end if;
 
   insert into public.arena_station_maintenance (
@@ -1374,7 +1374,7 @@ begin
   )
   values (
     p_station_id,
-    trim(coalesce(nullif(p_title, ''), 'ManutenÃ§Ã£o')),
+    trim(coalesce(nullif(p_title, ''), 'Manutenção')),
     trim(coalesce(p_description, '')),
     p_status,
     coalesce(p_started_at, now()),
@@ -1408,7 +1408,7 @@ begin
     returning * into v_row;
 
   if not found then
-    raise exception 'ManutenÃ§Ã£o nÃ£o encontrada.';
+    raise exception 'Manutenção não encontrada.';
   end if;
 
   if not exists (
@@ -1441,7 +1441,7 @@ begin
     returning * into v_row;
 
   if not found then
-    raise exception 'ManutenÃ§Ã£o nÃ£o encontrada.';
+    raise exception 'Manutenção não encontrada.';
   end if;
 
   if not exists (
