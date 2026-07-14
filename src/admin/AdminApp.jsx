@@ -1354,8 +1354,9 @@ function validateCodexAssistantLinks(form, variations) {
   };
 }
 
-function buildCodexAssistantPrompt(form, variations) {
+function buildCodexAssistantPrompt(form, variations, options = {}) {
   const validVariations = variations.filter(hasVariationData);
+  const requireValidImages = options.requireValidImages !== false;
   const variationLines = validVariations
     .map((variation, index) => `
 Variacao ${index + 1}:
@@ -1373,7 +1374,8 @@ IMPORTANTE:
 - Nao altere arquivos do projeto.
 - Nao execute SQL.
 - Nao faca git push.
-- Apenas devolva o SQL completo pronto para colar no Supabase SQL Editor.
+- Analise os links e devolva o resultado pronto para o Supabase SQL Editor.
+- Antes do SQL, devolva obrigatoriamente um resumo curto da validacao das imagens.
 
 Tabelas permitidas:
 - categories
@@ -1403,24 +1405,66 @@ Tarefas para o Codex:
    - cores;
    - capacidade, quando existir;
    - caracteristicas relevantes.
-3. Preencher no SQL:
+3. Localizar URLs reais, publicas e utilizaveis das imagens do produto:
+   - procurar imagem principal e galeria do produto;
+   - remover imagens duplicadas;
+   - ignorar logos, banners, avaliacoes, selos, icones, placeholders e imagens que nao sejam do produto;
+   - preferir URLs HTTPS;
+   - preferir imagens maiores quando houver miniatura e imagem ampliada;
+   - manter somente URLs publicas e diretas de imagem;
+   - nao usar data:, blob:, caminhos relativos ou URLs vazias;
+   - evitar URLs temporarias que dependam de sessao;
+   - preferir URLs que terminem ou entreguem JPG, JPEG, PNG, WEBP ou AVIF.
+4. Preencher obrigatoriamente no SQL:
    - products.main_image com a melhor imagem principal encontrada;
    - products.images com a galeria completa de imagens;
    - product_variations.image com a imagem correspondente de cada variacao;
+   - product_variations.images com a galeria especifica da variacao, quando houver;
    - descriptions, slug, categoria, preco, estoque, garantia e demais campos disponiveis.
-4. Se algum link nao permitir extrair imagens automaticamente, informe isso claramente em comentario SQL e sugira preenchimento manual das imagens no SQL.
-5. Gerar SQL seguro usando apenas categories, products e product_variations.
-6. Nao duplicar produtos por slug.
-7. Nao duplicar categorias por slug.
-8. Nao duplicar variacoes pela combinacao produto + SKU + nome + cor.
-9. Atualizar produto existente quando necessario.
-10. Criar o produto como disponivel.
-11. Usar upsert/on conflict quando fizer sentido.
-12. O SQL precisa ser seguro para executar mais de uma vez.
+5. Regras para products.main_image:
+   - deve receber a melhor imagem principal encontrada;
+   - nao pode ficar vazio quando houver imagem acessivel no link;
+   - nao deve usar miniatura de baixa qualidade quando existir imagem maior.
+6. Regras para products.images:
+   - deve receber todas as imagens uteis da galeria;
+   - nao pode conter URLs duplicadas;
+   - nao pode conter logos, banners, avaliacoes, selos, icones ou imagens genericas.
+7. Regras para variacoes:
+   - cada variacao deve receber a imagem correspondente a sua cor/modelo;
+   - preencher product_variations.image;
+   - preencher product_variations.images quando houver galeria especifica;
+   - nao usar imagem de outra cor/modelo.
+8. Antes de devolver o SQL, conferir obrigatoriamente:
+   - products.main_image esta preenchida;
+   - products.images contem pelo menos uma imagem valida;
+   - imagens das variacoes estao relacionadas corretamente;
+   - nao existem URLs duplicadas;
+   - nao existem aspas ou caracteres que quebrem o SQL.
+9. Se nao conseguir extrair imagens:
+   - nao fingir que o cadastro esta completo;
+   - informar claramente: "Nao foi possivel extrair imagens publicas e permanentes deste link.";
+   - nao usar imagens inventadas;
+   - nao usar imagens de outro produto;
+   - nao deixar o usuario acreditar que as fotos foram incluidas;
+   - devolver SQL apenas com comentario claro indicando onde inserir as imagens manualmente, se a regra abaixo permitir.
+10. Regra de bloqueio por imagem:
+   ${requireValidImages ? "- Se nenhuma imagem valida for encontrada, NAO gerar INSERT/UPDATE final. Apenas informe a falha de extracao e peca outro link ou imagens manuais." : "- Se nenhuma imagem valida for encontrada, gerar o SQL com comentario claro indicando onde inserir products.main_image, products.images, product_variations.image e product_variations.images manualmente."}
+11. Gerar SQL seguro usando apenas categories, products e product_variations.
+12. Nao duplicar produtos por slug.
+13. Nao duplicar categorias por slug.
+14. Nao duplicar variacoes pela combinacao produto + SKU + nome + cor.
+15. Atualizar produto existente quando necessario.
+16. Criar o produto como disponivel.
+17. Usar upsert/on conflict quando fizer sentido.
+18. O SQL precisa ser seguro para executar mais de uma vez.
 
 Resultado esperado:
-- Retorne apenas o SQL completo.
-- Nao inclua explicacoes fora do SQL.`;
+- Primeiro retorne este resumo curto:
+  Imagem principal encontrada: SIM/NAO
+  Quantidade de imagens da galeria: X
+  Imagens de variacoes encontradas: X de Y
+- Depois retorne o SQL completo pronto para colar no Supabase SQL Editor.
+- Nao inclua explicacoes fora do resumo de imagens e do SQL.`;
 }
 
 function CodexAssistantPage() {
@@ -1429,6 +1473,7 @@ function CodexAssistantPage() {
   const [prompt, setPrompt] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const [validation, setValidation] = useState({ valid: false, errors: [], success: "" });
+  const [requireValidImages, setRequireValidImages] = useState(true);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -1459,12 +1504,12 @@ function CodexAssistantPage() {
   function generatePrompt() {
     if (!validateLinks()) return;
     setCopyStatus("");
-    setPrompt(buildCodexAssistantPrompt(form, variations));
+    setPrompt(buildCodexAssistantPrompt(form, variations, { requireValidImages }));
   }
 
   async function copyPrompt() {
     if (!prompt && !validateLinks()) return;
-    const text = prompt || buildCodexAssistantPrompt(form, variations);
+    const text = prompt || buildCodexAssistantPrompt(form, variations, { requireValidImages });
     setPrompt(text);
 
     try {
@@ -1484,6 +1529,9 @@ function CodexAssistantPage() {
             <h2 className="mt-2 text-2xl font-black">Assistente Codex</h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
               Informe apenas os links do fornecedor, preços e estoque. O Codex utilizará esses links para extrair automaticamente nome, marca, modelo, descrições, especificações, imagens e variações.
+            </p>
+            <p className="mt-3 max-w-3xl rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm leading-6 text-amber-100">
+              O Codex tentará extrair as imagens diretamente dos links. Alguns fornecedores bloqueiam ou utilizam URLs temporárias. Confira sempre se o resumo informa que as imagens foram encontradas antes de executar o SQL.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -1506,6 +1554,23 @@ function CodexAssistantPage() {
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
         <TextField label="Link principal do produto" value={form.mainLink} onChange={(value) => updateField("mainLink", value)} required placeholder="https://..." />
         <TextareaField label="Observações" value={form.notes} onChange={(value) => updateField("notes", value)} placeholder="Ex.: priorizar imagens reais, produto com duas cores, garantia da loja..." />
+        <label className="flex items-start gap-3 rounded-md border border-slate-700 bg-slate-950 p-4 text-sm font-bold text-slate-200">
+          <input
+            type="checkbox"
+            checked={requireValidImages}
+            onChange={(event) => {
+              setRequireValidImages(event.target.checked);
+              setPrompt("");
+            }}
+            className="mt-1"
+          />
+          <span>
+            Não gerar o SQL se nenhuma imagem válida for encontrada
+            <small className="mt-1 block font-normal leading-5 text-slate-400">
+              Quando marcado, o prompt instrui o Codex a bloquear o INSERT/UPDATE final caso não encontre nenhuma imagem pública e permanente.
+            </small>
+          </span>
+        </label>
       </section>
 
       <section className="rounded-lg border border-white/10 bg-white/5 p-5">
