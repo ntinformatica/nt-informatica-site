@@ -13,6 +13,10 @@ let categories = [
   ["Carregadores e cabos", "Carregadores, fontes, HDMI, USB e adaptadores.", "../category-assets/carregadores.svg"],
   ["Kits e combos", "Combos gamer e kits para escritório.", "../category-assets/kits.svg"],
   ["Acessórios gamer", "Itens para completar seu setup.", "../category-assets/acessorios.svg"],
+  ["Ventoinhas", "Refrigeracao para gabinete, modelos RGB, ARGB, normais e reversos.", "../category-assets/acessorios.svg"],
+  ["Acessórios", "Adaptadores, suportes, cabos, perifericos e utilidades para seu setup.", "../category-assets/acessorios.svg"],
+  ["Placas-mãe", "Modelos Intel e AMD para upgrades e montagem de computadores.", "../category-assets/acessorios.svg"],
+  ["Cadeiras", "Cadeiras gamer e office para conforto no trabalho e nas partidas.", "../category-assets/acessorios.svg"],
 ];
 
 const requiredCategories = [
@@ -28,12 +32,14 @@ const requiredCategories = [
   ["Processadores", "CPUs para upgrades e montagens.", "../category-assets/acessorios.svg"],
   ["Air Coolers", "Refrigeracao a ar para processadores.", "../category-assets/acessorios.svg"],
   ["Water Coolers", "Refrigeracao liquida para setups potentes.", "../category-assets/acessorios.svg"],
-  ["Fans e Ventoinhas RGB", "Ventilacao e iluminacao para gabinetes.", "../category-assets/acessorios.svg"],
+  ["Ventoinhas", "Refrigeracao para gabinete, modelos RGB, ARGB, normais e reversos.", "../category-assets/acessorios.svg"],
   ["Controladoras e Hubs", "Controle de fans, RGB e conexoes.", "../category-assets/acessorios.svg"],
   ["Controles", "Controles para PC, consoles e games.", "../category-assets/controles.svg"],
   ["Consoles", "Videogames e equipamentos para jogar.", "../category-assets/controles.svg"],
-  ["Game Stick", "Opcoes compactas para jogos retro.", "../category-assets/controles.svg"],
   ["Carregadores e Cabos", "Carregadores, fontes, HDMI, USB e adaptadores.", "../category-assets/carregadores.svg"],
+  ["Acessórios", "Adaptadores, suportes, cabos, perifericos e utilidades para seu setup.", "../category-assets/acessorios.svg"],
+  ["Placas-mãe", "Modelos Intel e AMD para upgrades e montagem de computadores.", "../category-assets/acessorios.svg"],
+  ["Cadeiras", "Cadeiras gamer e office para conforto no trabalho e nas partidas.", "../category-assets/acessorios.svg"],
 ];
 
 let products = [
@@ -2416,6 +2422,16 @@ function categoryKey(value) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+function categorySlug(value) {
+  return categoryKey(value);
+}
+
+function findCategoryByParam(value) {
+  if (!value) return null;
+  const key = categoryKey(value);
+  return categories.find(([name]) => categoryKey(name) === key) || null;
+}
+
 function ensureCatalogCategories() {
   const merged = new Map();
   requiredCategories.forEach((category) => {
@@ -2495,8 +2511,9 @@ function assetPath(path) {
 function categoryFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get("categoria");
-  const category = categories.find(([name]) => categoryKey(name) === categoryKey(requested));
-  return category ? category[0] : categories[0][0];
+  if (!requested) return categories[0]?.[0] || "";
+  const category = findCategoryByParam(requested);
+  return category ? category[0] : "";
 }
 
 function hasCategoryParam() {
@@ -2647,7 +2664,7 @@ function whatsappHref(product, variant = productVariant(product)) {
 
 function productHref(product) {
   if (!product.id) return "";
-  return `/produtos?categoria=${encodeURIComponent(product.category)}&produto=${encodeURIComponent(product.id)}`;
+  return `/produtos?categoria=${encodeURIComponent(categorySlug(product.category))}&produto=${encodeURIComponent(product.id)}`;
 }
 
 function absoluteProductHref(product) {
@@ -2655,7 +2672,7 @@ function absoluteProductHref(product) {
 }
 
 function categoryHref(category) {
-  return `/produtos?categoria=${encodeURIComponent(category)}`;
+  return `/produtos?categoria=${encodeURIComponent(categorySlug(category))}`;
 }
 
 function isMobileViewport() {
@@ -2987,31 +3004,66 @@ function renderSearchResults(query) {
 
 function setCategory(category, options = {}) {
   if (searchInput && !options.keepSearch) searchInput.value = "";
-  currentCategory = category;
+  const categoryMatch = findCategoryByParam(category);
+  if (!categoryMatch) {
+    currentCategory = "";
+    if (!options.keepSearch) currentSearch = "";
+    const requestedCategory = category || "categoria informada";
+    const url = new URL(window.location.href);
+    if (category) {
+      url.searchParams.set("categoria", categorySlug(category));
+    } else {
+      url.searchParams.delete("categoria");
+    }
+    url.searchParams.delete("produto");
+    window.history.replaceState({}, "", url);
+
+    title.textContent = "Categoria não encontrada";
+    pageTitle.textContent = "Categoria não encontrada";
+    count.textContent = "0 produtos";
+
+    document.querySelectorAll(".category-button").forEach((button) => {
+      button.classList.remove("active");
+    });
+
+    grid.innerHTML = `
+      <article class="empty-category">
+        <strong>Categoria não encontrada</strong>
+        <p>Não encontramos a categoria "${requestedCategory}". Escolha outra categoria para continuar navegando.</p>
+      </article>
+    `;
+    if (options.scroll) {
+      scrollToCatalogProducts();
+    }
+    return;
+  }
+
+  const selectedCategory = categoryMatch[0];
+  currentCategory = selectedCategory;
   if (!options.keepSearch) currentSearch = "";
   const url = new URL(window.location.href);
-  url.searchParams.set("categoria", category);
+  url.searchParams.set("categoria", categorySlug(selectedCategory));
   url.searchParams.delete("produto");
   window.history.replaceState({}, "", url);
 
-  title.textContent = category;
-  pageTitle.textContent = category;
+  title.textContent = selectedCategory;
+  pageTitle.textContent = selectedCategory;
 
-  const visible = sortProducts(productsInCategory(category));
+  const visible = sortProducts(productsInCategory(selectedCategory));
   count.textContent = formatProductCount(visible.length);
 
   document.querySelectorAll(".category-button").forEach((button) => {
-    button.classList.toggle("active", categoryKey(button.dataset.category) === categoryKey(category));
+    button.classList.toggle("active", categoryKey(button.dataset.category) === categoryKey(selectedCategory));
   });
-  keepActiveCategoryVisible(category);
+  keepActiveCategoryVisible(selectedCategory);
 
   if (!visible.length) {
-    const message = `Olá, NT Informática. Quero consultar disponibilidade de produtos na categoria ${category}.`;
+    const message = `Olá, NT Informática. Quero consultar disponibilidade de produtos na categoria ${selectedCategory}.`;
     grid.innerHTML = `
       <article class="empty-category">
         <strong>Produtos em cadastro</strong>
         <p>Estamos cadastrando novos produtos nesta categoria. Entre em contato pelo WhatsApp para consultar disponibilidade.</p>
-        <a class="buy-button" href="${whatsappHref({ name: category, whatsappMessage: message }, null)}" target="_blank" rel="noreferrer">Consultar no WhatsApp</a>
+        <a class="buy-button" href="${whatsappHref({ name: selectedCategory, whatsappMessage: message }, null)}" target="_blank" rel="noreferrer">Consultar no WhatsApp</a>
       </article>
     `;
     if (options.scroll) {

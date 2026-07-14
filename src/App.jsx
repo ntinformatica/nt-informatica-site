@@ -509,8 +509,8 @@ function Products() {
   return (
     <Section id="produtos" eyebrow="Produtos" title="Escolha uma categoria para abrir a vitrine." description="Cada segmento abre uma página própria com os produtos daquela linha, deixando a loja mais organizada para o cliente.">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] lg:gap-4">
-        {productCategories.map(({ name, description, icon }) => {
-          const categoryUrl = `/produtos?categoria=${encodeURIComponent(name)}`;
+        {productCategories.map(({ name, slug, description, icon }) => {
+          const categoryUrl = `/produtos?categoria=${encodeURIComponent(slug || name)}`;
           const Icon = homeCategoryIcons[name] || icon || ShoppingBag;
 
           return (
