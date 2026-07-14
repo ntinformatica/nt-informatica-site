@@ -45,6 +45,12 @@ import {
   saveArenaStation,
   updateArenaReservationStatus,
   updateArenaSettings,
+  activateArenaSubscription,
+  adjustArenaCredits,
+  saveArenaCustomer,
+  saveArenaMonthlyPlan,
+  deleteArenaMonthlyPlan,
+  updateArenaSubscriptionStatus,
 } from "./services/arenaService";
 import {
   createAssembledPc,
@@ -72,6 +78,8 @@ const menuItems = [
   ["Categorias", "/admin/categorias", Layers3],
   ["Assistente Codex", "/admin/assistente-codex", FilePlus2],
   ["Arena Gamer", "/admin/arena", Gamepad2],
+  ["Clientes da Arena", "/admin/arena/clientes", MessageSquareText],
+  ["Planos Mensais", "/admin/arena/planos", CalendarDays],
   ["Avaliações", "/admin/avaliacoes", MessageSquareText],
   ["Conteúdo", "/admin/conteudo", ClipboardList],
   ["Configurações", "/admin/configuracoes", Settings],
@@ -248,6 +256,12 @@ function routeInfo(pathname) {
   if (cleanPath === "/admin/produtos") return { page: "products" };
   if (cleanPath === "/admin/categorias") return { page: "categories" };
   if (cleanPath === "/admin/assistente-codex") return { page: "codexAssistant" };
+  if (cleanPath === "/admin/arena/clientes/novo") return { page: "arenaCustomerForm", mode: "new" };
+  if (cleanPath.startsWith("/admin/arena/clientes/editar/")) {
+    return { page: "arenaCustomerForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/arena/clientes/editar/", "")) };
+  }
+  if (cleanPath === "/admin/arena/clientes") return { page: "arenaCustomers" };
+  if (cleanPath === "/admin/arena/planos") return { page: "arenaPlans" };
   if (cleanPath === "/admin/arena") return { page: "arena" };
   if (cleanPath === "/admin/configuracoes") return { page: "settings" };
   if (cleanPath === "/admin/avaliacoes") return { page: "placeholder", title: "Avaliações" };
@@ -1696,6 +1710,325 @@ function arenaPackagePrice(packages, durationMinutes, fallbackPricePerHour = 20)
   return (Number(durationMinutes || 0) / 60) * Number(fallbackPricePerHour || 20);
 }
 
+function formatMinutesLabel(minutes) {
+  const total = Number(minutes || 0);
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (!hours) return `${rest} min`;
+  if (!rest) return `${hours}h`;
+  return `${hours}h ${rest}min`;
+}
+
+function formatShortDate(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
+}
+
+function currentArenaSubscription(customer, subscriptions = []) {
+  const today = new Date().toISOString().slice(0, 10);
+  return subscriptions
+    .filter((subscription) => subscription.customerId === customer.id)
+    .sort((a, b) => {
+      const activeScore = (b.status === "ativo" ? 1 : 0) - (a.status === "ativo" ? 1 : 0);
+      if (activeScore) return activeScore;
+      return String(b.expirationDate || "").localeCompare(String(a.expirationDate || ""));
+    })
+    .find((subscription) => subscription.status === "ativo" && subscription.expirationDate >= today)
+    || subscriptions.find((subscription) => subscription.customerId === customer.id);
+}
+
+function customerWhatsappHref(customer) {
+  const phone = String(customer.phone || "").replace(/\D/g, "");
+  const message = `Olá, ${customer.name || ""}. Aqui é da NT Informática sobre seu cadastro na NT Arena Gamer.`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+}
+
+function ArenaCustomersPage({ arenaData }) {
+  const [query, setQuery] = useState("");
+  const [activeFilter, setActiveFilter] = useState("todos");
+  const customers = arenaData.customers || [];
+  const subscriptions = arenaData.subscriptions || [];
+  const reservations = arenaData.reservations || [];
+  const filtered = customers.filter((customer) => {
+    const text = `${customer.name} ${customer.phone}`.toLowerCase();
+    const matchesQuery = !query || text.includes(query.toLowerCase());
+    const matchesActive = activeFilter === "todos" || (activeFilter === "ativos" ? customer.active !== false : customer.active === false);
+    return matchesQuery && matchesActive;
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 rounded-lg border border-white/10 bg-white/5 p-4 md:flex-row md:items-end md:justify-between">
+        <TextField label="Buscar por nome ou telefone" value={query} onChange={setQuery} />
+        <SelectField label="Status" value={activeFilter} onChange={setActiveFilter} options={[["todos", "Todos"], ["ativos", "Ativos"], ["inativos", "Inativos"]]} />
+        <a href="/admin/arena/clientes/novo" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white transition hover:bg-nt-cyan">
+          <Plus size={17} /> Novo Cliente
+        </a>
+      </div>
+      <div className="grid gap-4">
+        {filtered.length ? filtered.map((customer) => {
+          const subscription = currentArenaSubscription(customer, subscriptions);
+          const customerReservations = reservations.filter((reservation) => reservation.customerId === customer.id || reservation.customerPhone === customer.phone);
+          const lastReservation = customerReservations[0];
+          return (
+            <article key={customer.id} className="rounded-lg border border-white/10 bg-white/5 p-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong className="text-lg text-white">{customer.name}</strong>
+                    <span className={`rounded-full border px-2 py-1 text-xs font-bold ${customer.active ? "border-lime-300/30 text-lime-200" : "border-red-300/30 text-red-100"}`}>
+                      {customer.active ? "Ativo" : "Inativo"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-300">{customer.phone} {customer.email ? `· ${customer.email}` : ""}</p>
+                  <p className="mt-2 text-sm text-slate-400">
+                    Plano atual: <strong className="text-white">{subscription?.planName || "Sem plano ativo"}</strong>
+                    {subscription ? ` · saldo ${formatMinutesLabel(subscription.remainingMinutes)} · vence ${formatShortDate(subscription.expirationDate)}` : ""}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Última reserva: {lastReservation ? `${lastReservation.reservationDate} ${lastReservation.startTime}` : "nenhuma"} · Total de reservas: {customerReservations.length}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <a className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan" href={`/admin/arena/clientes/editar/${customer.id}`}>Ver detalhes</a>
+                  <a className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan" href={customerWhatsappHref(customer)} target="_blank" rel="noreferrer">WhatsApp</a>
+                </div>
+              </div>
+            </article>
+          );
+        }) : (
+          <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Nenhum cliente da Arena cadastrado ainda.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ArenaCustomerFormPage({ mode, customerId, arenaData, onSaveCustomer, onActivateSubscription, onAdjustCredits, onSubscriptionStatus }) {
+  const editing = mode === "edit";
+  const customer = arenaData.customers?.find((item) => item.id === customerId);
+  const [form, setForm] = useState(customer || { name: "", phone: "", email: "", notes: "", active: true });
+  const [planForm, setPlanForm] = useState({ planId: arenaData.monthlyPlans?.[0]?.id || "", startDate: todayIsoDate(), amountPaid: "", notes: "", keepPreviousBalance: false });
+  const [creditForm, setCreditForm] = useState({ subscriptionId: "", type: "credito", minutes: 60, reason: "", notes: "" });
+  const subscriptions = (arenaData.subscriptions || []).filter((item) => item.customerId === customerId);
+  const reservations = (arenaData.reservations || []).filter((item) => item.customerId === customerId || item.customerPhone === customer?.phone);
+  const movements = (arenaData.creditMovements || []).filter((item) => item.customerId === customerId);
+  const activeSubscription = subscriptions.find((item) => item.status === "ativo") || subscriptions[0];
+
+  useEffect(() => {
+    if (!creditForm.subscriptionId && activeSubscription?.id) {
+      setCreditForm((current) => ({ ...current, subscriptionId: activeSubscription.id }));
+    }
+  }, [activeSubscription?.id]);
+
+  async function submit(event) {
+    event.preventDefault();
+    await onSaveCustomer(customerId, form);
+    if (!editing) window.location.href = "/admin/arena/clientes";
+  }
+
+  async function activatePlan(event) {
+    event.preventDefault();
+    if (!customerId) return;
+    await onActivateSubscription({ customerId, ...planForm });
+  }
+
+  async function adjustCredits(event) {
+    event.preventDefault();
+    await onAdjustCredits(creditForm);
+  }
+
+  if (editing && !customer) {
+    return <p className="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">Cliente não encontrado.</p>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <form onSubmit={submit} className="rounded-lg border border-white/10 bg-white/5 p-5">
+        <h2 className="text-xl font-black">{editing ? "Dados do cliente" : "Novo cliente da Arena"}</h2>
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <TextField label="Nome" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} required />
+          <TextField label="WhatsApp" value={form.phone} onChange={(value) => setForm((current) => ({ ...current, phone: value }))} required />
+          <TextField label="E-mail" value={form.email} onChange={(value) => setForm((current) => ({ ...current, email: value }))} />
+          <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+            <input type="checkbox" checked={form.active !== false} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
+            Cliente ativo
+          </label>
+          <div className="md:col-span-2">
+            <TextareaField label="Observações" value={form.notes} onChange={(value) => setForm((current) => ({ ...current, notes: value }))} rows={3} />
+          </div>
+        </div>
+        <AdminButton type="submit" className="mt-5" icon={CheckCircle2}>Salvar cliente</AdminButton>
+      </form>
+
+      {editing ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-4">
+            <SummaryCard label="Plano atual" value={activeSubscription?.planName || "Sem plano"} icon={CalendarDays} />
+            <SummaryCard label="Saldo restante" value={formatMinutesLabel(activeSubscription?.remainingMinutes || 0)} icon={BarChart3} />
+            <SummaryCard label="Vencimento" value={formatShortDate(activeSubscription?.expirationDate)} icon={CalendarDays} />
+            <SummaryCard label="Reservas" value={reservations.length} icon={Gamepad2} />
+          </div>
+
+          <form onSubmit={activatePlan} className="rounded-lg border border-white/10 bg-white/5 p-5">
+            <h3 className="text-lg font-black">Adicionar ou renovar plano</h3>
+            <div className="mt-4 grid gap-4 md:grid-cols-5">
+              <SelectField label="Plano" value={planForm.planId} onChange={(value) => setPlanForm((current) => ({ ...current, planId: value }))} options={(arenaData.monthlyPlans || []).map((plan) => [plan.id, `${plan.name} - ${formatCurrency(plan.price)}`])} />
+              <TextField label="Data inicial" type="date" value={planForm.startDate} onChange={(value) => setPlanForm((current) => ({ ...current, startDate: value }))} />
+              <TextField label="Valor pago" value={planForm.amountPaid} onChange={(value) => setPlanForm((current) => ({ ...current, amountPaid: value }))} />
+              <TextField label="Observação" value={planForm.notes} onChange={(value) => setPlanForm((current) => ({ ...current, notes: value }))} />
+              <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+                <input type="checkbox" checked={planForm.keepPreviousBalance} onChange={(event) => setPlanForm((current) => ({ ...current, keepPreviousBalance: event.target.checked }))} />
+                Somar saldo anterior
+              </label>
+            </div>
+            <AdminButton type="submit" className="mt-4" icon={Plus}>Ativar plano</AdminButton>
+          </form>
+
+          <form onSubmit={adjustCredits} className="rounded-lg border border-white/10 bg-white/5 p-5">
+            <h3 className="text-lg font-black">Ajustar saldo</h3>
+            <div className="mt-4 grid gap-4 md:grid-cols-5">
+              <SelectField label="Assinatura" value={creditForm.subscriptionId} onChange={(value) => setCreditForm((current) => ({ ...current, subscriptionId: value }))} options={subscriptions.map((item) => [item.id, `${item.planName} - ${formatMinutesLabel(item.remainingMinutes)}`])} />
+              <SelectField label="Tipo" value={creditForm.type} onChange={(value) => setCreditForm((current) => ({ ...current, type: value }))} options={[["credito", "Adicionar crédito"], ["consumo", "Remover crédito"], ["ajuste", "Definir saldo final"], ["estorno", "Estorno"]]} />
+              <TextField label="Minutos" type="number" value={creditForm.minutes} onChange={(value) => setCreditForm((current) => ({ ...current, minutes: Number(value) }))} min="0" />
+              <TextField label="Motivo" value={creditForm.reason} onChange={(value) => setCreditForm((current) => ({ ...current, reason: value }))} />
+              <TextField label="Observações" value={creditForm.notes} onChange={(value) => setCreditForm((current) => ({ ...current, notes: value }))} />
+            </div>
+            <AdminButton type="submit" className="mt-4" icon={CheckCircle2}>Salvar ajuste</AdminButton>
+          </form>
+
+          <div className="grid gap-6 xl:grid-cols-3">
+            <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+              <h3 className="text-lg font-black">Assinaturas</h3>
+              <div className="mt-4 grid gap-3">
+                {subscriptions.map((item) => (
+                  <div key={item.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+                    <strong className="text-white">{item.planName}</strong>
+                    <p>{formatShortDate(item.startDate)} até {formatShortDate(item.expirationDate)}</p>
+                    <p>{formatMinutesLabel(item.usedMinutes)} usados · {formatMinutesLabel(item.remainingMinutes)} restantes</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <AdminButton type="button" variant="secondary" onClick={() => onSubscriptionStatus(item.id, "suspenso")}>Suspender</AdminButton>
+                      <AdminButton type="button" variant="danger" onClick={() => onSubscriptionStatus(item.id, "cancelado")}>Cancelar</AdminButton>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+              <h3 className="text-lg font-black">Histórico de créditos</h3>
+              <div className="mt-4 grid gap-3">
+                {movements.slice(0, 12).map((item) => (
+                  <div key={item.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+                    <strong className="text-white">{item.type}</strong>
+                    <p>{formatMinutesLabel(item.minutes)} · {formatMinutesLabel(item.previousBalance)} para {formatMinutesLabel(item.newBalance)}</p>
+                    <p>{item.reason}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+              <h3 className="text-lg font-black">Reservas</h3>
+              <div className="mt-4 grid gap-3">
+                {reservations.slice(0, 12).map((item) => (
+                  <div key={item.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+                    <strong className="text-white">{item.stationName || "Arena"}</strong>
+                    <p>{item.reservationDate} · {item.startTime} até {item.endTime}</p>
+                    <p>{item.paymentType === "plano" ? "Plano mensal" : "Avulso"} · {item.status}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscription }) {
+  const plans = arenaData.monthlyPlans || [];
+  const [form, setForm] = useState({ id: "", name: "Plano Player", price: 150, includedMinutes: 600, validityDays: 30, description: "", active: true, sortOrder: plans.length + 1 });
+  const [assign, setAssign] = useState({ customerId: "", planId: plans[0]?.id || "", startDate: todayIsoDate(), amountPaid: "", notes: "", keepPreviousBalance: false });
+
+  function edit(plan) {
+    setForm(plan);
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    await onSavePlan(form);
+    setForm({ id: "", name: "", price: "", includedMinutes: 600, validityDays: 30, description: "", active: true, sortOrder: plans.length + 1 });
+  }
+
+  async function assignPlan(event) {
+    event.preventDefault();
+    await onActivateSubscription(assign);
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-3">
+        {plans.map((plan) => (
+          <article key={plan.id} className="rounded-lg border border-white/10 bg-white/5 p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-xl font-black">{plan.name}</h3>
+                <p className="mt-1 text-sm text-slate-400">{formatMinutesLabel(plan.includedMinutes)} · {plan.validityDays} dias</p>
+              </div>
+              <span className={`rounded-full border px-2 py-1 text-xs font-bold ${plan.active ? "border-lime-300/30 text-lime-200" : "border-red-300/30 text-red-100"}`}>{plan.active ? "Ativo" : "Inativo"}</span>
+            </div>
+            <p className="mt-4 text-2xl font-black text-nt-cyan">{formatCurrency(plan.price)}</p>
+            <p className="mt-1 text-sm text-slate-300">Equivale a {formatCurrency(Number(plan.price || 0) / Math.max(1, Number(plan.includedMinutes || 0) / 60))} por hora.</p>
+            <p className="mt-3 text-sm leading-6 text-slate-400">{plan.description}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <AdminButton type="button" variant="secondary" onClick={() => edit(plan)} icon={Pencil}>Editar</AdminButton>
+              <AdminButton type="button" variant="danger" onClick={() => onDeletePlan(plan.id)} icon={Trash2}>Excluir</AdminButton>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <form onSubmit={submit} className="rounded-lg border border-white/10 bg-white/5 p-5">
+          <h3 className="text-lg font-black">{form.id ? "Editar plano mensal" : "Criar plano mensal"}</h3>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <TextField label="Nome" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} required />
+            <TextField label="Preço" value={form.price} onChange={(value) => setForm((current) => ({ ...current, price: value }))} required />
+            <TextField label="Minutos incluídos" type="number" value={form.includedMinutes} onChange={(value) => setForm((current) => ({ ...current, includedMinutes: Number(value) }))} required />
+            <TextField label="Validade em dias" type="number" value={form.validityDays} onChange={(value) => setForm((current) => ({ ...current, validityDays: Number(value) }))} required />
+            <TextField label="Ordem" type="number" value={form.sortOrder} onChange={(value) => setForm((current) => ({ ...current, sortOrder: Number(value) }))} />
+            <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+              <input type="checkbox" checked={form.active !== false} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
+              Plano ativo
+            </label>
+            <div className="md:col-span-2">
+              <TextareaField label="Descrição" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} rows={3} />
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-slate-400">Cálculo automático: {formatCurrency(Number(form.price || 0) / Math.max(1, Number(form.includedMinutes || 0) / 60))} por hora.</p>
+          <AdminButton type="submit" className="mt-4" icon={CheckCircle2}>Salvar plano</AdminButton>
+        </form>
+
+        <form onSubmit={assignPlan} className="rounded-lg border border-white/10 bg-white/5 p-5">
+          <h3 className="text-lg font-black">Atribuir plano a cliente</h3>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <SelectField label="Cliente" value={assign.customerId} onChange={(value) => setAssign((current) => ({ ...current, customerId: value }))} options={[["", "Selecione"], ...(arenaData.customers || []).map((customer) => [customer.id, `${customer.name} - ${customer.phone}`])]} />
+            <SelectField label="Plano" value={assign.planId} onChange={(value) => setAssign((current) => ({ ...current, planId: value }))} options={plans.map((plan) => [plan.id, `${plan.name} - ${formatCurrency(plan.price)}`])} />
+            <TextField label="Data inicial" type="date" value={assign.startDate} onChange={(value) => setAssign((current) => ({ ...current, startDate: value }))} />
+            <TextField label="Valor pago" value={assign.amountPaid} onChange={(value) => setAssign((current) => ({ ...current, amountPaid: value }))} />
+            <label className="flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+              <input type="checkbox" checked={assign.keepPreviousBalance} onChange={(event) => setAssign((current) => ({ ...current, keepPreviousBalance: event.target.checked }))} />
+              Somar saldo anterior
+            </label>
+            <TextField label="Observação" value={assign.notes} onChange={(value) => setAssign((current) => ({ ...current, notes: value }))} />
+          </div>
+          <AdminButton type="submit" className="mt-4" icon={Plus}>Ativar para cliente</AdminButton>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function ArenaPackageForm({ packages, onSave, onDelete }) {
   const [form, setForm] = useState({ id: "", name: "", durationMinutes: 60, price: 20, active: true, sortOrder: packages.length + 1 });
 
@@ -1841,13 +2174,16 @@ function ArenaSettingsForm({ settings, onSave }) {
 
 function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCreateReservation, onCreateBlock, onSaveStation, onDeleteStation, onSaveSettings, onSavePackage, onDeletePackage }) {
   const [filters, setFilters] = useState({ date: todayIsoDate(), status: "", stationId: "", query: "" });
-  const [manual, setManual] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "14:00", durationMinutes: 60, customerName: "", customerPhone: "", notes: "" });
+  const [manual, setManual] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "14:00", durationMinutes: 60, customerName: "", customerPhone: "", notes: "", paymentType: "avulso", subscriptionId: "" });
   const [block, setBlock] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "12:00", endTime: "13:00", reason: "" });
   const [selectedReservationId, setSelectedReservationId] = useState("");
   const stations = arenaData.stations || [];
   const reservations = arenaData.reservations || [];
   const settings = arenaData.settings || {};
   const packages = arenaData.packages || [];
+  const customers = arenaData.customers || [];
+  const subscriptions = arenaData.subscriptions || [];
+  const monthlyPlans = arenaData.monthlyPlans || [];
   const today = todayIsoDate();
 
   useEffect(() => {
@@ -1876,6 +2212,14 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
     .filter((reservation) => ["pendente", "confirmado"].includes(reservation.status))
     .reduce((total, reservation) => total + Number(reservation.totalPrice || 0), 0);
   const selectedReservation = reservations.find((reservation) => reservation.id === selectedReservationId);
+  const manualPhone = String(manual.customerPhone || "").replace(/\D/g, "");
+  const manualCustomer = customers.find((customer) => customer.normalizedPhone === manualPhone || String(customer.phone || "").replace(/\D/g, "") === manualPhone);
+  const manualSubscriptions = subscriptions
+    .filter((subscription) => subscription.customerId === manualCustomer?.id && subscription.status === "ativo" && subscription.expirationDate >= today)
+    .sort((a, b) => String(a.expirationDate).localeCompare(String(b.expirationDate)));
+  const manualSubscription = manualSubscriptions.find((subscription) => subscription.id === manual.subscriptionId) || manualSubscriptions[0];
+  const manualPlan = monthlyPlans.find((plan) => plan.id === manualSubscription?.planId);
+  const manualBalanceAfter = manualSubscription ? Number(manualSubscription.remainingMinutes || 0) - Number(manual.durationMinutes || 0) : 0;
   const openMinute = timeToMinutes(settings.openingTime || "09:00");
   const closeMinute = timeToMinutes(settings.closingTime || "22:00");
   const step = Number(settings.slotMinutes || 30);
@@ -1889,8 +2233,12 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
 
   function submitManual(event) {
     event.preventDefault();
-    onCreateReservation(manual);
-    setManual((current) => ({ ...current, customerName: "", customerPhone: "", notes: "" }));
+    onCreateReservation({
+      ...manual,
+      customerName: manual.customerName || manualCustomer?.name || "",
+      subscriptionId: manual.paymentType === "plano" ? manual.subscriptionId || manualSubscription?.id || "" : "",
+    });
+    setManual((current) => ({ ...current, customerName: "", customerPhone: "", notes: "", paymentType: "avulso", subscriptionId: "" }));
   }
 
   function submitBlock(event) {
@@ -2046,9 +2394,26 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
             <TextField label="Data" type="date" value={manual.reservationDate} onChange={(value) => setManual((current) => ({ ...current, reservationDate: value }))} required />
             <TextField label="Início" type="time" value={manual.startTime} onChange={(value) => setManual((current) => ({ ...current, startTime: value }))} required />
             <SelectField label="Duração" value={manual.durationMinutes} onChange={(value) => setManual((current) => ({ ...current, durationMinutes: Number(value) }))} options={packageOptions} />
-            <TextField label="Nome do cliente" value={manual.customerName} onChange={(value) => setManual((current) => ({ ...current, customerName: value }))} required />
-            <TextField label="WhatsApp" value={manual.customerPhone} onChange={(value) => setManual((current) => ({ ...current, customerPhone: value }))} required />
+            <TextField label="Nome do cliente" value={manual.customerName || manualCustomer?.name || ""} onChange={(value) => setManual((current) => ({ ...current, customerName: value }))} required />
+            <TextField label="WhatsApp" value={manual.customerPhone} onChange={(value) => setManual((current) => ({ ...current, customerPhone: value, subscriptionId: "" }))} required />
             <TextareaField label="Observações" value={manual.notes} onChange={(value) => setManual((current) => ({ ...current, notes: value }))} rows={2} />
+            <SelectField label="Forma de pagamento" value={manual.paymentType} onChange={(value) => setManual((current) => ({ ...current, paymentType: value, subscriptionId: value === "plano" ? manualSubscription?.id || "" : "" }))} options={[["avulso", "Pagamento avulso"], ["plano", "Usar plano mensal"]]} />
+            {manual.paymentType === "plano" ? (
+              <SelectField label="Assinatura" value={manual.subscriptionId || manualSubscription?.id || ""} onChange={(value) => setManual((current) => ({ ...current, subscriptionId: value }))} options={manualSubscriptions.length ? manualSubscriptions.map((subscription) => [subscription.id, `${subscription.planName} - ${formatMinutesLabel(subscription.remainingMinutes)} até ${formatShortDate(subscription.expirationDate)}`]) : [["", "Nenhum plano ativo encontrado"]]} />
+            ) : null}
+            {manual.paymentType === "plano" ? (
+              <div className="rounded-md border border-nt-cyan/20 bg-nt-cyan/10 p-3 text-sm text-slate-200 md:col-span-2">
+                {manualSubscription ? (
+                  <>
+                    <strong>{manualCustomer?.name || "Cliente encontrado"} · {manualPlan?.name || manualSubscription.planName}</strong>
+                    <p className="mt-1 text-slate-300">Saldo antes: {formatMinutesLabel(manualSubscription.remainingMinutes)} · duração: {formatMinutesLabel(manual.durationMinutes)} · saldo previsto: {formatMinutesLabel(Math.max(0, manualBalanceAfter))}</p>
+                    <p className="mt-1 text-slate-400">Vencimento: {formatShortDate(manualSubscription.expirationDate)}</p>
+                  </>
+                ) : (
+                  <span>Nenhum plano ativo localizado para este telefone.</span>
+                )}
+              </div>
+            ) : null}
             <AdminButton type="submit" icon={Plus}>Criar reserva</AdminButton>
           </form>
         </section>
@@ -2072,11 +2437,16 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
         <ArenaSettingsForm settings={settings} onSave={onSaveSettings} />
         <section className="glass rounded-lg p-5 shadow-card">
           <h3 className="text-lg font-black">Planos mensais</h3>
-          <p className="mt-3 text-sm leading-6 text-slate-300">Planos mensais serão configurados na próxima etapa.</p>
-          <div className="mt-4 rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-            <strong className="text-white">Plano Squad</strong>
-            <p className="mt-1">R$ 400,00 por mês · 40 horas por mês · Equivale a R$ 10,00 por hora.</p>
+          <p className="mt-3 text-sm leading-6 text-slate-300">Gerencie planos, clientes e saldo de horas nas telas dedicadas.</p>
+          <div className="mt-4 grid gap-3">
+            {monthlyPlans.map((plan) => (
+              <div key={plan.id} className="rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                <strong className="text-white">{plan.name}</strong>
+                <p className="mt-1">{formatCurrency(plan.price)} por mês · {formatMinutesLabel(plan.includedMinutes)} · equivale a {formatCurrency(Number(plan.price || 0) / Math.max(1, Number(plan.includedMinutes || 0) / 60))} por hora.</p>
+              </div>
+            ))}
           </div>
+          <a href="/admin/arena/planos" className="mt-4 inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan">Abrir planos mensais</a>
         </section>
       </div>
     </div>
@@ -2311,6 +2681,31 @@ export function AdminApp() {
     return runAction(async () => deleteArenaPackage(id), "Pacote da Arena excluído.");
   }
 
+  async function saveArenaCustomerAction(id, customer) {
+    return runAction(async () => saveArenaCustomer({ ...customer, id }), id ? "Cliente atualizado." : "Cliente criado com sucesso.");
+  }
+
+  async function saveArenaMonthlyPlanAction(plan) {
+    return runAction(async () => saveArenaMonthlyPlan(plan), "Plano ativado com sucesso.");
+  }
+
+  async function removeArenaMonthlyPlan(id) {
+    return runAction(async () => deleteArenaMonthlyPlan(id), "Plano mensal excluído.");
+  }
+
+  async function activateArenaSubscriptionAction(payload) {
+    return runAction(async () => activateArenaSubscription(payload), "Plano renovado.");
+  }
+
+  async function adjustArenaCreditsAction(payload) {
+    return runAction(async () => adjustArenaCredits(payload), "Saldo ajustado.");
+  }
+
+  async function changeArenaSubscriptionStatus(id, status) {
+    const message = status === "suspenso" ? "Assinatura suspensa." : status === "cancelado" ? "Assinatura cancelada." : "Assinatura atualizada.";
+    return runAction(async () => updateArenaSubscriptionStatus(id, status), message);
+  }
+
   if (info.page === "login") return <LoginPage />;
 
   const titles = {
@@ -2322,6 +2717,9 @@ export function AdminApp() {
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
     codexAssistant: ["Assistente Codex", "Gere prompts para importacao segura de produtos via SQL."],
     arena: ["Arena Gamer", "Reservas, equipamentos e configurações da Arena."],
+    arenaCustomers: ["Clientes da Arena", "Clientes, saldo de horas, histórico e assinaturas."],
+    arenaCustomerForm: [info.mode === "edit" ? "Detalhes do Cliente" : "Novo Cliente", "Cadastro e gestão de planos da NT Arena Gamer."],
+    arenaPlans: ["Planos Mensais", "Planos Player, Pro e Squad com saldo em minutos."],
     settings: ["Configurações", "Status das integrações do painel."],
     placeholder: [info.title, "Área preparada para uma próxima etapa."],
   };
@@ -2348,6 +2746,26 @@ export function AdminApp() {
       {!loading && info.page === "pcForm" ? <PcFormPage mode={info.mode} pcId={info.id} pcs={pcs} onSave={savePc} error={error} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
       {!loading && info.page === "codexAssistant" ? <CodexAssistantPage categories={categories} /> : null}
+      {!loading && info.page === "arenaCustomers" ? <ArenaCustomersPage arenaData={arenaData} /> : null}
+      {!loading && info.page === "arenaCustomerForm" ? (
+        <ArenaCustomerFormPage
+          mode={info.mode}
+          customerId={info.id}
+          arenaData={arenaData}
+          onSaveCustomer={saveArenaCustomerAction}
+          onActivateSubscription={activateArenaSubscriptionAction}
+          onAdjustCredits={adjustArenaCreditsAction}
+          onSubscriptionStatus={changeArenaSubscriptionStatus}
+        />
+      ) : null}
+      {!loading && info.page === "arenaPlans" ? (
+        <ArenaPlansPage
+          arenaData={arenaData}
+          onSavePlan={saveArenaMonthlyPlanAction}
+          onDeletePlan={removeArenaMonthlyPlan}
+          onActivateSubscription={activateArenaSubscriptionAction}
+        />
+      ) : null}
       {!loading && info.page === "arena" ? (
         <ArenaPage
           arenaData={arenaData}

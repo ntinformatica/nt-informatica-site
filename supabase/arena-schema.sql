@@ -35,6 +35,48 @@ create table if not exists public.arena_packages (
   unique (duration_minutes)
 );
 
+create table if not exists public.arena_customers (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  phone text not null,
+  normalized_phone text not null unique,
+  email text not null default '',
+  notes text not null default '',
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.arena_monthly_plans (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  price numeric(12,2) not null,
+  included_minutes integer not null check (included_minutes > 0),
+  validity_days integer not null default 30 check (validity_days > 0),
+  description text not null default '',
+  active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.arena_customer_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references public.arena_customers(id) on delete cascade,
+  plan_id uuid not null references public.arena_monthly_plans(id),
+  start_date date not null,
+  expiration_date date not null,
+  total_minutes integer not null check (total_minutes >= 0),
+  used_minutes integer not null default 0 check (used_minutes >= 0),
+  remaining_minutes integer not null check (remaining_minutes >= 0),
+  status text not null default 'ativo' check (status in ('ativo', 'expirado', 'suspenso', 'cancelado', 'encerrado')),
+  amount_paid numeric(12,2),
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (expiration_date >= start_date)
+);
+
 create table if not exists public.arena_reservations (
   id uuid primary key default gen_random_uuid(),
   station_id uuid not null references public.arena_stations(id) on delete cascade,
@@ -52,6 +94,33 @@ create table if not exists public.arena_reservations (
   check (end_time > start_time)
 );
 
+alter table public.arena_reservations
+  add column if not exists customer_id uuid references public.arena_customers(id) on delete set null,
+  add column if not exists subscription_id uuid references public.arena_customer_subscriptions(id) on delete set null,
+  add column if not exists payment_type text not null default 'avulso',
+  add column if not exists credits_consumed_minutes integer not null default 0,
+  add column if not exists credits_processed boolean not null default false;
+
+alter table public.arena_reservations
+  drop constraint if exists arena_reservations_payment_type_check;
+
+alter table public.arena_reservations
+  add constraint arena_reservations_payment_type_check check (payment_type in ('avulso', 'plano'));
+
+create table if not exists public.arena_credit_movements (
+  id uuid primary key default gen_random_uuid(),
+  subscription_id uuid not null references public.arena_customer_subscriptions(id) on delete cascade,
+  customer_id uuid not null references public.arena_customers(id) on delete cascade,
+  reservation_id uuid references public.arena_reservations(id) on delete set null,
+  type text not null check (type in ('credito', 'consumo', 'ajuste', 'estorno', 'renovacao')),
+  minutes integer not null,
+  previous_balance integer not null check (previous_balance >= 0),
+  new_balance integer not null check (new_balance >= 0),
+  reason text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now()
+);
+
 create index if not exists arena_stations_active_idx
   on public.arena_stations(active, sort_order);
 
@@ -60,6 +129,15 @@ create index if not exists arena_reservations_lookup_idx
 
 create index if not exists arena_packages_active_idx
   on public.arena_packages(active, sort_order);
+
+create index if not exists arena_customers_phone_idx
+  on public.arena_customers(normalized_phone);
+
+create index if not exists arena_subscriptions_customer_status_idx
+  on public.arena_customer_subscriptions(customer_id, status, expiration_date);
+
+create index if not exists arena_credit_movements_customer_idx
+  on public.arena_credit_movements(customer_id, created_at desc);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -89,6 +167,21 @@ for each row execute function public.set_updated_at();
 drop trigger if exists arena_packages_set_updated_at on public.arena_packages;
 create trigger arena_packages_set_updated_at
 before update on public.arena_packages
+for each row execute function public.set_updated_at();
+
+drop trigger if exists arena_customers_set_updated_at on public.arena_customers;
+create trigger arena_customers_set_updated_at
+before update on public.arena_customers
+for each row execute function public.set_updated_at();
+
+drop trigger if exists arena_monthly_plans_set_updated_at on public.arena_monthly_plans;
+create trigger arena_monthly_plans_set_updated_at
+before update on public.arena_monthly_plans
+for each row execute function public.set_updated_at();
+
+drop trigger if exists arena_customer_subscriptions_set_updated_at on public.arena_customer_subscriptions;
+create trigger arena_customer_subscriptions_set_updated_at
+before update on public.arena_customer_subscriptions
 for each row execute function public.set_updated_at();
 
 insert into public.arena_settings (
@@ -128,6 +221,513 @@ set
   sort_order = excluded.sort_order,
   updated_at = now();
 
+insert into public.arena_monthly_plans (name, price, included_minutes, validity_days, description, active, sort_order)
+values
+  ('Plano Player', 150.00, 600, 30, '10 horas mensais para jogar na NT Arena Gamer, com validade de 30 dias.', true, 1),
+  ('Plano Pro', 250.00, 1200, 30, '20 horas mensais para jogar na NT Arena Gamer, com validade de 30 dias.', true, 2),
+  ('Plano Squad', 400.00, 2400, 30, '40 horas mensais para jogar na NT Arena Gamer, equivalente a R$ 10,00 por hora.', true, 3)
+on conflict (name) do update
+set
+  price = excluded.price,
+  included_minutes = excluded.included_minutes,
+  validity_days = excluded.validity_days,
+  description = excluded.description,
+  active = excluded.active,
+  sort_order = excluded.sort_order,
+  updated_at = now();
+
+create or replace function public.normalize_arena_phone(p_phone text)
+returns text
+language sql
+immutable
+as $$
+  select regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
+$$;
+
+create or replace function public.create_or_find_arena_customer(
+  p_name text,
+  p_phone text,
+  p_email text default '',
+  p_notes text default ''
+)
+returns setof public.arena_customers
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_phone text;
+  v_customer public.arena_customers;
+begin
+  v_phone := public.normalize_arena_phone(p_phone);
+
+  if nullif(trim(coalesce(p_name, '')), '') is null then
+    raise exception 'Nome obrigatório.';
+  end if;
+
+  if nullif(v_phone, '') is null then
+    raise exception 'WhatsApp obrigatório.';
+  end if;
+
+  insert into public.arena_customers (name, phone, normalized_phone, email, notes, active)
+  values (
+    trim(p_name),
+    trim(p_phone),
+    v_phone,
+    trim(coalesce(p_email, '')),
+    trim(coalesce(p_notes, '')),
+    true
+  )
+  on conflict (normalized_phone) do update
+  set
+    name = case when nullif(trim(excluded.name), '') is null then arena_customers.name else excluded.name end,
+    phone = excluded.phone,
+    email = case when nullif(trim(excluded.email), '') is null then arena_customers.email else excluded.email end,
+    notes = case when nullif(trim(excluded.notes), '') is null then arena_customers.notes else excluded.notes end,
+    updated_at = now()
+  returning * into v_customer;
+
+  return next v_customer;
+end;
+$$;
+
+drop function if exists public.find_arena_customer_plan_by_phone(text);
+
+create or replace function public.find_arena_customer_plan_by_phone(p_phone text)
+returns table (
+  has_active_plan boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_phone text;
+begin
+  v_phone := public.normalize_arena_phone(p_phone);
+
+  return query
+  select
+    (
+      customer.active = true
+      and plan.active = true
+      and subscription.status = 'ativo'
+      and subscription.expiration_date >= current_date
+      and subscription.remaining_minutes > 0
+    ) as has_active_plan
+  from public.arena_customers customer
+  join public.arena_customer_subscriptions subscription on subscription.customer_id = customer.id
+  join public.arena_monthly_plans plan on plan.id = subscription.plan_id
+  where customer.normalized_phone = v_phone
+  order by subscription.expiration_date desc, subscription.created_at desc
+  limit 1;
+end;
+$$;
+
+create or replace function public.activate_arena_subscription(
+  p_customer_id uuid,
+  p_plan_id uuid,
+  p_start_date date default current_date,
+  p_amount_paid numeric default null,
+  p_notes text default '',
+  p_keep_previous_balance boolean default false
+)
+returns setof public.arena_customer_subscriptions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_customer public.arena_customers;
+  v_plan public.arena_monthly_plans;
+  v_previous_remaining integer := 0;
+  v_subscription public.arena_customer_subscriptions;
+  v_total integer;
+begin
+  select * into v_customer from public.arena_customers where id = p_customer_id and active = true;
+  if not found then
+    raise exception 'Cliente não encontrado ou inativo.';
+  end if;
+
+  select * into v_plan from public.arena_monthly_plans where id = p_plan_id and active = true;
+  if not found then
+    raise exception 'Plano mensal não encontrado ou inativo.';
+  end if;
+
+  if p_keep_previous_balance then
+    select coalesce(sum(remaining_minutes), 0)
+      into v_previous_remaining
+      from public.arena_customer_subscriptions
+      where customer_id = p_customer_id
+        and status = 'ativo'
+        and expiration_date >= current_date;
+  end if;
+
+  update public.arena_customer_subscriptions
+    set status = 'encerrado'
+    where customer_id = p_customer_id
+      and status = 'ativo'
+      and id is not null;
+
+  v_total := v_plan.included_minutes + coalesce(v_previous_remaining, 0);
+
+  insert into public.arena_customer_subscriptions (
+    customer_id,
+    plan_id,
+    start_date,
+    expiration_date,
+    total_minutes,
+    used_minutes,
+    remaining_minutes,
+    status,
+    amount_paid,
+    notes
+  )
+  values (
+    p_customer_id,
+    p_plan_id,
+    coalesce(p_start_date, current_date),
+    coalesce(p_start_date, current_date) + (v_plan.validity_days - 1),
+    v_total,
+    0,
+    v_total,
+    'ativo',
+    coalesce(p_amount_paid, v_plan.price),
+    trim(coalesce(p_notes, ''))
+  )
+  returning * into v_subscription;
+
+  insert into public.arena_credit_movements (
+    subscription_id,
+    customer_id,
+    type,
+    minutes,
+    previous_balance,
+    new_balance,
+    reason,
+    notes
+  )
+  values (
+    v_subscription.id,
+    p_customer_id,
+    case when v_previous_remaining > 0 then 'renovacao' else 'credito' end,
+    v_total,
+    v_previous_remaining,
+    v_total,
+    'Ativação de plano mensal',
+    trim(coalesce(p_notes, ''))
+  );
+
+  return next v_subscription;
+end;
+$$;
+
+create or replace function public.adjust_arena_credits(
+  p_subscription_id uuid,
+  p_type text,
+  p_minutes integer,
+  p_reason text default '',
+  p_notes text default ''
+)
+returns setof public.arena_customer_subscriptions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_subscription public.arena_customer_subscriptions;
+  v_previous integer;
+  v_new integer;
+  v_delta integer;
+  v_type text;
+begin
+  if p_minutes is null or p_minutes < 0 then
+    raise exception 'Informe uma quantidade válida de minutos.';
+  end if;
+
+  v_type := coalesce(p_type, 'ajuste');
+
+  select * into v_subscription
+    from public.arena_customer_subscriptions
+    where id = p_subscription_id
+    for update;
+
+  if not found then
+    raise exception 'Assinatura não encontrada.';
+  end if;
+
+  v_previous := v_subscription.remaining_minutes;
+
+  if v_type in ('credito', 'estorno', 'renovacao') then
+    v_new := v_previous + p_minutes;
+    v_delta := p_minutes;
+  elsif v_type = 'consumo' then
+    if v_previous < p_minutes then
+      raise exception 'Saldo de horas insuficiente para esta reserva.';
+    end if;
+    v_new := v_previous - p_minutes;
+    v_delta := p_minutes;
+  else
+    v_new := p_minutes;
+    v_delta := abs(v_new - v_previous);
+  end if;
+
+  if v_new < 0 then
+    raise exception 'Saldo de horas insuficiente para esta reserva.';
+  end if;
+
+  update public.arena_customer_subscriptions
+    set
+      remaining_minutes = v_new,
+      used_minutes = greatest(0, total_minutes - v_new)
+    where id = p_subscription_id
+    returning * into v_subscription;
+
+  insert into public.arena_credit_movements (
+    subscription_id,
+    customer_id,
+    type,
+    minutes,
+    previous_balance,
+    new_balance,
+    reason,
+    notes
+  )
+  values (
+    v_subscription.id,
+    v_subscription.customer_id,
+    case when v_type in ('credito', 'consumo', 'ajuste', 'estorno', 'renovacao') then v_type else 'ajuste' end,
+    v_delta,
+    v_previous,
+    v_new,
+    trim(coalesce(p_reason, 'Ajuste manual de saldo')),
+    trim(coalesce(p_notes, ''))
+  );
+
+  return next v_subscription;
+end;
+$$;
+
+create or replace function public.consume_arena_credits(p_reservation_id uuid)
+returns setof public.arena_reservations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reservation public.arena_reservations;
+  v_subscription public.arena_customer_subscriptions;
+  v_customer public.arena_customers;
+  v_plan public.arena_monthly_plans;
+  v_previous integer;
+  v_new integer;
+begin
+  select * into v_reservation
+    from public.arena_reservations
+    where id = p_reservation_id
+    for update;
+
+  if not found then
+    raise exception 'Reserva não encontrada.';
+  end if;
+
+  if v_reservation.payment_type <> 'plano' then
+    return next v_reservation;
+    return;
+  end if;
+
+  if v_reservation.credits_processed then
+    return next v_reservation;
+    return;
+  end if;
+
+  select * into v_subscription
+    from public.arena_customer_subscriptions
+    where id = v_reservation.subscription_id
+    for update;
+
+  if not found then
+    raise exception 'Assinatura não encontrada.';
+  end if;
+
+  select * into v_customer from public.arena_customers where id = v_subscription.customer_id;
+  select * into v_plan from public.arena_monthly_plans where id = v_subscription.plan_id;
+
+  if not coalesce(v_customer.active, false) then
+    raise exception 'Cliente inativo.';
+  end if;
+
+  if not coalesce(v_plan.active, false) then
+    raise exception 'Plano mensal inativo.';
+  end if;
+
+  if v_subscription.status <> 'ativo' then
+    raise exception 'Assinatura não está ativa.';
+  end if;
+
+  if v_subscription.expiration_date < current_date then
+    raise exception 'Plano mensal expirado.';
+  end if;
+
+  if v_subscription.remaining_minutes < v_reservation.duration_minutes then
+    raise exception 'Saldo de horas insuficiente para esta reserva.';
+  end if;
+
+  v_previous := v_subscription.remaining_minutes;
+  v_new := v_previous - v_reservation.duration_minutes;
+
+  update public.arena_customer_subscriptions
+    set
+      remaining_minutes = v_new,
+      used_minutes = used_minutes + v_reservation.duration_minutes
+    where id = v_subscription.id;
+
+  insert into public.arena_credit_movements (
+    subscription_id,
+    customer_id,
+    reservation_id,
+    type,
+    minutes,
+    previous_balance,
+    new_balance,
+    reason
+  )
+  values (
+    v_subscription.id,
+    v_subscription.customer_id,
+    v_reservation.id,
+    'consumo',
+    v_reservation.duration_minutes,
+    v_previous,
+    v_new,
+    'Consumo de reserva confirmada'
+  );
+
+  update public.arena_reservations
+    set
+      credits_consumed_minutes = v_reservation.duration_minutes,
+      credits_processed = true
+    where id = v_reservation.id
+    returning * into v_reservation;
+
+  return next v_reservation;
+end;
+$$;
+
+create or replace function public.refund_arena_credits(p_reservation_id uuid)
+returns setof public.arena_reservations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reservation public.arena_reservations;
+  v_subscription public.arena_customer_subscriptions;
+  v_previous integer;
+  v_new integer;
+  v_minutes integer;
+begin
+  select * into v_reservation
+    from public.arena_reservations
+    where id = p_reservation_id
+    for update;
+
+  if not found then
+    raise exception 'Reserva não encontrada.';
+  end if;
+
+  if v_reservation.payment_type <> 'plano' or not v_reservation.credits_processed then
+    return next v_reservation;
+    return;
+  end if;
+
+  v_minutes := greatest(v_reservation.credits_consumed_minutes, v_reservation.duration_minutes);
+
+  select * into v_subscription
+    from public.arena_customer_subscriptions
+    where id = v_reservation.subscription_id
+    for update;
+
+  if not found then
+    raise exception 'Assinatura não encontrada.';
+  end if;
+
+  v_previous := v_subscription.remaining_minutes;
+  v_new := v_previous + v_minutes;
+
+  update public.arena_customer_subscriptions
+    set
+      remaining_minutes = v_new,
+      used_minutes = greatest(0, used_minutes - v_minutes)
+    where id = v_subscription.id;
+
+  insert into public.arena_credit_movements (
+    subscription_id,
+    customer_id,
+    reservation_id,
+    type,
+    minutes,
+    previous_balance,
+    new_balance,
+    reason
+  )
+  values (
+    v_subscription.id,
+    v_subscription.customer_id,
+    v_reservation.id,
+    'estorno',
+    v_minutes,
+    v_previous,
+    v_new,
+    'Estorno por cancelamento de reserva'
+  );
+
+  update public.arena_reservations
+    set
+      credits_consumed_minutes = 0,
+      credits_processed = false
+    where id = v_reservation.id
+    returning * into v_reservation;
+
+  return next v_reservation;
+end;
+$$;
+
+create or replace function public.update_arena_reservation_status(
+  p_reservation_id uuid,
+  p_status text
+)
+returns setof public.arena_reservations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reservation public.arena_reservations;
+begin
+  if p_status not in ('pendente', 'confirmado', 'cancelado', 'concluido', 'bloqueado') then
+    raise exception 'Status inválido.';
+  end if;
+
+  if p_status = 'confirmado' then
+    perform public.consume_arena_credits(p_reservation_id);
+  elsif p_status = 'cancelado' then
+    perform public.refund_arena_credits(p_reservation_id);
+  end if;
+
+  update public.arena_reservations
+    set status = p_status
+    where id = p_reservation_id
+    returning * into v_reservation;
+
+  if not found then
+    raise exception 'Reserva não encontrada.';
+  end if;
+
+  return next v_reservation;
+end;
+$$;
+
 create or replace function public.create_arena_reservation(
   p_station_id uuid,
   p_customer_name text,
@@ -135,7 +735,9 @@ create or replace function public.create_arena_reservation(
   p_reservation_date date,
   p_start_time time,
   p_duration_minutes integer,
-  p_notes text default null
+  p_notes text default null,
+  p_payment_type text default 'avulso',
+  p_subscription_id uuid default null
 )
 returns setof public.arena_reservations
 language plpgsql
@@ -150,6 +752,8 @@ declare
   v_row public.arena_reservations;
   v_day integer;
   v_package public.arena_packages;
+  v_customer public.arena_customers;
+  v_subscription public.arena_customer_subscriptions;
 begin
   if p_station_id is null then
     raise exception 'Equipamento obrigatório.';
@@ -216,6 +820,58 @@ begin
     raise exception 'Horário indisponível.';
   end if;
 
+  if coalesce(p_payment_type, 'avulso') = 'plano' then
+    select * into v_customer
+      from public.create_or_find_arena_customer(p_customer_name, p_customer_phone);
+
+    if p_subscription_id is not null then
+      select * into v_subscription
+        from public.arena_customer_subscriptions
+        where id = p_subscription_id
+          and customer_id = v_customer.id;
+    else
+      select subscription.*
+        into v_subscription
+        from public.arena_customer_subscriptions subscription
+        join public.arena_monthly_plans plan on plan.id = subscription.plan_id
+        where subscription.customer_id = v_customer.id
+          and subscription.status = 'ativo'
+          and subscription.expiration_date >= current_date
+          and subscription.remaining_minutes >= p_duration_minutes
+          and plan.active = true
+        order by subscription.expiration_date asc, subscription.created_at desc
+        limit 1;
+    end if;
+
+    if not found then
+      raise exception 'Plano mensal expirado ou saldo de horas insuficiente para esta reserva.';
+    end if;
+
+    if not exists (
+      select 1
+        from public.arena_monthly_plans plan
+        where plan.id = v_subscription.plan_id
+          and plan.active = true
+    ) then
+      raise exception 'Plano mensal inativo.';
+    end if;
+
+    if v_subscription.status <> 'ativo' then
+      raise exception 'Assinatura não está ativa.';
+    end if;
+
+    if v_subscription.expiration_date < current_date then
+      raise exception 'Plano mensal expirado.';
+    end if;
+
+    if v_subscription.remaining_minutes < p_duration_minutes then
+      raise exception 'Saldo de horas insuficiente para esta reserva.';
+    end if;
+  else
+    select * into v_customer
+      from public.create_or_find_arena_customer(p_customer_name, p_customer_phone);
+  end if;
+
   select *
     into v_package
     from public.arena_packages
@@ -240,7 +896,10 @@ begin
     duration_minutes,
     total_price,
     status,
-    notes
+    notes,
+    customer_id,
+    subscription_id,
+    payment_type
   )
   values (
     p_station_id,
@@ -252,7 +911,10 @@ begin
     p_duration_minutes,
     v_total_price,
     'pendente',
-    nullif(trim(coalesce(p_notes, '')), '')
+    nullif(trim(coalesce(p_notes, '')), ''),
+    v_customer.id,
+    case when coalesce(p_payment_type, 'avulso') = 'plano' then v_subscription.id else null end,
+    case when coalesce(p_payment_type, 'avulso') = 'plano' then 'plano' else 'avulso' end
   )
   returning * into v_row;
 
@@ -342,3 +1004,7 @@ alter table public.arena_stations disable row level security;
 alter table public.arena_settings disable row level security;
 alter table public.arena_reservations disable row level security;
 alter table public.arena_packages disable row level security;
+alter table public.arena_customers disable row level security;
+alter table public.arena_monthly_plans disable row level security;
+alter table public.arena_customer_subscriptions disable row level security;
+alter table public.arena_credit_movements disable row level security;

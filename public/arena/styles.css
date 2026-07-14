@@ -337,6 +337,51 @@ h2 {
   box-shadow: 0 8px 24px rgba(49, 214, 255, .16);
 }
 
+.payment-options {
+  display: grid;
+  gap: 10px;
+}
+
+.payment-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .05);
+  color: rgba(255, 255, 255, .84);
+  font-size: .9rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.payment-option.active {
+  border-color: rgba(49, 214, 255, .55);
+  background: rgba(49, 214, 255, .12);
+  color: #fff;
+}
+
+.payment-option.is-hidden {
+  display: none;
+}
+
+.plan-status {
+  margin: -4px 0 0;
+  color: rgba(255, 255, 255, .62);
+  font-size: .82rem;
+  line-height: 1.5;
+}
+
+.plan-status.available {
+  color: #b7f7d2;
+}
+
+.plan-status.warning {
+  color: #ffe8a3;
+}
+
 .tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

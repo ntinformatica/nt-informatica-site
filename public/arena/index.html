@@ -125,8 +125,20 @@
 
           <div class="payment-row">
             <span>Pagamento</span>
-            <strong>Pix/loja</strong>
+            <strong id="paymentSummary">Pix/loja</strong>
           </div>
+
+          <div class="payment-options" id="paymentOptions">
+            <label class="payment-option active">
+              <input type="radio" name="paymentType" value="avulso" checked>
+              <span>Pagamento avulso</span>
+            </label>
+            <label class="payment-option is-hidden" id="planPaymentOption">
+              <input type="radio" name="paymentType" value="plano">
+              <span>Usar plano mensal</span>
+            </label>
+          </div>
+          <p class="plan-status" id="planStatus">Digite o WhatsApp para verificar plano mensal disponível.</p>
 
           <button class="primary-button reserve-button" type="submit">Reservar</button>
           <p class="fine-print">Solicitação de reserva: a NT Informática confirma o horário antes de considerar a reserva finalizada.</p>

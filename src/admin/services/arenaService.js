@@ -6,6 +6,14 @@ const localArenaKey = "nt-admin-arena-local-v1";
 const emptyArenaData = {
   stations: [],
   reservations: [],
+  customers: [],
+  monthlyPlans: [
+    { id: "local-plan-player", name: "Plano Player", price: 150, includedMinutes: 600, validityDays: 30, description: "10 horas mensais para jogar na NT Arena Gamer, com validade de 30 dias.", active: true, sortOrder: 1 },
+    { id: "local-plan-pro", name: "Plano Pro", price: 250, includedMinutes: 1200, validityDays: 30, description: "20 horas mensais para jogar na NT Arena Gamer, com validade de 30 dias.", active: true, sortOrder: 2 },
+    { id: "local-plan-squad", name: "Plano Squad", price: 400, includedMinutes: 2400, validityDays: 30, description: "40 horas mensais para jogar na NT Arena Gamer, equivalente a R$ 10,00 por hora.", active: true, sortOrder: 3 },
+  ],
+  subscriptions: [],
+  creditMovements: [],
   packages: [
     { id: "local-package-60", name: "1 Hora", durationMinutes: 60, price: 20, active: true, sortOrder: 10 },
     { id: "local-package-120", name: "2 Horas", durationMinutes: 120, price: 40, active: true, sortOrder: 20 },
@@ -49,6 +57,10 @@ function timeFromMinutes(value) {
   const hour = Math.floor(value / 60);
   const minute = value % 60;
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+export function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
 function moneyNumber(value, fallback = 0) {
@@ -106,6 +118,100 @@ function fromPackage(row = {}) {
   };
 }
 
+function fromCustomer(row = {}) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    phone: row.phone || "",
+    normalizedPhone: row.normalized_phone || normalizePhone(row.phone),
+    email: row.email || "",
+    notes: row.notes || "",
+    active: row.active !== false,
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+function toCustomer(customer = {}) {
+  return {
+    name: customer.name || "",
+    phone: customer.phone || "",
+    normalized_phone: normalizePhone(customer.phone),
+    email: customer.email || "",
+    notes: customer.notes || "",
+    active: customer.active !== false,
+  };
+}
+
+function fromMonthlyPlan(row = {}) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    price: Number(row.price || 0),
+    includedMinutes: Number(row.included_minutes || 0),
+    validityDays: Number(row.validity_days || 30),
+    description: row.description || "",
+    active: row.active !== false,
+    sortOrder: Number(row.sort_order || 0),
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+function toMonthlyPlan(plan = {}) {
+  return {
+    name: plan.name || "",
+    price: moneyNumber(plan.price, 0),
+    included_minutes: Number(plan.includedMinutes || 0),
+    validity_days: Number(plan.validityDays || 30),
+    description: plan.description || "",
+    active: plan.active !== false,
+    sort_order: Number(plan.sortOrder || 0),
+  };
+}
+
+function fromSubscription(row = {}, customers = [], plans = []) {
+  const customer = customers.find((item) => item.id === row.customer_id);
+  const plan = plans.find((item) => item.id === row.plan_id);
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    customerName: customer?.name || row.customer_name || "",
+    customerPhone: customer?.phone || row.customer_phone || "",
+    planId: row.plan_id,
+    planName: plan?.name || row.plan_name || "",
+    startDate: row.start_date || "",
+    expirationDate: row.expiration_date || "",
+    totalMinutes: Number(row.total_minutes || 0),
+    usedMinutes: Number(row.used_minutes || 0),
+    remainingMinutes: Number(row.remaining_minutes || 0),
+    status: row.status || "ativo",
+    amountPaid: Number(row.amount_paid || 0),
+    notes: row.notes || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+function fromCreditMovement(row = {}, customers = [], subscriptions = []) {
+  const customer = customers.find((item) => item.id === row.customer_id);
+  const subscription = subscriptions.find((item) => item.id === row.subscription_id);
+  return {
+    id: row.id,
+    subscriptionId: row.subscription_id,
+    customerId: row.customer_id,
+    customerName: customer?.name || subscription?.customerName || "",
+    reservationId: row.reservation_id || "",
+    type: row.type || "ajuste",
+    minutes: Number(row.minutes || 0),
+    previousBalance: Number(row.previous_balance || 0),
+    newBalance: Number(row.new_balance || 0),
+    reason: row.reason || "",
+    notes: row.notes || "",
+    createdAt: row.created_at || "",
+  };
+}
+
 function toPackage(pack = {}) {
   return {
     name: pack.name || "",
@@ -143,6 +249,11 @@ function fromReservation(row = {}, stations = []) {
     totalPrice: Number(row.total_price || 0),
     status: row.status || "pendente",
     notes: row.notes || "",
+    customerId: row.customer_id || "",
+    subscriptionId: row.subscription_id || "",
+    paymentType: row.payment_type || "avulso",
+    creditsConsumedMinutes: Number(row.credits_consumed_minutes || 0),
+    creditsProcessed: row.credits_processed === true,
     createdAt: row.created_at || "",
     updatedAt: row.updated_at || "",
   };
@@ -151,19 +262,32 @@ function fromReservation(row = {}, stations = []) {
 export async function listArenaData() {
   if (!isSupabaseConfigured) return localData();
 
-  const [stationRows, settingsRows, packageRows] = await Promise.all([
+  const [stationRows, settingsRows, packageRows, customerRows, planRows] = await Promise.all([
     supabaseRequest("/arena_stations?select=*&order=sort_order.asc,name.asc"),
     supabaseRequest("/arena_settings?select=*&order=created_at.asc&limit=1"),
     supabaseRequest("/arena_packages?select=*&order=sort_order.asc,duration_minutes.asc"),
+    supabaseRequest("/arena_customers?select=*&order=name.asc"),
+    supabaseRequest("/arena_monthly_plans?select=*&order=sort_order.asc,name.asc"),
   ]);
 
   const stations = (stationRows || []).map(fromStation);
-  const reservationRows = await supabaseRequest("/arena_reservations?select=*&order=reservation_date.desc,start_time.asc&limit=250");
+  const customers = (customerRows || []).map(fromCustomer);
+  const monthlyPlans = (planRows || []).map(fromMonthlyPlan);
+  const [subscriptionRows, movementRows, reservationRows] = await Promise.all([
+    supabaseRequest("/arena_customer_subscriptions?select=*&order=created_at.desc&limit=500"),
+    supabaseRequest("/arena_credit_movements?select=*&order=created_at.desc&limit=500"),
+    supabaseRequest("/arena_reservations?select=*&order=reservation_date.desc,start_time.asc&limit=500"),
+  ]);
+  const subscriptions = (subscriptionRows || []).map((row) => fromSubscription(row, customers, monthlyPlans));
   const settings = fromSettings(settingsRows?.[0]);
 
   return {
     stations,
     reservations: (reservationRows || []).map((row) => fromReservation(row, stations)),
+    customers,
+    monthlyPlans,
+    subscriptions,
+    creditMovements: (movementRows || []).map((row) => fromCreditMovement(row, customers, subscriptions)),
     packages: (packageRows || []).map(fromPackage),
     settings,
     localMode: false,
@@ -268,6 +392,190 @@ export async function deleteArenaPackage(id) {
   return supabaseRequest(`/arena_packages?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
+export async function saveArenaCustomer(customer) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    const normalizedPhone = normalizePhone(customer.phone);
+    const saved = {
+      id: customer.id || `customer-${Date.now()}`,
+      ...customer,
+      normalizedPhone,
+      active: customer.active !== false,
+    };
+    data.customers = customer.id
+      ? data.customers.map((item) => (item.id === customer.id ? saved : item))
+      : [saved, ...data.customers.filter((item) => item.normalizedPhone !== normalizedPhone)];
+    return saveLocalData(data);
+  }
+
+  if (customer.id) {
+    return supabaseRequest(`/arena_customers?id=eq.${encodeURIComponent(customer.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(toCustomer(customer)),
+    });
+  }
+
+  return supabaseRequest("/rpc/create_or_find_arena_customer", {
+    method: "POST",
+    body: JSON.stringify({
+      p_name: customer.name,
+      p_phone: customer.phone,
+      p_email: customer.email || "",
+      p_notes: customer.notes || "",
+    }),
+  });
+}
+
+export async function saveArenaMonthlyPlan(plan) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    const saved = {
+      id: plan.id || `monthly-plan-${Date.now()}`,
+      ...plan,
+      price: moneyNumber(plan.price, 0),
+      includedMinutes: Number(plan.includedMinutes || 0),
+      validityDays: Number(plan.validityDays || 30),
+      active: plan.active !== false,
+      sortOrder: Number(plan.sortOrder || 0),
+    };
+    data.monthlyPlans = plan.id
+      ? data.monthlyPlans.map((item) => (item.id === plan.id ? saved : item))
+      : [...data.monthlyPlans, saved];
+    return saveLocalData(data);
+  }
+
+  if (plan.id) {
+    return supabaseRequest(`/arena_monthly_plans?id=eq.${encodeURIComponent(plan.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(toMonthlyPlan(plan)),
+    });
+  }
+
+  return supabaseRequest("/arena_monthly_plans", {
+    method: "POST",
+    body: JSON.stringify(toMonthlyPlan(plan)),
+  });
+}
+
+export async function deleteArenaMonthlyPlan(id) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    data.monthlyPlans = data.monthlyPlans.filter((plan) => plan.id !== id);
+    return saveLocalData(data);
+  }
+
+  return supabaseRequest(`/arena_monthly_plans?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function activateArenaSubscription(payload) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    const plan = data.monthlyPlans.find((item) => item.id === payload.planId);
+    if (!plan) throw new Error("Plano mensal não encontrado.");
+    const startDate = payload.startDate || new Date().toISOString().slice(0, 10);
+    const expiration = new Date(`${startDate}T00:00:00`);
+    expiration.setDate(expiration.getDate() + Number(plan.validityDays || 30) - 1);
+    const saved = {
+      id: `subscription-${Date.now()}`,
+      customerId: payload.customerId,
+      planId: plan.id,
+      planName: plan.name,
+      startDate,
+      expirationDate: expiration.toISOString().slice(0, 10),
+      totalMinutes: Number(plan.includedMinutes || 0),
+      usedMinutes: 0,
+      remainingMinutes: Number(plan.includedMinutes || 0),
+      status: "ativo",
+      amountPaid: moneyNumber(payload.amountPaid, plan.price),
+      notes: payload.notes || "",
+    };
+    data.subscriptions = [saved, ...data.subscriptions.map((item) => (
+      item.customerId === payload.customerId && item.status === "ativo" ? { ...item, status: "encerrado" } : item
+    ))];
+    data.creditMovements = [{
+      id: `movement-${Date.now()}`,
+      subscriptionId: saved.id,
+      customerId: payload.customerId,
+      type: "credito",
+      minutes: saved.totalMinutes,
+      previousBalance: 0,
+      newBalance: saved.totalMinutes,
+      reason: "Ativação de plano mensal",
+      notes: payload.notes || "",
+      createdAt: new Date().toISOString(),
+    }, ...data.creditMovements];
+    return saveLocalData(data);
+  }
+
+  return supabaseRequest("/rpc/activate_arena_subscription", {
+    method: "POST",
+    body: JSON.stringify({
+      p_customer_id: payload.customerId,
+      p_plan_id: payload.planId,
+      p_start_date: payload.startDate || null,
+      p_amount_paid: moneyNumber(payload.amountPaid, null),
+      p_notes: payload.notes || "",
+      p_keep_previous_balance: payload.keepPreviousBalance === true,
+    }),
+  });
+}
+
+export async function updateArenaSubscriptionStatus(subscriptionId, status) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    data.subscriptions = data.subscriptions.map((item) => (item.id === subscriptionId ? { ...item, status } : item));
+    return saveLocalData(data);
+  }
+
+  return supabaseRequest(`/arena_customer_subscriptions?id=eq.${encodeURIComponent(subscriptionId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function adjustArenaCredits(payload) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    const subscription = data.subscriptions.find((item) => item.id === payload.subscriptionId);
+    if (!subscription) throw new Error("Assinatura não encontrada.");
+    const previousBalance = Number(subscription.remainingMinutes || 0);
+    const minutes = Number(payload.minutes || 0);
+    let newBalance = minutes;
+    if (payload.type === "credito" || payload.type === "estorno") newBalance = previousBalance + minutes;
+    if (payload.type === "consumo") newBalance = previousBalance - minutes;
+    if (newBalance < 0) throw new Error("Saldo de horas insuficiente para esta reserva.");
+    data.subscriptions = data.subscriptions.map((item) => (
+      item.id === subscription.id
+        ? { ...item, remainingMinutes: newBalance, usedMinutes: Math.max(0, Number(item.totalMinutes || 0) - newBalance) }
+        : item
+    ));
+    data.creditMovements = [{
+      id: `movement-${Date.now()}`,
+      subscriptionId: subscription.id,
+      customerId: subscription.customerId,
+      type: payload.type || "ajuste",
+      minutes: Math.abs(newBalance - previousBalance),
+      previousBalance,
+      newBalance,
+      reason: payload.reason || "Ajuste manual de saldo",
+      notes: payload.notes || "",
+      createdAt: new Date().toISOString(),
+    }, ...data.creditMovements];
+    return saveLocalData(data);
+  }
+
+  return supabaseRequest("/rpc/adjust_arena_credits", {
+    method: "POST",
+    body: JSON.stringify({
+      p_subscription_id: payload.subscriptionId,
+      p_type: payload.type || "ajuste",
+      p_minutes: Number(payload.minutes || 0),
+      p_reason: payload.reason || "",
+      p_notes: payload.notes || "",
+    }),
+  });
+}
+
 export async function createArenaReservation(reservation) {
   if (!isSupabaseConfigured) {
     const data = localData();
@@ -282,6 +590,10 @@ export async function createArenaReservation(reservation) {
         durationMinutes,
         totalPrice: arenaPackage ? Number(arenaPackage.price || 0) : (durationMinutes / 60) * Number(data.settings.pricePerHour || 20),
         status: "pendente",
+        paymentType: reservation.paymentType || "avulso",
+        subscriptionId: reservation.subscriptionId || "",
+        creditsConsumedMinutes: 0,
+        creditsProcessed: false,
       },
       ...data.reservations,
     ];
@@ -298,6 +610,8 @@ export async function createArenaReservation(reservation) {
       p_start_time: reservation.startTime,
       p_duration_minutes: Number(reservation.durationMinutes || 60),
       p_notes: reservation.notes || null,
+      p_payment_type: reservation.paymentType || "avulso",
+      p_subscription_id: reservation.subscriptionId || null,
     }),
   });
 }
@@ -346,9 +660,12 @@ export async function updateArenaReservationStatus(id, status) {
     return saveLocalData(data);
   }
 
-  return supabaseRequest(`/arena_reservations?id=eq.${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ status }),
+  return supabaseRequest("/rpc/update_arena_reservation_status", {
+    method: "POST",
+    body: JSON.stringify({
+      p_reservation_id: id,
+      p_status: status,
+    }),
   });
 }
 

@@ -34,6 +34,7 @@ const state = {
   stations: [],
   reservations: [],
   packages: fallbackPackages,
+  customerPlan: null,
   settings: fallbackSettings,
   localMode: !isSupabaseConfigured,
   loading: true,
@@ -51,6 +52,10 @@ const stationGrid = document.querySelector(".station-grid");
 const noticeText = document.querySelector(".fine-print");
 const customerNameInput = document.querySelector("#customerName");
 const customerPhoneInput = document.querySelector("#customerPhone");
+const planStatus = document.querySelector("#planStatus");
+const planPaymentOption = document.querySelector("#planPaymentOption");
+const paymentSummary = document.querySelector("#paymentSummary");
+const paymentOptions = document.querySelector("#paymentOptions");
 
 function cleanTime(value) {
   return String(value || "").slice(0, 5);
@@ -112,6 +117,10 @@ function priceForDuration(minutes) {
 
 function formatMoney(value) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
+}
+
+function normalizePhone(value) {
+  return String(value || "").replace(/\D/g, "");
 }
 
 function supabaseHeaders(extra = {}) {
@@ -185,6 +194,21 @@ function fromReservation(row) {
     totalPrice: Number(row.total_price || 0),
     status: row.status || "pendente",
     notes: row.notes || "",
+    paymentType: row.payment_type || "avulso",
+    subscriptionId: row.subscription_id || "",
+  };
+}
+
+function fromCustomerPlan(row = {}) {
+  return {
+    customerId: row.customer_id || "",
+    customerName: row.customer_name || "",
+    subscriptionId: row.subscription_id || "",
+    planId: row.plan_id || "",
+    planName: row.plan_name || "",
+    remainingMinutes: Number(row.remaining_minutes || 0),
+    expirationDate: row.expiration_date || "",
+    hasActivePlan: row.has_active_plan === true,
   };
 }
 
@@ -333,6 +357,7 @@ function buildReservationMessage({ customerName = "", customerPhone = "" } = {})
     `Horário: ${range.startTime} até ${range.endTime}.`,
     `Duração: ${range.duration} minutos.`,
     `Valor: ${formatMoney(priceForDuration(range.duration))}.`,
+    selectedPaymentType() === "plano" ? "Forma de pagamento: usar plano mensal." : "Forma de pagamento: avulso.",
     "Status: aguardando confirmação da loja.",
   ].filter(Boolean).join("\n");
 }
@@ -427,6 +452,7 @@ function renderSummary() {
   const range = selectedRange();
   if (!range) {
     selectedSummary.textContent = "Selecione um horário";
+    renderPaymentOptions();
     updateWhatsapp();
     return;
   }
@@ -436,7 +462,54 @@ function renderSummary() {
     ? problem
     : `${stationName()} em ${fullDateLabel(state.selectedDay)}, ${range.startTime} até ${range.endTime} - ${formatMoney(priceForDuration(range.duration))}`;
   renderReservationPreview();
+  renderPaymentOptions();
   updateWhatsapp();
+}
+
+function selectedPaymentType() {
+  return document.querySelector("input[name='paymentType']:checked")?.value || "avulso";
+}
+
+async function lookupCustomerPlan() {
+  const phone = normalizePhone(customerPhoneInput?.value);
+  state.customerPlan = null;
+  if (!phone || phone.length < 10 || !isSupabaseConfigured || state.localMode) {
+    renderPaymentOptions();
+    return;
+  }
+
+  try {
+    const rows = await supabaseRequest("/rpc/find_arena_customer_plan_by_phone", {
+      method: "POST",
+      body: JSON.stringify({ p_phone: phone }),
+    });
+    state.customerPlan = fromCustomerPlan(rows?.[0] || {});
+  } catch (error) {
+    console.error(error);
+    state.customerPlan = null;
+  }
+  renderPaymentOptions();
+}
+
+function renderPaymentOptions() {
+  const activePlan = state.customerPlan?.hasActivePlan;
+  if (planPaymentOption) planPaymentOption.classList.toggle("is-hidden", !activePlan);
+  if (!activePlan && selectedPaymentType() === "plano") {
+    const avulsoInput = document.querySelector("input[name='paymentType'][value='avulso']");
+    if (avulsoInput) avulsoInput.checked = true;
+  }
+  document.querySelectorAll(".payment-option").forEach((option) => {
+    const input = option.querySelector("input");
+    option.classList.toggle("active", input?.checked === true);
+  });
+  if (paymentSummary) paymentSummary.textContent = selectedPaymentType() === "plano" ? "Plano mensal" : "Pix/loja";
+  if (planStatus) {
+    planStatus.classList.toggle("available", Boolean(activePlan));
+    planStatus.classList.toggle("warning", !activePlan);
+    planStatus.textContent = activePlan
+      ? "Plano mensal disponível para este telefone."
+      : "Pagamento avulso disponível. Se você possui plano mensal, digite o WhatsApp cadastrado.";
+  }
 }
 
 function renderReservationPreview() {
@@ -461,6 +534,7 @@ function renderReservationPreview() {
     <span>Início: ${range.startTime} · Término: ${range.endTime}</span>
     <span>Duração: ${range.duration / 60} ${range.duration === 60 ? "hora" : "horas"}</span>
     <span>Valor total: ${formatMoney(priceForDuration(range.duration))}</span>
+    <span>Pagamento: ${selectedPaymentType() === "plano" ? "Usar plano mensal" : "Pagamento avulso"}</span>
     <span>Nome: ${customerNameInput?.value || "preencha seu nome"}</span>
     <span>Telefone: ${customerPhoneInput?.value || "preencha seu WhatsApp"}</span>
   `;
@@ -572,6 +646,8 @@ async function createReservation(payload) {
       p_start_time: payload.startTime,
       p_duration_minutes: payload.durationMinutes,
       p_notes: payload.notes || null,
+      p_payment_type: payload.paymentType || "avulso",
+      p_subscription_id: payload.subscriptionId || null,
     }),
   });
   const created = fromReservation(rows?.[0] || {});
@@ -597,7 +673,17 @@ durationInput.addEventListener("change", () => {
 });
 
 customerNameInput?.addEventListener("input", renderReservationPreview);
-customerPhoneInput?.addEventListener("input", renderReservationPreview);
+customerPhoneInput?.addEventListener("input", () => {
+  renderReservationPreview();
+  window.clearTimeout(customerPhoneInput.lookupTimer);
+  customerPhoneInput.lookupTimer = window.setTimeout(lookupCustomerPlan, 450);
+});
+
+paymentOptions?.addEventListener("change", () => {
+  renderPaymentOptions();
+  renderReservationPreview();
+  updateWhatsapp();
+});
 
 bookingForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -612,9 +698,15 @@ bookingForm.addEventListener("submit", async (event) => {
   const customerName = String(form.get("customerName") || "").trim();
   const customerPhone = String(form.get("customerPhone") || "").trim();
   const notes = String(form.get("customerNotes") || "").trim();
+  const paymentType = String(form.get("paymentType") || "avulso");
 
   if (!customerName || !customerPhone) {
     showToast("Informe nome e WhatsApp para reservar.");
+    return;
+  }
+
+  if (paymentType === "plano" && !state.customerPlan?.hasActivePlan) {
+    showToast("Plano mensal indisponível para este telefone.");
     return;
   }
 
@@ -628,6 +720,8 @@ bookingForm.addEventListener("submit", async (event) => {
       startTime: range.startTime,
       durationMinutes: range.duration,
       notes,
+      paymentType,
+      subscriptionId: paymentType === "plano" ? state.customerPlan?.subscriptionId || "" : "",
     });
 
     state.selectedSlot = "";
@@ -635,7 +729,7 @@ bookingForm.addEventListener("submit", async (event) => {
     await loadReservationsForSelectedDate();
     render();
     switchView("bookings");
-    showToast(state.settings.reservationNotice || fallbackSettings.reservationNotice);
+    showToast(paymentType === "plano" ? "Sua solicitação foi enviada. A utilização do plano será processada após a confirmação da reserva pela NT Informática." : state.settings.reservationNotice || fallbackSettings.reservationNotice);
   } catch (error) {
     console.error(error);
     showToast(error.message || "Falha ao salvar reserva.");
