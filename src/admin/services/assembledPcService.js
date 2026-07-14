@@ -17,6 +17,10 @@ function textFromArray(value) {
   return value || "";
 }
 
+function normalizeTextArray(value) {
+  return arrayFromText(value);
+}
+
 function moneyOrNull(value) {
   if (value === "" || value === null || value === undefined) return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -61,28 +65,46 @@ function fromSupabase(row) {
     name: row.name || "",
     slug: row.slug || "",
     category: row.category || "",
+    pcType: row.pc_type || "gamer_entrada",
+    internalCode: row.internal_code || "",
+    status: row.status || (row.published ? "publicado" : "rascunho"),
     shortDescription: row.short_description || "",
     fullDescription: row.full_description || "",
     processor: row.processor || "",
+    processorCooler: row.processor_cooler || "",
     motherboard: row.motherboard || "",
     memory: row.memory || "",
     storage: row.storage || "",
+    hardDrive: row.hard_drive || "",
     graphicsCard: row.graphics_card || "",
     powerSupply: row.power_supply || "",
     caseModel: row.case_model || "",
     cooling: row.cooling || "",
+    fans: row.fans || "",
     operatingSystem: row.operating_system || "",
+    windowsVersion: row.windows_version || "",
+    wifi: Boolean(row.wifi),
+    bluetooth: Boolean(row.bluetooth),
+    rgb: Boolean(row.rgb),
+    officeIncluded: Boolean(row.office_included),
+    windowsIncluded: Boolean(row.windows_included),
     price: moneyForInput(row.price),
     promoPrice: moneyForInput(row.promo_price),
     stock: Number(row.stock || 0),
     warranty: row.warranty || "",
+    warrantyMonths: Number(row.warranty_months || 3),
+    targetUses: textFromArray(row.target_uses),
+    recommendedGames: textFromArray(row.recommended_games),
+    qualityChecks: textFromArray(row.quality_checks),
     mainImage,
     images: textFromArray(images),
     gallery: textFromArray(images.filter((image) => image !== mainImage)),
     featured: Boolean(row.featured),
     published: Boolean(row.published),
     internalNotes: row.internal_notes || "",
+    createdAt: row.created_at || "",
     updatedAt: row.updated_at || row.created_at,
+    publishedAt: row.published_at || "",
   };
 }
 
@@ -94,9 +116,13 @@ function normalizeLocalPc(pc = {}) {
     id: pc.id || slugify(pc.slug || pc.name) || `pc-${Date.now()}`,
     slug: pc.slug || slugify(pc.name),
     category: pc.category || "",
+    pcType: pc.pcType || "gamer_entrada",
+    internalCode: pc.internalCode || "",
+    status: pc.status || (pc.published ? "publicado" : "rascunho"),
     price: pc.price ?? "",
     promoPrice: pc.promoPrice ?? "",
     stock: Number(pc.stock || 0),
+    warrantyMonths: Number(pc.warrantyMonths || 3),
     mainImage: pc.mainImage || images[0] || "",
     images: textFromArray(images),
     gallery: textFromArray(images.slice(1)),
@@ -107,30 +133,50 @@ function normalizeLocalPc(pc = {}) {
 
 function toSupabase(pc) {
   const images = [...new Set([pc.mainImage, ...arrayFromText(pc.images), ...arrayFromText(pc.gallery)].filter(Boolean))];
+  const stock = Number(pc.stock || 0);
+  const published = Boolean(pc.published);
+  const status = pc.status || (published ? (stock > 0 ? "publicado" : "esgotado") : "rascunho");
 
   return {
     name: pc.name || "",
     slug: pc.slug || slugify(pc.name),
     category: pc.category || "",
+    pc_type: pc.pcType || "gamer_entrada",
+    internal_code: pc.internalCode || "",
+    status,
     short_description: pc.shortDescription || "",
     full_description: pc.fullDescription || "",
     processor: pc.processor || "",
+    processor_cooler: pc.processorCooler || "",
     motherboard: pc.motherboard || "",
     memory: pc.memory || "",
     storage: pc.storage || "",
+    hard_drive: pc.hardDrive || "",
     graphics_card: pc.graphicsCard || "",
     power_supply: pc.powerSupply || "",
     case_model: pc.caseModel || "",
     cooling: pc.cooling || "",
+    fans: pc.fans || "",
     operating_system: pc.operatingSystem || "",
+    windows_version: pc.windowsVersion || "",
+    wifi: Boolean(pc.wifi),
+    bluetooth: Boolean(pc.bluetooth),
+    rgb: Boolean(pc.rgb),
+    office_included: Boolean(pc.officeIncluded),
+    windows_included: Boolean(pc.windowsIncluded),
     price: moneyOrNull(pc.price),
     promo_price: moneyOrNull(pc.promoPrice),
-    stock: Number(pc.stock || 0),
+    stock,
     warranty: pc.warranty || "",
+    warranty_months: Number(pc.warrantyMonths || 3),
+    target_uses: normalizeTextArray(pc.targetUses),
+    recommended_games: normalizeTextArray(pc.recommendedGames),
+    quality_checks: normalizeTextArray(pc.qualityChecks),
     main_image: pc.mainImage || images[0] || "",
     images,
     featured: Boolean(pc.featured),
-    published: Boolean(pc.published),
+    published,
+    published_at: published ? (pc.publishedAt || new Date().toISOString()) : null,
     internal_notes: pc.internalNotes || "",
     updated_at: new Date().toISOString(),
   };
@@ -146,12 +192,29 @@ function writeLocalPcs(pcs) {
 
 export const pcCategories = [
   "Office",
+  "Estudos",
   "Gamer de entrada",
   "Gamer intermediário",
   "Gamer avançado",
   "Streaming",
-  "Edição e trabalho",
+  "Edição",
+  "High-End",
 ];
+
+export const pcTypeOptions = [
+  ["office", "Office"],
+  ["estudos", "Estudos"],
+  ["gamer_entrada", "Gamer de entrada"],
+  ["gamer_intermediario", "Gamer intermediário"],
+  ["gamer_avancado", "Gamer avançado"],
+  ["streaming", "Streaming"],
+  ["edicao", "Edição"],
+  ["high_end", "High-End"],
+];
+
+export function pcTypeLabel(value) {
+  return pcTypeOptions.find(([key]) => key === value)?.[1] || "Gamer de entrada";
+}
 
 export async function listAssembledPcs() {
   if (!isSupabaseConfigured) return readLocalPcs();
@@ -169,7 +232,7 @@ export async function listPublicAssembledPcs() {
   if (!isSupabaseConfigured) return [];
 
   try {
-    const rows = await supabaseRequest("/assembled_pcs?published=eq.true&select=*&order=featured.desc,updated_at.desc");
+    const rows = await supabaseRequest("/assembled_pcs?published=eq.true&status=neq.desativado&select=*&order=featured.desc,updated_at.desc");
     return rows.map(fromSupabase);
   } catch (error) {
     console.warn("Nao foi possivel carregar PCs publicos do Supabase:", error);
@@ -223,7 +286,12 @@ export async function updateAssembledPcPublished(id, published) {
   if (isSupabaseConfigured) {
     const [row] = await supabaseRequest(`/assembled_pcs?id=eq.${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ published, updated_at: new Date().toISOString() }),
+      body: JSON.stringify({
+        published,
+        status: published ? "publicado" : "rascunho",
+        published_at: published ? new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      }),
     });
     return fromSupabase(row);
   }
