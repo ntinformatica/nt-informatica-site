@@ -1357,6 +1357,7 @@ function validateCodexAssistantLinks(form, variations) {
 function buildCodexAssistantPrompt(form, variations, options = {}) {
   const validVariations = variations.filter(hasVariationData);
   const requireValidImages = options.requireValidImages !== false;
+  const minimumImages = Math.max(1, Number(options.minimumImages) || 4);
   const variationLines = validVariations
     .map((variation, index) => `
 Variacao ${index + 1}:
@@ -1406,7 +1407,13 @@ Tarefas para o Codex:
    - capacidade, quando existir;
    - caracteristicas relevantes.
 3. Localizar URLs reais, publicas e utilizaveis das imagens do produto:
-   - procurar imagem principal e galeria do produto;
+   - procurar imagem principal e a galeria completa do produto;
+   - coletar TODAS as imagens uteis do produto encontradas no anuncio;
+   - nao limitar a galeria a apenas 1 imagem;
+   - nao usar apenas thumbnail, primeira imagem ou imagem de capa;
+   - percorrer carrossel, galeria, miniaturas e imagens carregadas por JavaScript;
+   - verificar atributos src, srcset, data-src, data-image, data-zoom-image e equivalentes;
+   - verificar JSON-LD, scripts estruturados, metadados Open Graph e dados embutidos do produto;
    - remover imagens duplicadas;
    - ignorar logos, banners, avaliacoes, selos, icones, placeholders e imagens que nao sejam do produto;
    - preferir URLs HTTPS;
@@ -1427,16 +1434,25 @@ Tarefas para o Codex:
    - nao deve usar miniatura de baixa qualidade quando existir imagem maior.
 6. Regras para products.images:
    - deve receber todas as imagens uteis da galeria;
+   - se o anuncio tiver ${minimumImages} ou mais imagens validas, products.images deve conter no minimo ${minimumImages} imagens;
+   - se o anuncio tiver 5 imagens validas, incluir as 5;
+   - se o anuncio tiver 8 imagens validas, incluir as 8, desde que sejam realmente do produto;
+   - preferencialmente incluir todas as imagens uteis encontradas;
+   - products.main_image tambem pode aparecer em products.images, desde que nao existam duplicatas exatas;
    - nao pode conter URLs duplicadas;
-   - nao pode conter logos, banners, avaliacoes, selos, icones ou imagens genericas.
+   - nao pode conter logos, banners, avaliacoes, selos, icones ou imagens genericas;
+   - nao duplicar a mesma imagem para tentar atingir a quantidade minima;
+   - nao usar imagem de outro produto para tentar atingir a quantidade minima.
 7. Regras para variacoes:
    - cada variacao deve receber a imagem correspondente a sua cor/modelo;
    - preencher product_variations.image;
-   - preencher product_variations.images quando houver galeria especifica;
+   - preencher product_variations.images com todas as imagens especificas daquela variacao quando houver galeria especifica;
+   - nao misturar imagens de cores/modelos diferentes;
    - nao usar imagem de outra cor/modelo.
 8. Antes de devolver o SQL, conferir obrigatoriamente:
    - products.main_image esta preenchida;
-   - products.images contem pelo menos uma imagem valida;
+   - products.images contem a galeria completa encontrada;
+   - products.images contem pelo menos ${minimumImages} imagens validas quando o anuncio disponibilizar essa quantidade;
    - imagens das variacoes estao relacionadas corretamente;
    - nao existem URLs duplicadas;
    - nao existem aspas ou caracteres que quebrem o SQL.
@@ -1448,7 +1464,9 @@ Tarefas para o Codex:
    - nao deixar o usuario acreditar que as fotos foram incluidas;
    - devolver SQL apenas com comentario claro indicando onde inserir as imagens manualmente, se a regra abaixo permitir.
 10. Regra de bloqueio por imagem:
-   ${requireValidImages ? "- Se nenhuma imagem valida for encontrada, NAO gerar INSERT/UPDATE final. Apenas informe a falha de extracao e peca outro link ou imagens manuais." : "- Se nenhuma imagem valida for encontrada, gerar o SQL com comentario claro indicando onde inserir products.main_image, products.images, product_variations.image e product_variations.images manualmente."}
+   - Quantidade minima de imagens exigida pela loja: ${minimumImages}.
+   ${requireValidImages ? `- Se forem encontradas menos de ${minimumImages} imagens validas, NAO gerar INSERT/UPDATE final. Informar exatamente: "Foram encontradas apenas X imagens validas. O minimo exigido e ${minimumImages}." e solicitar outro link ou URLs adicionais de imagem.` : `- Se forem encontradas menos de ${minimumImages} imagens validas, informar claramente no resumo e gerar o SQL com comentario indicando onde inserir imagens adicionais manualmente.`}
+   - Se o anuncio realmente tiver menos imagens que o minimo, nao inventar imagens, nao duplicar a mesma imagem e nao usar imagem de outro produto.
 11. Gerar SQL seguro usando apenas categories, products e product_variations.
 12. Nao duplicar produtos por slug.
 13. Nao duplicar categorias por slug.
@@ -1461,8 +1479,10 @@ Tarefas para o Codex:
 Resultado esperado:
 - Primeiro retorne este resumo curto:
   Imagem principal encontrada: SIM/NAO
-  Quantidade de imagens da galeria: X
-  Imagens de variacoes encontradas: X de Y
+  Total de imagens validas encontradas: X
+  Total de imagens usadas em products.images: X
+  Variacoes com imagem propria: X de Y
+  Quantidade minima exigida atingida: SIM/NAO
 - Depois retorne o SQL completo pronto para colar no Supabase SQL Editor.
 - Nao inclua explicacoes fora do resumo de imagens e do SQL.`;
 }
@@ -1474,6 +1494,7 @@ function CodexAssistantPage() {
   const [copyStatus, setCopyStatus] = useState("");
   const [validation, setValidation] = useState({ valid: false, errors: [], success: "" });
   const [requireValidImages, setRequireValidImages] = useState(true);
+  const [minimumImages, setMinimumImages] = useState(4);
 
   function updateField(field, value) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -1504,12 +1525,12 @@ function CodexAssistantPage() {
   function generatePrompt() {
     if (!validateLinks()) return;
     setCopyStatus("");
-    setPrompt(buildCodexAssistantPrompt(form, variations, { requireValidImages }));
+    setPrompt(buildCodexAssistantPrompt(form, variations, { requireValidImages, minimumImages }));
   }
 
   async function copyPrompt() {
     if (!prompt && !validateLinks()) return;
-    const text = prompt || buildCodexAssistantPrompt(form, variations, { requireValidImages });
+    const text = prompt || buildCodexAssistantPrompt(form, variations, { requireValidImages, minimumImages });
     setPrompt(text);
 
     try {
@@ -1533,6 +1554,9 @@ function CodexAssistantPage() {
             <p className="mt-3 max-w-3xl rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm leading-6 text-amber-100">
               O Codex tentará extrair as imagens diretamente dos links. Alguns fornecedores bloqueiam ou utilizam URLs temporárias. Confira sempre se o resumo informa que as imagens foram encontradas antes de executar o SQL.
             </p>
+            <p className="mt-3 max-w-3xl rounded-md border border-cyan-300/30 bg-cyan-300/10 p-3 text-sm leading-6 text-cyan-100">
+              O Assistente Codex tentara extrair toda a galeria do anuncio. Por padrao, o SQL so sera gerado quando forem encontradas pelo menos 4 imagens validas.
+            </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
             <AdminButton variant="secondary" icon={CheckCircle2} onClick={validateLinks}>Validar links</AdminButton>
@@ -1554,6 +1578,17 @@ function CodexAssistantPage() {
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
         <TextField label="Link principal do produto" value={form.mainLink} onChange={(value) => updateField("mainLink", value)} required placeholder="https://..." />
         <TextareaField label="Observações" value={form.notes} onChange={(value) => updateField("notes", value)} placeholder="Ex.: priorizar imagens reais, produto com duas cores, garantia da loja..." />
+        <TextField
+          label="Quantidade minima de imagens"
+          type="number"
+          value={minimumImages}
+          onChange={(value) => {
+            setMinimumImages(Math.max(1, Number(value) || 4));
+            setPrompt("");
+          }}
+          min="1"
+          step="1"
+        />
         <label className="flex items-start gap-3 rounded-md border border-slate-700 bg-slate-950 p-4 text-sm font-bold text-slate-200">
           <input
             type="checkbox"
@@ -1565,9 +1600,9 @@ function CodexAssistantPage() {
             className="mt-1"
           />
           <span>
-            Não gerar o SQL se nenhuma imagem válida for encontrada
+            Nao gerar SQL se houver menos imagens validas do que o minimo exigido
             <small className="mt-1 block font-normal leading-5 text-slate-400">
-              Quando marcado, o prompt instrui o Codex a bloquear o INSERT/UPDATE final caso não encontre nenhuma imagem pública e permanente.
+              Quando marcado, o prompt instrui o Codex a bloquear o INSERT/UPDATE final caso encontre menos imagens validas do que a quantidade minima definida acima.
             </small>
           </span>
         </label>
