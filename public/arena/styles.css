@@ -374,6 +374,16 @@ h2 {
   line-height: 1.5;
 }
 
+.plan-status strong,
+.plan-status span {
+  display: block;
+}
+
+.plan-status strong {
+  color: #fff;
+  font-size: .92rem;
+}
+
 .plan-status.available {
   color: #b7f7d2;
 }

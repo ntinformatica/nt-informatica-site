@@ -119,6 +119,21 @@ function formatMoney(value) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
 }
 
+function formatMinutes(value) {
+  const total = Math.max(0, Number(value || 0));
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  if (total === 0) return "0h";
+  if (!hours) return `${minutes}min`;
+  if (!minutes) return `${hours}h`;
+  return `${hours}h${minutes}min`;
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
+}
+
 function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
@@ -200,15 +215,26 @@ function fromReservation(row) {
 }
 
 function fromCustomerPlan(row = {}) {
+  const plan = row.arena_monthly_plans || {};
+  const customer = row.arena_customers || {};
+  const today = new Date().toISOString().slice(0, 10);
+  const remainingMinutes = Number(row.remaining_minutes || 0);
+  const activeSubscription = row.status === "ativo";
+  const activePlan = plan.active !== false;
+  const activeCustomer = customer.active !== false;
+  const expired = Boolean(row.expiration_date && row.expiration_date < today);
+  const hasBalance = remainingMinutes > 0;
+
   return {
-    customerId: row.customer_id || "",
-    customerName: row.customer_name || "",
-    subscriptionId: row.subscription_id || "",
-    planId: row.plan_id || "",
-    planName: row.plan_name || "",
-    remainingMinutes: Number(row.remaining_minutes || 0),
+    subscriptionId: row.id || row.subscription_id || "",
+    planName: plan.name || row.plan_name || "",
+    remainingMinutes,
     expirationDate: row.expiration_date || "",
-    hasActivePlan: row.has_active_plan === true,
+    activeSubscription,
+    expired,
+    hasBalance,
+    hasActivePlan: activeCustomer && activePlan && activeSubscription && !expired && hasBalance,
+    hasPlan: Boolean(row.id || row.subscription_id || row.has_active_plan),
   };
 }
 
@@ -479,20 +505,30 @@ async function lookupCustomerPlan() {
   }
 
   try {
-    const rows = await supabaseRequest("/rpc/find_arena_customer_plan_by_phone", {
-      method: "POST",
-      body: JSON.stringify({ p_phone: phone }),
-    });
+    const rows = await supabaseRequest(`/arena_customer_subscriptions?select=id,status,remaining_minutes,expiration_date,arena_monthly_plans(name,active),arena_customers!inner(active)&arena_customers.normalized_phone=eq.${encodeURIComponent(phone)}&order=expiration_date.desc&limit=1`);
     state.customerPlan = fromCustomerPlan(rows?.[0] || {});
   } catch (error) {
     console.error(error);
-    state.customerPlan = null;
+    try {
+      const rows = await supabaseRequest("/rpc/find_arena_customer_plan_by_phone", {
+        method: "POST",
+        body: JSON.stringify({ p_phone: phone }),
+      });
+      state.customerPlan = fromCustomerPlan(rows?.[0] || {});
+    } catch (fallbackError) {
+      console.error(fallbackError);
+      state.customerPlan = null;
+    }
   }
   renderPaymentOptions();
 }
 
 function renderPaymentOptions() {
-  const activePlan = state.customerPlan?.hasActivePlan;
+  const plan = state.customerPlan;
+  const range = selectedRange();
+  const activePlan = plan?.hasActivePlan;
+  const selectedDuration = Number(range?.duration || durationInput?.value || 0);
+  const projectedBalance = Number(plan?.remainingMinutes || 0) - selectedDuration;
   if (planPaymentOption) planPaymentOption.classList.toggle("is-hidden", !activePlan);
   if (!activePlan && selectedPaymentType() === "plano") {
     const avulsoInput = document.querySelector("input[name='paymentType'][value='avulso']");
@@ -505,10 +541,30 @@ function renderPaymentOptions() {
   if (paymentSummary) paymentSummary.textContent = selectedPaymentType() === "plano" ? "Plano mensal" : "Pix/loja";
   if (planStatus) {
     planStatus.classList.toggle("available", Boolean(activePlan));
-    planStatus.classList.toggle("warning", !activePlan);
-    planStatus.textContent = activePlan
-      ? "Plano mensal disponível para este telefone."
-      : "Pagamento avulso disponível. Se você possui plano mensal, digite o WhatsApp cadastrado.";
+    planStatus.classList.toggle("warning", Boolean((plan?.hasPlan && !activePlan) || (activePlan && selectedDuration && projectedBalance < 0)));
+
+    if (activePlan) {
+      planStatus.innerHTML = `
+        <strong>${plan.planName || "Plano mensal"} ativo</strong>
+        <span>Saldo disponível: ${formatMinutes(plan.remainingMinutes)}</span>
+        <span>Válido até: ${formatDate(plan.expirationDate)}</span>
+        ${selectedDuration ? `<span>Reserva selecionada: ${formatMinutes(selectedDuration)}</span><span>Saldo previsto após confirmação: ${formatMinutes(Math.max(0, projectedBalance))}</span>` : ""}
+        ${selectedDuration && projectedBalance < 0 ? "<span>Saldo de horas insuficiente para esta duração.</span>" : ""}
+      `;
+      return;
+    }
+
+    if (plan?.hasPlan && plan.expired) {
+      planStatus.textContent = "Plano mensal vencido.";
+      return;
+    }
+
+    if (plan?.hasPlan && !plan.hasBalance) {
+      planStatus.textContent = "Plano mensal ativo, porém sem saldo disponível.";
+      return;
+    }
+
+    planStatus.textContent = "Pagamento avulso disponível. Se você possui plano mensal, digite o WhatsApp cadastrado.";
   }
 }
 
@@ -707,6 +763,11 @@ bookingForm.addEventListener("submit", async (event) => {
 
   if (paymentType === "plano" && !state.customerPlan?.hasActivePlan) {
     showToast("Plano mensal indisponível para este telefone.");
+    return;
+  }
+
+  if (paymentType === "plano" && Number(state.customerPlan?.remainingMinutes || 0) < Number(durationInput.value || 0)) {
+    showToast("Saldo de horas insuficiente para esta reserva.");
     return;
   }
 
