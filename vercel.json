@@ -29,6 +29,14 @@
       "destination": "/index.html"
     },
     {
+      "source": "/computadores/:slug",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/computadores/:slug/",
+      "destination": "/index.html"
+    },
+    {
       "source": "/computadores/:path*",
       "destination": "/index.html"
     },

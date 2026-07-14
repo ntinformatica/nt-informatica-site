@@ -98,8 +98,14 @@ function cashValue(value) {
   return parsed === null ? null : parsed * 0.85;
 }
 
+function pcCashPrice(pc) {
+  const promoPrice = parseMoney(pc.promoPrice);
+  if (promoPrice !== null) return promoPrice;
+  return cashValue(pc.price);
+}
+
 function pcPrice(pc) {
-  return parseMoney(pc.promoPrice || pc.price) ?? Number.POSITIVE_INFINITY;
+  return pcCashPrice(pc) ?? Number.POSITIVE_INFINITY;
 }
 
 function pcSummary(pc) {
@@ -116,7 +122,7 @@ function pcWhatsappMessage(pc) {
   return `Olá! Tenho interesse no computador ${pc.name}.
 Configuração:
 ${pcSummary(pc) || "Configuração a consultar"}
-Preço: ${formatCurrency(pc.promoPrice || pc.price)}
+Preço à vista: ${formatCurrency(pcCashPrice(pc))}
 Link: ${url}`;
 }
 
@@ -144,6 +150,25 @@ function pcGallery(pc) {
     ? pc.images.split("\n").map((image) => image.trim()).filter(Boolean)
     : Array.isArray(pc.images) ? pc.images : [];
   return [...new Set([pc.mainImage, ...fromText].filter(Boolean))];
+}
+
+function PcPriceBlock({ pc, detail = false }) {
+  const cashPrice = pcCashPrice(pc);
+  const installmentPrice = parseMoney(pc.price);
+
+  return (
+    <div className={detail ? "mt-5" : "mt-5"}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className={(detail ? "text-4xl" : "text-3xl") + " font-black text-nt-cyan"}>
+          {formatCurrency(cashPrice)}
+        </span>
+        <span className="text-sm font-bold uppercase tracking-[0.08em] text-lime-200">À vista com 15% OFF</span>
+      </div>
+      <p className="mt-1 text-sm font-semibold text-slate-300">
+        {formatCurrency(installmentPrice)} em 10x sem juros
+      </p>
+    </div>
+  );
 }
 
 function LineSvgIcon({ size = 24, strokeWidth = 2, children, ...props }) {
@@ -649,8 +674,7 @@ function PcCard({ pc }) {
         <dl className="mt-4 grid gap-2 text-sm">
           {summaryItems.map((item) => <div key={item} className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-slate-200">{item}</div>)}
         </dl>
-        <p className="mt-5 text-3xl font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
-        <p className="mt-1 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)} · Pix/dinheiro: {formatCurrency(cashValue(pc.price))}</p>
+        <PcPriceBlock pc={pc} />
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Button href={'/computadores/' + pc.slug} variant="secondary">Ver detalhes</Button>
           {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
@@ -710,9 +734,7 @@ function PcDetail({ pc }) {
             <span className="inline-flex rounded-full border border-nt-cyan/30 bg-nt-cyan/10 px-3 py-1 text-xs font-bold text-nt-cyan">{pc.category || pcTypeLabel(pc.pcType)}</span>
             <span className={'inline-flex rounded-full border px-3 py-1 text-xs font-bold ' + (available ? "border-lime-300/30 bg-lime-300/10 text-lime-200" : "border-red-300/30 bg-red-300/10 text-red-200")}>{available ? "Em estoque" : "Esgotado"}</span>
           </div>
-          <p className="mt-5 text-4xl font-black text-nt-cyan">{formatCurrency(pc.promoPrice || pc.price)}</p>
-          <p className="mt-2 text-sm text-slate-300">10x sem juros: {formatCurrency(pc.price)}</p>
-          <p className="mt-1 text-sm text-lime-200">À vista no Pix/dinheiro com 15% off: {formatCurrency(cashValue(pc.price))}</p>
+          <PcPriceBlock pc={pc} detail />
           <p className="mt-5 text-sm leading-6 text-slate-300">{pc.fullDescription || pc.shortDescription || "Computador montado e revisado pela NT Informática."}</p>
           <div className="mt-6 grid gap-3">
             {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))} className="w-full">Comprar via WhatsApp</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'} className="w-full">Consultar disponibilidade</WhatsAppButton>}
@@ -737,6 +759,23 @@ function PcDetail({ pc }) {
   );
 }
 
+function PcNotFound({ slug }) {
+  return (
+    <Section eyebrow="PCs Montados" title="Computador não encontrado." description="O computador solicitado não está disponível no catálogo público ou o link foi alterado.">
+      <Card className="max-w-2xl">
+        <p className="text-sm leading-6 text-slate-300">
+          Verifique o endereço acessado ou consulte a NT Informática para confirmar disponibilidade.
+          {slug ? <span className="mt-2 block text-slate-400">Código pesquisado: {slug}</span> : null}
+        </p>
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+          <Button href="/computadores" variant="secondary">Ver computadores</Button>
+          <WhatsAppButton message="Olá! Gostaria de consultar computadores montados disponíveis na NT Informática.">Consultar no WhatsApp</WhatsAppButton>
+        </div>
+      </Card>
+    </Section>
+  );
+}
+
 function ComputersPage() {
   const { pcs, loading, error, localMode } = usePublicPcs();
   const [search, setSearch] = useState("");
@@ -757,7 +796,7 @@ function ComputersPage() {
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
       <Header />
       <main className="pt-20">
-        {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : selectedPc ? <PcDetail pc={selectedPc} /> : (
+        {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : selectedPc ? <PcDetail pc={selectedPc} /> : slug ? <PcNotFound slug={slug} /> : (
           <Section eyebrow="PCs Montados" title="Computadores prontos da NT Informática" description="Filtre por tipo, compare configurações e chame no WhatsApp para comprar.">
             {(error || localMode) ? <div className="mb-6 rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">{error || "Supabase não configurado. Nenhum PC real será exibido no modo local."}</div> : null}
             <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 lg:grid-cols-[1fr_0.5fr_0.5fr_0.45fr]">
