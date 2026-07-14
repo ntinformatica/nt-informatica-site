@@ -6,6 +6,11 @@ const localArenaKey = "nt-admin-arena-local-v1";
 const emptyArenaData = {
   stations: [],
   reservations: [],
+  packages: [
+    { id: "local-package-60", name: "1 Hora", durationMinutes: 60, price: 20, active: true, sortOrder: 10 },
+    { id: "local-package-120", name: "2 Horas", durationMinutes: 120, price: 40, active: true, sortOrder: 20 },
+    { id: "local-package-180", name: "3 Horas", durationMinutes: 180, price: 50, active: true, sortOrder: 30 },
+  ],
   settings: {
     id: "local-settings",
     pricePerHour: 20,
@@ -33,6 +38,17 @@ function saveLocalData(data) {
 
 function toTime(value) {
   return String(value || "").slice(0, 5);
+}
+
+function minutesFromTime(value) {
+  const [hour, minute] = toTime(value).split(":").map(Number);
+  return (hour * 60) + minute;
+}
+
+function timeFromMinutes(value) {
+  const hour = Math.floor(value / 60);
+  const minute = value % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function moneyNumber(value, fallback = 0) {
@@ -79,6 +95,27 @@ function fromSettings(row = {}) {
   };
 }
 
+function fromPackage(row = {}) {
+  return {
+    id: row.id,
+    name: row.name || "",
+    durationMinutes: Number(row.duration_minutes || 60),
+    price: Number(row.price || 0),
+    active: row.active !== false,
+    sortOrder: Number(row.sort_order || 0),
+  };
+}
+
+function toPackage(pack = {}) {
+  return {
+    name: pack.name || "",
+    duration_minutes: Number(pack.durationMinutes || 60),
+    price: moneyNumber(pack.price, 0),
+    active: pack.active !== false,
+    sort_order: Number(pack.sortOrder || 0),
+  };
+}
+
 function toSettings(settings = {}) {
   return {
     price_per_hour: moneyNumber(settings.pricePerHour, 20),
@@ -114,9 +151,10 @@ function fromReservation(row = {}, stations = []) {
 export async function listArenaData() {
   if (!isSupabaseConfigured) return localData();
 
-  const [stationRows, settingsRows] = await Promise.all([
+  const [stationRows, settingsRows, packageRows] = await Promise.all([
     supabaseRequest("/arena_stations?select=*&order=sort_order.asc,name.asc"),
     supabaseRequest("/arena_settings?select=*&order=created_at.asc&limit=1"),
+    supabaseRequest("/arena_packages?select=*&order=sort_order.asc,duration_minutes.asc"),
   ]);
 
   const stations = (stationRows || []).map(fromStation);
@@ -126,6 +164,7 @@ export async function listArenaData() {
   return {
     stations,
     reservations: (reservationRows || []).map((row) => fromReservation(row, stations)),
+    packages: (packageRows || []).map(fromPackage),
     settings,
     localMode: false,
   };
@@ -189,13 +228,59 @@ export async function updateArenaSettings(settings) {
   });
 }
 
+export async function saveArenaPackage(pack) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    const saved = {
+      id: pack.id || `package-${Date.now()}`,
+      ...pack,
+      durationMinutes: Number(pack.durationMinutes || 60),
+      price: moneyNumber(pack.price, 0),
+      active: pack.active !== false,
+      sortOrder: Number(pack.sortOrder || 0),
+    };
+    data.packages = pack.id
+      ? data.packages.map((item) => (item.id === pack.id ? saved : item))
+      : [...data.packages, saved];
+    return saveLocalData(data);
+  }
+
+  if (pack.id) {
+    return supabaseRequest(`/arena_packages?id=eq.${encodeURIComponent(pack.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(toPackage(pack)),
+    });
+  }
+
+  return supabaseRequest("/arena_packages", {
+    method: "POST",
+    body: JSON.stringify(toPackage(pack)),
+  });
+}
+
+export async function deleteArenaPackage(id) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    data.packages = data.packages.filter((pack) => pack.id !== id);
+    return saveLocalData(data);
+  }
+
+  return supabaseRequest(`/arena_packages?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
 export async function createArenaReservation(reservation) {
   if (!isSupabaseConfigured) {
     const data = localData();
+    const durationMinutes = Number(reservation.durationMinutes || 60);
+    const arenaPackage = data.packages.find((pack) => pack.active !== false && Number(pack.durationMinutes) === durationMinutes);
+    const endTime = timeFromMinutes(minutesFromTime(reservation.startTime) + durationMinutes);
     data.reservations = [
       {
         id: `reservation-${Date.now()}`,
         ...reservation,
+        endTime,
+        durationMinutes,
+        totalPrice: arenaPackage ? Number(arenaPackage.price || 0) : (durationMinutes / 60) * Number(data.settings.pricePerHour || 20),
         status: "pendente",
       },
       ...data.reservations,
@@ -220,6 +305,7 @@ export async function createArenaReservation(reservation) {
 export async function createArenaBlock(block) {
   if (!isSupabaseConfigured) {
     const data = localData();
+    const durationMinutes = Math.max(0, minutesFromTime(block.endTime) - minutesFromTime(block.startTime));
     data.reservations = [
       {
         id: `block-${Date.now()}`,
@@ -229,7 +315,7 @@ export async function createArenaBlock(block) {
         reservationDate: block.reservationDate,
         startTime: block.startTime,
         endTime: block.endTime,
-        durationMinutes: 0,
+        durationMinutes,
         totalPrice: 0,
         status: "bloqueado",
         notes: block.reason || "",

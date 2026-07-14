@@ -22,7 +22,7 @@ import {
   UploadCloud,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { businessName } from "../data/siteData";
 import {
   deleteStorageFile,
@@ -37,9 +37,11 @@ import { slugify } from "./services/localStorageHelpers";
 import {
   createArenaBlock,
   createArenaReservation,
+  deleteArenaPackage,
   deleteArenaReservation,
   deleteArenaStation,
   listArenaData,
+  saveArenaPackage,
   saveArenaStation,
   updateArenaReservationStatus,
   updateArenaSettings,
@@ -1673,6 +1675,73 @@ function reservationWhatsappHref(reservation) {
   return `https://wa.me/5547999309344?text=${encodeURIComponent(text)}`;
 }
 
+function timeToMinutes(value) {
+  const [hour, minute] = String(value || "00:00").slice(0, 5).split(":").map(Number);
+  return (hour * 60) + minute;
+}
+
+function minutesToTime(value) {
+  const hour = Math.floor(value / 60);
+  const minute = value % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function reservationOverlapsSlot(reservation, slotStart, slotEnd) {
+  return timeToMinutes(reservation.startTime) < slotEnd && timeToMinutes(reservation.endTime) > slotStart;
+}
+
+function arenaPackagePrice(packages, durationMinutes, fallbackPricePerHour = 20) {
+  const pack = packages.find((item) => item.active !== false && Number(item.durationMinutes) === Number(durationMinutes));
+  if (pack) return Number(pack.price || 0);
+  return (Number(durationMinutes || 0) / 60) * Number(fallbackPricePerHour || 20);
+}
+
+function ArenaPackageForm({ packages, onSave, onDelete }) {
+  const [form, setForm] = useState({ id: "", name: "", durationMinutes: 60, price: 20, active: true, sortOrder: packages.length + 1 });
+
+  function submit(event) {
+    event.preventDefault();
+    onSave(form);
+    setForm({ id: "", name: "", durationMinutes: 60, price: 20, active: true, sortOrder: packages.length + 1 });
+  }
+
+  return (
+    <section className="glass rounded-lg p-5 shadow-card">
+      <h3 className="text-lg font-black">Pacotes de duração</h3>
+      <p className="mt-2 text-sm text-slate-400">Valores oficiais da Arena usados no site público e nas reservas manuais.</p>
+      <form onSubmit={submit} className="mt-4 grid gap-3">
+        <TextField label="Nome" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} required />
+        <TextField label="Duração em minutos" type="number" value={form.durationMinutes} onChange={(value) => setForm((current) => ({ ...current, durationMinutes: Number(value) }))} required />
+        <TextField label="Valor" value={form.price} onChange={(value) => setForm((current) => ({ ...current, price: value }))} required />
+        <TextField label="Ordem" type="number" value={form.sortOrder} onChange={(value) => setForm((current) => ({ ...current, sortOrder: Number(value) }))} />
+        <label className="flex items-center gap-3 text-sm font-bold text-slate-200">
+          <input type="checkbox" checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
+          Pacote ativo
+        </label>
+        <AdminButton type="submit" icon={FilePlus2}>{form.id ? "Salvar pacote" : "Criar pacote"}</AdminButton>
+      </form>
+
+      <div className="mt-5 grid gap-3">
+        {packages.map((pack) => (
+          <article key={pack.id} className="rounded-md border border-white/10 bg-white/5 p-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <strong>{pack.name}</strong>
+                <p className="text-xs text-slate-400">{pack.durationMinutes} min · {formatCurrency(pack.price)} · ordem {pack.sortOrder}</p>
+                <p className={`mt-1 text-xs font-bold ${pack.active ? "text-lime-200" : "text-amber-200"}`}>{pack.active ? "Ativo" : "Inativo"}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <AdminButton type="button" variant="secondary" onClick={() => setForm(pack)} icon={Pencil}>Editar</AdminButton>
+                <AdminButton type="button" variant="danger" onClick={() => onDelete(pack.id)} icon={Trash2}>Excluir</AdminButton>
+              </div>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ArenaStationForm({ stations, onSave, onDelete }) {
   const [form, setForm] = useState({ id: "", name: "", type: "pc", description: "", active: true, sortOrder: stations.length + 1 });
 
@@ -1770,13 +1839,15 @@ function ArenaSettingsForm({ settings, onSave }) {
   );
 }
 
-function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCreateReservation, onCreateBlock, onSaveStation, onDeleteStation, onSaveSettings }) {
+function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCreateReservation, onCreateBlock, onSaveStation, onDeleteStation, onSaveSettings, onSavePackage, onDeletePackage }) {
   const [filters, setFilters] = useState({ date: todayIsoDate(), status: "", stationId: "", query: "" });
   const [manual, setManual] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "14:00", durationMinutes: 60, customerName: "", customerPhone: "", notes: "" });
   const [block, setBlock] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "12:00", endTime: "13:00", reason: "" });
+  const [selectedReservationId, setSelectedReservationId] = useState("");
   const stations = arenaData.stations || [];
   const reservations = arenaData.reservations || [];
   const settings = arenaData.settings || {};
+  const packages = arenaData.packages || [];
   const today = todayIsoDate();
 
   useEffect(() => {
@@ -1794,10 +1865,27 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
     return matchesDate && matchesStatus && matchesStation && matchesQuery;
   });
 
-  const todayReservations = reservations.filter((reservation) => reservation.reservationDate === today);
-  const pending = reservations.filter((reservation) => reservation.status === "pendente");
-  const confirmed = reservations.filter((reservation) => reservation.status === "confirmado");
-  const blocked = reservations.filter((reservation) => reservation.status === "bloqueado");
+  const dayReservations = reservations.filter((reservation) => reservation.reservationDate === filters.date);
+  const pending = dayReservations.filter((reservation) => reservation.status === "pendente");
+  const confirmed = dayReservations.filter((reservation) => reservation.status === "confirmado");
+  const blocked = dayReservations.filter((reservation) => reservation.status === "bloqueado");
+  const reservedMinutes = dayReservations
+    .filter((reservation) => ["pendente", "confirmado"].includes(reservation.status))
+    .reduce((total, reservation) => total + Number(reservation.durationMinutes || 0), 0);
+  const expectedRevenue = dayReservations
+    .filter((reservation) => ["pendente", "confirmado"].includes(reservation.status))
+    .reduce((total, reservation) => total + Number(reservation.totalPrice || 0), 0);
+  const selectedReservation = reservations.find((reservation) => reservation.id === selectedReservationId);
+  const openMinute = timeToMinutes(settings.openingTime || "09:00");
+  const closeMinute = timeToMinutes(settings.closingTime || "22:00");
+  const step = Number(settings.slotMinutes || 30);
+  const calendarSlots = [];
+  for (let minute = openMinute; minute < closeMinute; minute += step) {
+    calendarSlots.push({ start: minute, end: minute + step, label: minutesToTime(minute) });
+  }
+  const packageOptions = packages.length
+    ? packages.filter((pack) => pack.active !== false).map((pack) => [pack.durationMinutes, `${pack.name} - ${formatCurrency(pack.price)}`])
+    : [[60, "1 hora - R$ 20,00"], [120, "2 horas - R$ 40,00"], [180, "3 horas - R$ 50,00"]];
 
   function submitManual(event) {
     event.preventDefault();
@@ -1820,10 +1908,11 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-4">
-        <SummaryCard label="Reservas de hoje" value={todayReservations.length} icon={CalendarDays} />
+        <SummaryCard label="Reservas do dia" value={dayReservations.length} icon={CalendarDays} />
         <SummaryCard label="Pendentes" value={pending.length} icon={CalendarDays} />
         <SummaryCard label="Confirmadas" value={confirmed.length} icon={CheckCircle2} />
-        <SummaryCard label="Bloqueios" value={blocked.length} icon={X} />
+        <SummaryCard label="Horas reservadas" value={`${Math.round((reservedMinutes / 60) * 10) / 10}h`} icon={CalendarDays} />
+        <SummaryCard label="Receita prevista" value={formatCurrency(expectedRevenue)} icon={Star} />
       </div>
 
       <section className="glass rounded-lg p-5 shadow-card">
@@ -1833,6 +1922,95 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
           <SelectField label="Equipamento" value={filters.stationId} onChange={(value) => setFilters((current) => ({ ...current, stationId: value }))} options={[["", "Todos"], ...stations.map((station) => [station.id, station.name])]} />
           <TextField label="Buscar cliente" value={filters.query} onChange={(value) => setFilters((current) => ({ ...current, query: value }))} placeholder="Nome ou WhatsApp" />
         </div>
+      </section>
+
+      <section className="glass rounded-lg p-5 shadow-card">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-xl font-black">Calendário diário</h3>
+            <p className="mt-1 text-sm text-slate-400">Livre, pendente, confirmado, bloqueado e concluído por equipamento.</p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs font-bold">
+            <span className="rounded-full bg-lime-400/15 px-3 py-1 text-lime-200">Livre</span>
+            <span className="rounded-full bg-yellow-400/15 px-3 py-1 text-yellow-200">Pendente</span>
+            <span className="rounded-full bg-sky-400/15 px-3 py-1 text-sky-200">Confirmado</span>
+            <span className="rounded-full bg-slate-400/15 px-3 py-1 text-slate-200">Bloqueado</span>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-slate-300">Concluído</span>
+          </div>
+        </div>
+
+        <div className="mt-5 overflow-x-auto">
+          <div className="grid min-w-[760px] gap-2" style={{ gridTemplateColumns: `150px repeat(${calendarSlots.length}, minmax(72px, 1fr))` }}>
+            <div className="rounded-md border border-white/10 bg-white/5 p-2 text-xs font-black text-slate-300">Equipamento</div>
+            {calendarSlots.map((slot) => (
+              <div key={slot.label} className="rounded-md border border-white/10 bg-white/5 p-2 text-center text-xs font-black text-slate-300">{slot.label}</div>
+            ))}
+            {stations.map((station) => (
+              <Fragment key={station.id}>
+                <div className="rounded-md border border-white/10 bg-white/5 p-2 text-sm font-black text-white">{station.name}</div>
+                {calendarSlots.map((slot) => {
+                  const reservation = dayReservations.find((item) => item.stationId === station.id && reservationOverlapsSlot(item, slot.start, slot.end));
+                  const status = reservation?.status || "livre";
+                  const statusClass = {
+                    livre: "border-lime-400/30 bg-lime-400/10 text-lime-100",
+                    pendente: "border-yellow-400/40 bg-yellow-400/15 text-yellow-100",
+                    confirmado: "border-sky-400/40 bg-sky-400/15 text-sky-100",
+                    bloqueado: "border-slate-400/30 bg-slate-400/15 text-slate-100",
+                    concluido: "border-white/10 bg-white/8 text-slate-300",
+                    cancelado: "border-red-400/30 bg-red-400/10 text-red-100",
+                  }[status] || "border-white/10 bg-white/5 text-slate-300";
+                  return (
+                    <button
+                      key={`${station.id}-${slot.label}`}
+                      type="button"
+                      onClick={() => reservation ? setSelectedReservationId(reservation.id) : null}
+                      className={`min-h-14 rounded-md border p-2 text-left text-[11px] font-bold transition hover:border-nt-cyan ${statusClass}`}
+                    >
+                      {reservation ? (
+                        <>
+                          <span className="block uppercase">{reservation.status}</span>
+                          <span className="block truncate">{reservation.customerName}</span>
+                        </>
+                      ) : "Livre"}
+                    </button>
+                  );
+                })}
+              </Fragment>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {selectedReservation ? (
+        <section className="glass rounded-lg p-5 shadow-card">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-xl font-black">Detalhes da reserva</h3>
+              <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                <p><strong className="text-white">Cliente:</strong> {selectedReservation.customerName}</p>
+                <p><strong className="text-white">Telefone:</strong> {selectedReservation.customerPhone || "Sem telefone"}</p>
+                <p><strong className="text-white">Data:</strong> {selectedReservation.reservationDate}</p>
+                <p><strong className="text-white">Horário:</strong> {selectedReservation.startTime} até {selectedReservation.endTime}</p>
+                <p><strong className="text-white">Duração:</strong> {selectedReservation.durationMinutes} min</p>
+                <p><strong className="text-white">Equipamento:</strong> {selectedReservation.stationName}</p>
+                <p><strong className="text-white">Valor:</strong> {formatCurrency(selectedReservation.totalPrice)}</p>
+                <p><strong className="text-white">Status:</strong> {selectedReservation.status}</p>
+              </div>
+              {selectedReservation.notes ? <p className="mt-3 text-sm text-slate-300">{selectedReservation.notes}</p> : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(selectedReservation.id, "confirmado")} icon={CheckCircle2}>Confirmar</AdminButton>
+              <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(selectedReservation.id, "concluido")} icon={CheckCircle2}>Concluir</AdminButton>
+              <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(selectedReservation.id, "cancelado")} icon={X}>Cancelar</AdminButton>
+              <a className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan" href={reservationWhatsappHref(selectedReservation)} target="_blank" rel="noreferrer">WhatsApp</a>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      <section className="glass rounded-lg p-5 shadow-card">
+        <h3 className="text-xl font-black">Lista de reservas</h3>
+        <p className="mt-1 text-sm text-slate-400">Use os filtros acima para encontrar reservas por cliente, status e equipamento.</p>
 
         <div className="mt-5 grid gap-3">
           {filteredReservations.length ? filteredReservations.map((reservation) => (
@@ -1867,7 +2045,7 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
             <SelectField label="Equipamento" value={manual.stationId} onChange={(value) => setManual((current) => ({ ...current, stationId: value }))} options={stations.map((station) => [station.id, station.name])} />
             <TextField label="Data" type="date" value={manual.reservationDate} onChange={(value) => setManual((current) => ({ ...current, reservationDate: value }))} required />
             <TextField label="Início" type="time" value={manual.startTime} onChange={(value) => setManual((current) => ({ ...current, startTime: value }))} required />
-            <SelectField label="Duração" value={manual.durationMinutes} onChange={(value) => setManual((current) => ({ ...current, durationMinutes: Number(value) }))} options={[[30, "30 minutos"], [60, "1 hora"], [120, "2 horas"], [180, "3 horas"]]} />
+            <SelectField label="Duração" value={manual.durationMinutes} onChange={(value) => setManual((current) => ({ ...current, durationMinutes: Number(value) }))} options={packageOptions} />
             <TextField label="Nome do cliente" value={manual.customerName} onChange={(value) => setManual((current) => ({ ...current, customerName: value }))} required />
             <TextField label="WhatsApp" value={manual.customerPhone} onChange={(value) => setManual((current) => ({ ...current, customerPhone: value }))} required />
             <TextareaField label="Observações" value={manual.notes} onChange={(value) => setManual((current) => ({ ...current, notes: value }))} rows={2} />
@@ -1890,7 +2068,16 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
 
       <div className="grid gap-6 xl:grid-cols-2">
         <ArenaStationForm stations={stations} onSave={onSaveStation} onDelete={onDeleteStation} />
+        <ArenaPackageForm packages={packages} onSave={onSavePackage} onDelete={onDeletePackage} />
         <ArenaSettingsForm settings={settings} onSave={onSaveSettings} />
+        <section className="glass rounded-lg p-5 shadow-card">
+          <h3 className="text-lg font-black">Planos mensais</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-300">Planos mensais serão configurados na próxima etapa.</p>
+          <div className="mt-4 rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+            <strong className="text-white">Plano Squad</strong>
+            <p className="mt-1">R$ 400,00 por mês · 40 horas por mês · Equivale a R$ 10,00 por hora.</p>
+          </div>
+        </section>
       </div>
     </div>
   );
@@ -2116,6 +2303,14 @@ export function AdminApp() {
     return runAction(async () => updateArenaSettings(settings), "Configurações da Arena salvas.");
   }
 
+  async function saveArenaPackageAction(pack) {
+    return runAction(async () => saveArenaPackage(pack), "Pacote da Arena salvo.");
+  }
+
+  async function removeArenaPackage(id) {
+    return runAction(async () => deleteArenaPackage(id), "Pacote da Arena excluído.");
+  }
+
   if (info.page === "login") return <LoginPage />;
 
   const titles = {
@@ -2163,6 +2358,8 @@ export function AdminApp() {
           onSaveStation={saveArenaStationAction}
           onDeleteStation={removeArenaStation}
           onSaveSettings={saveArenaSettingsAction}
+          onSavePackage={saveArenaPackageAction}
+          onDeletePackage={removeArenaPackage}
         />
       ) : null}
       {!loading && info.page === "settings" ? <SettingsPage /> : null}

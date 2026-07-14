@@ -1,4 +1,4 @@
-const CACHE_NAME = "nt-informatica-arena-v20260713-1200";
+const CACHE_NAME = "nt-informatica-arena-v20260713-1800";
 const ASSETS = [
   "/arena/",
   "/arena/index.html",

@@ -15,6 +15,12 @@ const fallbackSettings = {
   reservationNotice: "Sua solicitação foi enviada. A reserva será confirmada pela NT Informática.",
 };
 
+const fallbackPackages = [
+  { id: "local-package-60", name: "1 Hora", durationMinutes: 60, price: 20, active: true, sortOrder: 10 },
+  { id: "local-package-120", name: "2 Horas", durationMinutes: 120, price: 40, active: true, sortOrder: 20 },
+  { id: "local-package-180", name: "3 Horas", durationMinutes: 180, price: 50, active: true, sortOrder: 30 },
+];
+
 const fallbackStations = [
   { id: "local-pc", name: "PC Gamer", type: "pc", description: "Modo local de teste", active: true, sortOrder: 10 },
   { id: "local-ps5", name: "PlayStation 5", type: "ps5", description: "Modo local de teste", active: true, sortOrder: 20 },
@@ -27,6 +33,7 @@ const state = {
   selectedSlot: "",
   stations: [],
   reservations: [],
+  packages: fallbackPackages,
   settings: fallbackSettings,
   localMode: !isSupabaseConfigured,
   loading: true,
@@ -42,6 +49,8 @@ const toast = document.querySelector("#toast");
 const whatsappLink = document.querySelector("#whatsappLink");
 const stationGrid = document.querySelector(".station-grid");
 const noticeText = document.querySelector(".fine-print");
+const customerNameInput = document.querySelector("#customerName");
+const customerPhoneInput = document.querySelector("#customerPhone");
 
 function cleanTime(value) {
   return String(value || "").slice(0, 5);
@@ -95,6 +104,8 @@ function stationType(station = selectedStation()) {
 }
 
 function priceForDuration(minutes) {
+  const pack = state.packages.find((item) => item.active !== false && Number(item.durationMinutes) === Number(minutes));
+  if (pack) return Number(pack.price || 0);
   const total = (Number(minutes || 0) / 60) * Number(state.settings.pricePerHour || 20);
   return Math.round(total * 100) / 100;
 }
@@ -150,6 +161,17 @@ function fromSettings(row = {}) {
   };
 }
 
+function fromPackage(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    durationMinutes: Number(row.duration_minutes || 60),
+    price: Number(row.price || 0),
+    active: row.active !== false,
+    sortOrder: Number(row.sort_order || 0),
+  };
+}
+
 function fromReservation(row) {
   return {
     id: row.id,
@@ -173,24 +195,29 @@ async function loadArenaData() {
       state.localMode = true;
       state.stations = fallbackStations;
       state.settings = fallbackSettings;
+      state.packages = fallbackPackages;
       state.reservations = JSON.parse(localStorage.getItem("nt-arena-local-reservations") || "[]");
       return;
     }
 
-    const [stations, settings] = await Promise.all([
+    const [stations, settings, packages] = await Promise.all([
       supabaseRequest("/arena_stations?select=*&active=eq.true&order=sort_order.asc,name.asc"),
       supabaseRequest("/arena_settings?select=*&order=created_at.asc&limit=1"),
+      supabaseRequest("/arena_packages?select=*&active=eq.true&order=sort_order.asc,duration_minutes.asc"),
     ]);
 
     state.localMode = false;
     state.stations = (stations || []).map(fromStation);
     state.settings = fromSettings(settings?.[0]);
+    state.packages = (packages || []).map(fromPackage);
+    if (!state.packages.length) state.packages = fallbackPackages;
     await loadReservationsForSelectedDate();
   } catch (error) {
     console.error(error);
     state.localMode = true;
     state.stations = fallbackStations;
     state.settings = fallbackSettings;
+    state.packages = fallbackPackages;
     state.reservations = JSON.parse(localStorage.getItem("nt-arena-local-reservations") || "[]");
     showToast("Supabase indisponível. Modo local de teste ativo.");
   } finally {
@@ -265,6 +292,17 @@ function slotIsBusy(slot) {
   const start = minutesFromTime(slot);
   const end = start + Number(state.settings.slotMinutes || 30);
   return state.reservations.some((reservation) => (
+    reservation.stationId === state.selectedStationId
+    && reservation.reservationDate === state.selectedDate
+    && isBlockingReservation(reservation)
+    && overlaps(start, end, minutesFromTime(reservation.startTime), minutesFromTime(reservation.endTime))
+  ));
+}
+
+function reservationForSlot(slot) {
+  const start = minutesFromTime(slot);
+  const end = start + Number(state.settings.slotMinutes || 30);
+  return state.reservations.find((reservation) => (
     reservation.stationId === state.selectedStationId
     && reservation.reservationDate === state.selectedDate
     && isBlockingReservation(reservation)
@@ -356,14 +394,16 @@ function renderSlots() {
   }
 
   buildSlots().forEach((slot) => {
-    const busy = slotIsBusy(slot);
+    const reservation = reservationForSlot(slot);
+    const busy = Boolean(reservation);
     const past = isPastSlot(slot);
     const selected = range && minutesFromTime(slot) >= range.start && minutesFromTime(slot) < range.end;
+    const status = reservation?.status || "livre";
     const button = document.createElement("button");
     button.type = "button";
     button.disabled = busy || past;
-    button.className = `slot-button${busy ? " busy" : ""}${past ? " past" : ""}${selected ? " selected" : ""}`;
-    button.textContent = slot;
+    button.className = `slot-button ${status}${busy ? " busy" : ""}${past ? " past" : ""}${selected ? " selected" : ""}`;
+    button.innerHTML = `<strong>${slot}</strong><span>${busy ? "Horário indisponível" : past ? "Encerrado" : "Livre"}</span>`;
     button.addEventListener("click", () => {
       state.selectedSlot = slot;
       renderSlots();
@@ -375,10 +415,12 @@ function renderSlots() {
 
 function renderDurationOptions() {
   const selected = durationInput.value || "60";
-  durationInput.innerHTML = [60, 120, 180]
-    .map((minutes) => `<option value="${minutes}">${minutes / 60} ${minutes === 60 ? "hora" : "horas"} - ${formatMoney(priceForDuration(minutes))}</option>`)
+  durationInput.innerHTML = state.packages
+    .filter((pack) => pack.active !== false)
+    .sort((a, b) => (a.sortOrder - b.sortOrder) || (a.durationMinutes - b.durationMinutes))
+    .map((pack) => `<option value="${pack.durationMinutes}">${pack.name} - ${formatMoney(pack.price)}</option>`)
     .join("");
-  durationInput.value = selected;
+  durationInput.value = [...durationInput.options].some((option) => option.value === selected) ? selected : durationInput.options[0]?.value || "60";
 }
 
 function renderSummary() {
@@ -393,7 +435,35 @@ function renderSummary() {
   selectedSummary.textContent = problem
     ? problem
     : `${stationName()} em ${fullDateLabel(state.selectedDay)}, ${range.startTime} até ${range.endTime} - ${formatMoney(priceForDuration(range.duration))}`;
+  renderReservationPreview();
   updateWhatsapp();
+}
+
+function renderReservationPreview() {
+  let preview = document.querySelector("#reservationPreview");
+  if (!preview) {
+    preview = document.createElement("div");
+    preview.id = "reservationPreview";
+    preview.className = "reservation-preview";
+    bookingForm.insertBefore(preview, bookingForm.querySelector(".payment-row"));
+  }
+
+  const range = selectedRange();
+  if (!range || selectionProblem()) {
+    preview.innerHTML = "<strong>Resumo</strong><span>Escolha data, equipamento, duração e horário inicial.</span>";
+    return;
+  }
+
+  preview.innerHTML = `
+    <strong>Resumo da solicitação</strong>
+    <span>Equipamento: ${stationName()}</span>
+    <span>Data: ${fullDateLabel(state.selectedDay)}</span>
+    <span>Início: ${range.startTime} · Término: ${range.endTime}</span>
+    <span>Duração: ${range.duration / 60} ${range.duration === 60 ? "hora" : "horas"}</span>
+    <span>Valor total: ${formatMoney(priceForDuration(range.duration))}</span>
+    <span>Nome: ${customerNameInput?.value || "preencha seu nome"}</span>
+    <span>Telefone: ${customerPhoneInput?.value || "preencha seu WhatsApp"}</span>
+  `;
 }
 
 function renderBookings() {
@@ -525,6 +595,9 @@ durationInput.addEventListener("change", () => {
   renderSlots();
   renderSummary();
 });
+
+customerNameInput?.addEventListener("input", renderReservationPreview);
+customerPhoneInput?.addEventListener("input", renderReservationPreview);
 
 bookingForm.addEventListener("submit", async (event) => {
   event.preventDefault();

@@ -62,7 +62,7 @@ export const highlights = [
 export const arenaPlans = [
   { name: "1 hora de jogo", price: "R$ 20,00", detail: "Ideal para partidas rápidas e testes de setup." },
   { name: "Pacote 3 horas", price: "R$ 50,00", detail: "Mais tempo para jogar com amigos e montar squad." },
-  { name: "Mensal / fidelidade", price: "A partir de R$ 150,00", detail: "10 horas mensais para jogar na Arena Gamer, com agendamento antecipado." },
+  { name: "Mensal / fidelidade", price: "A partir de R$ 150,00", detail: "Planos mensais com horas para jogar na Arena Gamer, incluindo o Plano Squad com 40 horas por mês." },
 ];
 
 export const arenaFeatures = [

@@ -23,6 +23,18 @@ create table if not exists public.arena_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.arena_packages (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  duration_minutes integer not null check (duration_minutes > 0),
+  price numeric(10,2) not null default 0,
+  active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (duration_minutes)
+);
+
 create table if not exists public.arena_reservations (
   id uuid primary key default gen_random_uuid(),
   station_id uuid not null references public.arena_stations(id) on delete cascade,
@@ -45,6 +57,9 @@ create index if not exists arena_stations_active_idx
 
 create index if not exists arena_reservations_lookup_idx
   on public.arena_reservations(reservation_date, station_id, status, start_time, end_time);
+
+create index if not exists arena_packages_active_idx
+  on public.arena_packages(active, sort_order);
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -69,6 +84,11 @@ for each row execute function public.set_updated_at();
 drop trigger if exists arena_reservations_set_updated_at on public.arena_reservations;
 create trigger arena_reservations_set_updated_at
 before update on public.arena_reservations
+for each row execute function public.set_updated_at();
+
+drop trigger if exists arena_packages_set_updated_at on public.arena_packages;
+create trigger arena_packages_set_updated_at
+before update on public.arena_packages
 for each row execute function public.set_updated_at();
 
 insert into public.arena_settings (
@@ -96,6 +116,18 @@ insert into public.arena_stations (name, type, description, active, sort_order)
 select 'PlayStation 5', 'ps5', 'Console PlayStation 5 para jogar com amigos.', true, 20
 where not exists (select 1 from public.arena_stations where lower(name) = lower('PlayStation 5'));
 
+insert into public.arena_packages (name, duration_minutes, price, active, sort_order)
+values
+  ('1 Hora', 60, 20.00, true, 10),
+  ('2 Horas', 120, 40.00, true, 20),
+  ('3 Horas', 180, 50.00, true, 30)
+on conflict (duration_minutes) do update
+set
+  name = excluded.name,
+  price = excluded.price,
+  sort_order = excluded.sort_order,
+  updated_at = now();
+
 create or replace function public.create_arena_reservation(
   p_station_id uuid,
   p_customer_name text,
@@ -117,6 +149,7 @@ declare
   v_total_price numeric(10,2);
   v_row public.arena_reservations;
   v_day integer;
+  v_package public.arena_packages;
 begin
   if p_station_id is null then
     raise exception 'Equipamento obrigatório.';
@@ -183,7 +216,19 @@ begin
     raise exception 'Horário indisponível.';
   end if;
 
-  v_total_price := round((p_duration_minutes::numeric / 60) * v_settings.price_per_hour, 2);
+  select *
+    into v_package
+    from public.arena_packages
+    where duration_minutes = p_duration_minutes
+      and active = true
+    order by sort_order asc
+    limit 1;
+
+  if found then
+    v_total_price := v_package.price;
+  else
+    v_total_price := round((p_duration_minutes::numeric / 60) * v_settings.price_per_hour, 2);
+  end if;
 
   insert into public.arena_reservations (
     station_id,
@@ -296,3 +341,4 @@ $$;
 alter table public.arena_stations disable row level security;
 alter table public.arena_settings disable row level security;
 alter table public.arena_reservations disable row level security;
+alter table public.arena_packages disable row level security;
