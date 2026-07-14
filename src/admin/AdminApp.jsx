@@ -401,7 +401,7 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode
   );
 }
 
-function SummaryCard({ label, value, icon: Icon, tone = "cyan" }) {
+function SummaryCard({ label, value, icon: Icon, tone = "cyan", compact = false }) {
   const tones = {
     cyan: "text-nt-cyan bg-nt-cyan/10",
     green: "text-lime-300 bg-lime-300/10",
@@ -410,12 +410,12 @@ function SummaryCard({ label, value, icon: Icon, tone = "cyan" }) {
   };
 
   return (
-    <div className="glass rounded-lg p-5 shadow-card">
-      <div className={`mb-5 grid h-11 w-11 place-items-center rounded-md ${tones[tone]}`}>
-        <Icon size={22} />
+    <div className={`glass min-w-0 rounded-lg shadow-card ${compact ? "p-3 sm:p-4" : "p-5"}`}>
+      <div className={`grid place-items-center rounded-md ${tones[tone]} ${compact ? "mb-3 h-9 w-9" : "mb-5 h-11 w-11"}`}>
+        <Icon size={compact ? 18 : 22} />
       </div>
-      <p className="text-sm font-semibold text-slate-400">{label}</p>
-      <p className="mt-2 text-3xl font-black">{value}</p>
+      <p className={`font-semibold text-slate-400 ${compact ? "text-xs" : "text-sm"}`}>{label}</p>
+      <p className={`mt-1 break-words font-black ${compact ? "text-xl sm:text-2xl" : "text-3xl"}`}>{value}</p>
     </div>
   );
 }
@@ -2248,23 +2248,23 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
   }
 
   return (
-    <div className="grid gap-6">
+    <div className="grid w-full max-w-full min-w-0 gap-4 overflow-x-hidden">
       {arenaData.localMode ? (
-        <div className="rounded-md border border-amber-300/40 bg-amber-300/10 p-4 text-sm text-amber-100">
+        <div className="min-w-0 rounded-md border border-amber-300/40 bg-amber-300/10 p-3 text-sm text-amber-100">
           Supabase não configurado. A Arena está em modo local de teste e não representa reservas reais.
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-4">
-        <SummaryCard label="Reservas do dia" value={dayReservations.length} icon={CalendarDays} />
-        <SummaryCard label="Pendentes" value={pending.length} icon={CalendarDays} />
-        <SummaryCard label="Confirmadas" value={confirmed.length} icon={CheckCircle2} />
-        <SummaryCard label="Horas reservadas" value={`${Math.round((reservedMinutes / 60) * 10) / 10}h`} icon={CalendarDays} />
-        <SummaryCard label="Receita prevista" value={formatCurrency(expectedRevenue)} icon={Star} />
+      <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <SummaryCard compact label="Reservas do dia" value={dayReservations.length} icon={CalendarDays} />
+        <SummaryCard compact label="Pendentes" value={pending.length} icon={CalendarDays} />
+        <SummaryCard compact label="Confirmadas" value={confirmed.length} icon={CheckCircle2} />
+        <SummaryCard compact label="Horas reservadas" value={`${Math.round((reservedMinutes / 60) * 10) / 10}h`} icon={CalendarDays} />
+        <SummaryCard compact label="Receita prevista" value={formatCurrency(expectedRevenue)} icon={Star} />
       </div>
 
-      <section className="glass rounded-lg p-5 shadow-card">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+      <section className="glass min-w-0 rounded-lg p-4 shadow-card">
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <TextField label="Data" type="date" value={filters.date} onChange={(value) => setFilters((current) => ({ ...current, date: value }))} />
           <SelectField label="Status" value={filters.status} onChange={(value) => setFilters((current) => ({ ...current, status: value }))} options={[["", "Todos"], ["pendente", "Pendente"], ["confirmado", "Confirmado"], ["cancelado", "Cancelado"], ["concluido", "Concluído"], ["bloqueado", "Bloqueado"]]} />
           <SelectField label="Equipamento" value={filters.stationId} onChange={(value) => setFilters((current) => ({ ...current, stationId: value }))} options={[["", "Todos"], ...stations.map((station) => [station.id, station.name])]} />
@@ -2272,30 +2272,30 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
         </div>
       </section>
 
-      <section className="glass rounded-lg p-5 shadow-card">
+      <section className="glass min-w-0 overflow-hidden rounded-lg p-4 shadow-card">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h3 className="text-xl font-black">Calendário diário</h3>
+          <div className="min-w-0">
+            <h3 className="text-lg font-black">Calendário diário</h3>
             <p className="mt-1 text-sm text-slate-400">Livre, pendente, confirmado, bloqueado e concluído por equipamento.</p>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs font-bold">
-            <span className="rounded-full bg-lime-400/15 px-3 py-1 text-lime-200">Livre</span>
-            <span className="rounded-full bg-yellow-400/15 px-3 py-1 text-yellow-200">Pendente</span>
-            <span className="rounded-full bg-sky-400/15 px-3 py-1 text-sky-200">Confirmado</span>
-            <span className="rounded-full bg-slate-400/15 px-3 py-1 text-slate-200">Bloqueado</span>
-            <span className="rounded-full bg-white/10 px-3 py-1 text-slate-300">Concluído</span>
+          <div className="flex min-w-0 flex-wrap gap-1.5 text-[11px] font-bold">
+            <span className="rounded-full bg-lime-400/15 px-2.5 py-1 text-lime-200">Livre</span>
+            <span className="rounded-full bg-yellow-400/15 px-2.5 py-1 text-yellow-200">Pendente</span>
+            <span className="rounded-full bg-sky-400/15 px-2.5 py-1 text-sky-200">Confirmado</span>
+            <span className="rounded-full bg-slate-400/15 px-2.5 py-1 text-slate-200">Bloqueado</span>
+            <span className="rounded-full bg-white/10 px-2.5 py-1 text-slate-300">Concluído</span>
           </div>
         </div>
 
-        <div className="mt-5 overflow-x-auto">
-          <div className="grid min-w-[760px] gap-2" style={{ gridTemplateColumns: `150px repeat(${calendarSlots.length}, minmax(72px, 1fr))` }}>
-            <div className="rounded-md border border-white/10 bg-white/5 p-2 text-xs font-black text-slate-300">Equipamento</div>
+        <div className="mt-4 max-w-full min-w-0 overflow-x-auto overscroll-x-contain pb-2">
+          <div className="grid w-max min-w-full gap-1.5" style={{ gridTemplateColumns: `112px repeat(${calendarSlots.length}, minmax(54px, 58px))` }}>
+            <div className="rounded-md border border-white/10 bg-white/5 p-1.5 text-[11px] font-black text-slate-300">Equipamento</div>
             {calendarSlots.map((slot) => (
-              <div key={slot.label} className="rounded-md border border-white/10 bg-white/5 p-2 text-center text-xs font-black text-slate-300">{slot.label}</div>
+              <div key={slot.label} className="rounded-md border border-white/10 bg-white/5 p-1.5 text-center text-[11px] font-black text-slate-300">{slot.label}</div>
             ))}
             {stations.map((station) => (
               <Fragment key={station.id}>
-                <div className="rounded-md border border-white/10 bg-white/5 p-2 text-sm font-black text-white">{station.name}</div>
+                <div className="min-w-0 rounded-md border border-white/10 bg-white/5 p-1.5 text-xs font-black leading-tight text-white">{station.name}</div>
                 {calendarSlots.map((slot) => {
                   const reservation = dayReservations.find((item) => item.stationId === station.id && reservationOverlapsSlot(item, slot.start, slot.end));
                   const status = reservation?.status || "livre";
@@ -2312,7 +2312,7 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
                       key={`${station.id}-${slot.label}`}
                       type="button"
                       onClick={() => reservation ? setSelectedReservationId(reservation.id) : null}
-                      className={`min-h-14 rounded-md border p-2 text-left text-[11px] font-bold transition hover:border-nt-cyan ${statusClass}`}
+                      className={`min-h-11 min-w-0 rounded-md border p-1.5 text-left text-[10px] font-bold leading-tight transition hover:border-nt-cyan ${statusClass}`}
                     >
                       {reservation ? (
                         <>
@@ -2330,11 +2330,11 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
       </section>
 
       {selectedReservation ? (
-        <section className="glass rounded-lg p-5 shadow-card">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h3 className="text-xl font-black">Detalhes da reserva</h3>
-              <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+        <section className="glass min-w-0 rounded-lg p-4 shadow-card">
+          <div className="grid min-w-0 gap-4 xl:grid-cols-[1fr_auto]">
+            <div className="min-w-0">
+              <h3 className="text-lg font-black">Detalhes da reserva</h3>
+              <div className="mt-3 grid min-w-0 gap-2 text-sm text-slate-300 sm:grid-cols-2">
                 <p><strong className="text-white">Cliente:</strong> {selectedReservation.customerName}</p>
                 <p><strong className="text-white">Telefone:</strong> {selectedReservation.customerPhone || "Sem telefone"}</p>
                 <p><strong className="text-white">Data:</strong> {selectedReservation.reservationDate}</p>
@@ -2346,7 +2346,7 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
               </div>
               {selectedReservation.notes ? <p className="mt-3 text-sm text-slate-300">{selectedReservation.notes}</p> : null}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex min-w-0 flex-wrap gap-2 xl:max-w-xs xl:justify-end">
               <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(selectedReservation.id, "confirmado")} icon={CheckCircle2}>Confirmar</AdminButton>
               <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(selectedReservation.id, "concluido")} icon={CheckCircle2}>Concluir</AdminButton>
               <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(selectedReservation.id, "cancelado")} icon={X}>Cancelar</AdminButton>
@@ -2356,24 +2356,24 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
         </section>
       ) : null}
 
-      <section className="glass rounded-lg p-5 shadow-card">
-        <h3 className="text-xl font-black">Lista de reservas</h3>
+      <section className="glass min-w-0 rounded-lg p-4 shadow-card">
+        <h3 className="text-lg font-black">Lista de reservas</h3>
         <p className="mt-1 text-sm text-slate-400">Use os filtros acima para encontrar reservas por cliente, status e equipamento.</p>
 
-        <div className="mt-5 grid gap-3">
+        <div className="mt-4 grid min-w-0 gap-3">
           {filteredReservations.length ? filteredReservations.map((reservation) => (
-            <article key={reservation.id} className="rounded-lg border border-white/10 bg-white/5 p-4">
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div>
+            <article key={reservation.id} className="min-w-0 rounded-lg border border-white/10 bg-white/5 p-3">
+              <div className="grid min-w-0 gap-3 xl:grid-cols-[1fr_auto]">
+                <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <strong className="text-lg">{reservation.customerName}</strong>
+                    <strong className="min-w-0 break-words text-base">{reservation.customerName}</strong>
                     <span className="rounded-full border border-nt-cyan/30 px-2 py-1 text-xs font-bold text-nt-cyan">{reservation.status}</span>
                   </div>
-                  <p className="mt-2 text-sm text-slate-300">{reservation.stationName} · {reservation.reservationDate} · {reservation.startTime} até {reservation.endTime}</p>
-                  <p className="mt-1 text-sm text-slate-400">{reservation.customerPhone || "Sem telefone"} · {reservation.durationMinutes} min · {formatCurrency(reservation.totalPrice)}</p>
+                  <p className="mt-2 break-words text-sm text-slate-300">{reservation.stationName} · {reservation.reservationDate} · {reservation.startTime} até {reservation.endTime}</p>
+                  <p className="mt-1 break-words text-sm text-slate-400">{reservation.customerPhone || "Sem telefone"} · {reservation.durationMinutes} min · {formatCurrency(reservation.totalPrice)}</p>
                   {reservation.notes ? <p className="mt-2 text-sm text-slate-300">{reservation.notes}</p> : null}
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex min-w-0 flex-wrap gap-2 xl:max-w-md xl:justify-end">
                   <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(reservation.id, "confirmado")} icon={CheckCircle2}>Confirmar</AdminButton>
                   <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(reservation.id, "concluido")} icon={CheckCircle2}>Concluir</AdminButton>
                   <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(reservation.id, "cancelado")} icon={X}>Cancelar</AdminButton>
@@ -2386,23 +2386,25 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
         </div>
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <section className="glass rounded-lg p-5 shadow-card">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <section className="glass min-w-0 rounded-lg p-4 shadow-card">
           <h3 className="text-lg font-black">Criar reserva manual</h3>
-          <form onSubmit={submitManual} className="mt-4 grid gap-3">
+          <form onSubmit={submitManual} className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
             <SelectField label="Equipamento" value={manual.stationId} onChange={(value) => setManual((current) => ({ ...current, stationId: value }))} options={stations.map((station) => [station.id, station.name])} />
             <TextField label="Data" type="date" value={manual.reservationDate} onChange={(value) => setManual((current) => ({ ...current, reservationDate: value }))} required />
             <TextField label="Início" type="time" value={manual.startTime} onChange={(value) => setManual((current) => ({ ...current, startTime: value }))} required />
             <SelectField label="Duração" value={manual.durationMinutes} onChange={(value) => setManual((current) => ({ ...current, durationMinutes: Number(value) }))} options={packageOptions} />
             <TextField label="Nome do cliente" value={manual.customerName || manualCustomer?.name || ""} onChange={(value) => setManual((current) => ({ ...current, customerName: value }))} required />
             <TextField label="WhatsApp" value={manual.customerPhone} onChange={(value) => setManual((current) => ({ ...current, customerPhone: value, subscriptionId: "" }))} required />
-            <TextareaField label="Observações" value={manual.notes} onChange={(value) => setManual((current) => ({ ...current, notes: value }))} rows={2} />
+            <div className="sm:col-span-2">
+              <TextareaField label="Observações" value={manual.notes} onChange={(value) => setManual((current) => ({ ...current, notes: value }))} rows={2} />
+            </div>
             <SelectField label="Forma de pagamento" value={manual.paymentType} onChange={(value) => setManual((current) => ({ ...current, paymentType: value, subscriptionId: value === "plano" ? manualSubscription?.id || "" : "" }))} options={[["avulso", "Pagamento avulso"], ["plano", "Usar plano mensal"]]} />
             {manual.paymentType === "plano" ? (
               <SelectField label="Assinatura" value={manual.subscriptionId || manualSubscription?.id || ""} onChange={(value) => setManual((current) => ({ ...current, subscriptionId: value }))} options={manualSubscriptions.length ? manualSubscriptions.map((subscription) => [subscription.id, `${subscription.planName} - ${formatMinutesLabel(subscription.remainingMinutes)} até ${formatShortDate(subscription.expirationDate)}`]) : [["", "Nenhum plano ativo encontrado"]]} />
             ) : null}
             {manual.paymentType === "plano" ? (
-              <div className="rounded-md border border-nt-cyan/20 bg-nt-cyan/10 p-3 text-sm text-slate-200 md:col-span-2">
+              <div className="rounded-md border border-nt-cyan/20 bg-nt-cyan/10 p-3 text-sm text-slate-200 sm:col-span-2">
                 {manualSubscription ? (
                   <>
                     <strong>{manualCustomer?.name || "Cliente encontrado"} · {manualPlan?.name || manualSubscription.planName}</strong>
@@ -2418,20 +2420,22 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
           </form>
         </section>
 
-        <section className="glass rounded-lg p-5 shadow-card">
+        <section className="glass min-w-0 rounded-lg p-4 shadow-card">
           <h3 className="text-lg font-black">Bloqueio manual de horário</h3>
-          <form onSubmit={submitBlock} className="mt-4 grid gap-3">
+          <form onSubmit={submitBlock} className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
             <SelectField label="Equipamento" value={block.stationId} onChange={(value) => setBlock((current) => ({ ...current, stationId: value }))} options={stations.map((station) => [station.id, station.name])} />
             <TextField label="Data" type="date" value={block.reservationDate} onChange={(value) => setBlock((current) => ({ ...current, reservationDate: value }))} required />
             <TextField label="Início" type="time" value={block.startTime} onChange={(value) => setBlock((current) => ({ ...current, startTime: value }))} required />
             <TextField label="Fim" type="time" value={block.endTime} onChange={(value) => setBlock((current) => ({ ...current, endTime: value }))} required />
-            <TextareaField label="Motivo" value={block.reason} onChange={(value) => setBlock((current) => ({ ...current, reason: value }))} rows={2} />
+            <div className="sm:col-span-2">
+              <TextareaField label="Motivo" value={block.reason} onChange={(value) => setBlock((current) => ({ ...current, reason: value }))} rows={2} />
+            </div>
             <AdminButton type="submit" icon={X}>Bloquear horário</AdminButton>
           </form>
         </section>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         <ArenaStationForm stations={stations} onSave={onSaveStation} onDelete={onDeleteStation} />
         <ArenaPackageForm packages={packages} onSave={onSavePackage} onDelete={onDeletePackage} />
         <ArenaSettingsForm settings={settings} onSave={onSaveSettings} />
