@@ -1,15 +1,35 @@
-const durationPrices = {
-  1: 20,
-  2: 40,
-  3: 50
+const storePhone = "5547999309344";
+const blockingStatuses = ["pendente", "confirmado", "bloqueado"];
+
+const supabaseConfig = window.NT_SUPABASE_CONFIG || {};
+const supabaseUrl = String(supabaseConfig.url || "").replace(/\/rest\/v1\/?$/i, "").replace(/\/+$/, "");
+const supabaseAnonKey = String(supabaseConfig.anonKey || "").trim();
+const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+const fallbackSettings = {
+  pricePerHour: 20,
+  openingTime: "09:00",
+  closingTime: "22:00",
+  slotMinutes: 30,
+  activeDays: [1, 2, 3, 4, 5, 6],
+  reservationNotice: "Sua solicitação foi enviada. A reserva será confirmada pela NT Informática.",
 };
 
-const storePhone = "5547999309344";
+const fallbackStations = [
+  { id: "local-pc", name: "PC Gamer", type: "pc", description: "Modo local de teste", active: true, sortOrder: 10 },
+  { id: "local-ps5", name: "PlayStation 5", type: "ps5", description: "Modo local de teste", active: true, sortOrder: 20 },
+];
+
 const state = {
   selectedDay: 0,
-  selectedStation: "pc",
+  selectedDate: "",
+  selectedStationId: "",
   selectedSlot: "",
-  bookings: JSON.parse(localStorage.getItem("nt-bookings") || "[]")
+  stations: [],
+  reservations: [],
+  settings: fallbackSettings,
+  localMode: !isSupabaseConfigured,
+  loading: true,
 };
 
 const dayStrip = document.querySelector("#dayStrip");
@@ -20,17 +40,34 @@ const bookingList = document.querySelector("#bookingList");
 const durationInput = document.querySelector("#duration");
 const toast = document.querySelector("#toast");
 const whatsappLink = document.querySelector("#whatsappLink");
+const stationGrid = document.querySelector(".station-grid");
+const noticeText = document.querySelector(".fine-print");
 
-const slots = ["09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"];
-const busySeed = {
-  pc: ["10:00", "14:00", "19:00"],
-  ps5: ["11:00", "16:00", "20:00"]
-};
+function cleanTime(value) {
+  return String(value || "").slice(0, 5);
+}
 
-function formatDate(offset) {
+function minutesFromTime(value) {
+  const [hour, minute] = cleanTime(value).split(":").map(Number);
+  return (hour * 60) + minute;
+}
+
+function timeFromMinutes(value) {
+  const normalized = Math.max(0, value);
+  const hour = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function todayDate(offset = 0) {
   const date = new Date();
   date.setDate(date.getDate() + offset);
+  date.setHours(0, 0, 0, 0);
   return date;
+}
+
+function isoDate(offset = state.selectedDay) {
+  return todayDate(offset).toISOString().slice(0, 10);
 }
 
 function dayLabel(date) {
@@ -41,106 +78,224 @@ function dateLabel(date) {
   return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(date);
 }
 
-function fullDateLabel(offset) {
-  return new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).format(formatDate(offset));
+function fullDateLabel(offset = state.selectedDay) {
+  return new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).format(todayDate(offset));
 }
 
-function stationName(station) {
-  return station === "pc" ? "PC Gamer" : "PlayStation 5";
+function selectedStation() {
+  return state.stations.find((station) => station.id === state.selectedStationId) || state.stations[0];
 }
 
-function priceForDuration(hours) {
-  return durationPrices[hours] || hours * 20;
+function stationName(station = selectedStation()) {
+  return station?.name || "Arena Gamer";
 }
 
-function bookingKey(dayOffset, station, slot) {
-  return `${dayOffset}-${station}-${slot}`;
+function stationType(station = selectedStation()) {
+  return station?.type || "pc";
+}
+
+function priceForDuration(minutes) {
+  const total = (Number(minutes || 0) / 60) * Number(state.settings.pricePerHour || 20);
+  return Math.round(total * 100) / 100;
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
+}
+
+function supabaseHeaders(extra = {}) {
+  return {
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${supabaseAnonKey}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Prefer: "return=representation",
+    ...extra,
+  };
+}
+
+async function supabaseRequest(path, options = {}) {
+  if (!isSupabaseConfigured) throw new Error("Supabase não configurado.");
+  const response = await fetch(`${supabaseUrl}/rest/v1${path}`, {
+    ...options,
+    headers: supabaseHeaders(options.headers),
+  });
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(details || `Erro Supabase ${response.status}`);
+  }
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+function fromStation(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    description: row.description || "",
+    active: row.active !== false,
+    sortOrder: Number(row.sort_order || 0),
+  };
+}
+
+function fromSettings(row = {}) {
+  return {
+    pricePerHour: Number(row.price_per_hour ?? 20),
+    openingTime: cleanTime(row.opening_time || "09:00"),
+    closingTime: cleanTime(row.closing_time || "22:00"),
+    slotMinutes: Number(row.slot_minutes || 30),
+    activeDays: Array.isArray(row.active_days) ? row.active_days : [1, 2, 3, 4, 5, 6],
+    reservationNotice: row.reservation_notice || fallbackSettings.reservationNotice,
+  };
+}
+
+function fromReservation(row) {
+  return {
+    id: row.id,
+    stationId: row.station_id,
+    customerName: row.customer_name || "",
+    customerPhone: row.customer_phone || "",
+    reservationDate: row.reservation_date,
+    startTime: cleanTime(row.start_time),
+    endTime: cleanTime(row.end_time),
+    durationMinutes: Number(row.duration_minutes || 0),
+    totalPrice: Number(row.total_price || 0),
+    status: row.status || "pendente",
+    notes: row.notes || "",
+  };
+}
+
+async function loadArenaData() {
+  state.loading = true;
+  try {
+    if (!isSupabaseConfigured) {
+      state.localMode = true;
+      state.stations = fallbackStations;
+      state.settings = fallbackSettings;
+      state.reservations = JSON.parse(localStorage.getItem("nt-arena-local-reservations") || "[]");
+      return;
+    }
+
+    const [stations, settings] = await Promise.all([
+      supabaseRequest("/arena_stations?select=*&active=eq.true&order=sort_order.asc,name.asc"),
+      supabaseRequest("/arena_settings?select=*&order=created_at.asc&limit=1"),
+    ]);
+
+    state.localMode = false;
+    state.stations = (stations || []).map(fromStation);
+    state.settings = fromSettings(settings?.[0]);
+    await loadReservationsForSelectedDate();
+  } catch (error) {
+    console.error(error);
+    state.localMode = true;
+    state.stations = fallbackStations;
+    state.settings = fallbackSettings;
+    state.reservations = JSON.parse(localStorage.getItem("nt-arena-local-reservations") || "[]");
+    showToast("Supabase indisponível. Modo local de teste ativo.");
+  } finally {
+    if (!state.selectedStationId) state.selectedStationId = state.stations[0]?.id || "";
+    state.loading = false;
+  }
+}
+
+async function loadReservationsForSelectedDate() {
+  state.selectedDate = isoDate();
+  if (!isSupabaseConfigured || state.localMode) return;
+  const rows = await supabaseRequest(`/arena_reservations?select=*&reservation_date=eq.${state.selectedDate}`);
+  state.reservations = (rows || []).map(fromReservation);
+}
+
+function buildSlots() {
+  const start = minutesFromTime(state.settings.openingTime);
+  const end = minutesFromTime(state.settings.closingTime);
+  const step = Number(state.settings.slotMinutes || 30);
+  const slots = [];
+  for (let minute = start; minute < end; minute += step) {
+    slots.push(timeFromMinutes(minute));
+  }
+  return slots;
+}
+
+function isActiveDay(offset) {
+  const dow = todayDate(offset).getDay();
+  return state.settings.activeDays.includes(dow);
 }
 
 function isPastSlot(slot) {
-  if (state.selectedDay !== 0) {
-    return false;
-  }
-
+  if (state.selectedDay !== 0) return false;
   const [hour, minute] = slot.split(":").map(Number);
   const slotDate = new Date();
   slotDate.setHours(hour, minute, 0, 0);
   return slotDate <= new Date();
 }
 
-function bookingOccupiesSlot(booking, slot) {
-  const key = bookingKey(state.selectedDay, state.selectedStation, slot);
-  if (Array.isArray(booking.keys)) {
-    return booking.keys.includes(key);
-  }
-  return booking.key === key;
+function isBlockingReservation(reservation) {
+  return blockingStatuses.includes(reservation.status);
 }
 
-function isBusy(slot) {
-  const seeded = busySeed[state.selectedStation].includes(slot) && state.selectedDay === 0;
-  const reserved = state.bookings.some((booking) => bookingOccupiesSlot(booking, slot));
-  return seeded || reserved;
+function overlaps(start, end, busyStart, busyEnd) {
+  return start < busyEnd && end > busyStart;
 }
 
-function selectedSlotsForDuration() {
-  if (!state.selectedSlot) {
-    return [];
-  }
+function selectedRange() {
+  if (!state.selectedSlot) return null;
+  const start = minutesFromTime(state.selectedSlot);
+  const duration = Number(durationInput.value || 60);
+  return {
+    start,
+    end: start + duration,
+    startTime: timeFromMinutes(start),
+    endTime: timeFromMinutes(start + duration),
+    duration,
+  };
+}
 
-  const hours = Number(durationInput.value);
-  const startIndex = slots.indexOf(state.selectedSlot);
-  if (startIndex < 0) {
-    return [];
-  }
+function rangeIsBusy(range) {
+  if (!range) return false;
+  return state.reservations.some((reservation) => (
+    reservation.stationId === state.selectedStationId
+    && reservation.reservationDate === state.selectedDate
+    && isBlockingReservation(reservation)
+    && overlaps(range.start, range.end, minutesFromTime(reservation.startTime), minutesFromTime(reservation.endTime))
+  ));
+}
 
-  return slots.slice(startIndex, startIndex + hours);
+function slotIsBusy(slot) {
+  const start = minutesFromTime(slot);
+  const end = start + Number(state.settings.slotMinutes || 30);
+  return state.reservations.some((reservation) => (
+    reservation.stationId === state.selectedStationId
+    && reservation.reservationDate === state.selectedDate
+    && isBlockingReservation(reservation)
+    && overlaps(start, end, minutesFromTime(reservation.startTime), minutesFromTime(reservation.endTime))
+  ));
 }
 
 function selectionProblem() {
-  const hours = Number(durationInput.value);
-  const selectedSlots = selectedSlotsForDuration();
-  if (!selectedSlots.length) {
-    return "Escolha um horario antes de reservar.";
-  }
-  if (selectedSlots.length < hours) {
-    return "Nao ha horarios suficientes em sequencia para essa duracao.";
-  }
-  if (selectedSlots.some((slot) => isBusy(slot) || isPastSlot(slot))) {
-    return "Um dos horarios desse periodo ja esta ocupado. Escolha outro inicio.";
-  }
+  const range = selectedRange();
+  if (!range) return "Escolha um horário antes de reservar.";
+  if (!isActiveDay(state.selectedDay)) return "A Arena não atende neste dia.";
+  if (range.end > minutesFromTime(state.settings.closingTime)) return "Não há tempo suficiente antes do fechamento.";
+  if (isPastSlot(range.startTime)) return "Esse horário já passou.";
+  if (rangeIsBusy(range)) return "Horário indisponível. Escolha outro período.";
   return "";
 }
 
-function selectedSlotRange() {
-  const selectedSlots = selectedSlotsForDuration();
-  if (!selectedSlots.length) {
-    return "";
-  }
-  return selectedSlots.join(", ");
-}
-
 function buildReservationMessage({ customerName = "", customerPhone = "" } = {}) {
-  const hours = Number(durationInput.value);
-  const total = priceForDuration(hours);
-  const selectedSlots = selectedSlotRange();
-  const nameLine = customerName ? `Nome: ${customerName}.` : "";
-  const phoneLine = customerPhone ? `WhatsApp do cliente: ${customerPhone}.` : "";
-
-  if (!state.selectedSlot) {
-    return "Ola, NT Informatica. Quero saber quais horarios estao disponiveis para jogar na Arena Gamer.";
-  }
+  const range = selectedRange();
+  if (!range) return "Olá, NT Informática. Quero saber quais horários estão disponíveis para jogar na Arena Gamer.";
 
   return [
-    "Ola, NT Informatica. Quero confirmar uma pre-reserva na Arena Gamer.",
-    nameLine,
-    phoneLine,
-    `Estacao: ${stationName(state.selectedStation)}.`,
+    "Olá, NT Informática. Enviei uma solicitação de reserva na Arena Gamer.",
+    customerName ? `Nome: ${customerName}.` : "",
+    customerPhone ? `WhatsApp do cliente: ${customerPhone}.` : "",
+    `Equipamento: ${stationName()}.`,
     `Dia: ${fullDateLabel(state.selectedDay)}.`,
-    `Horarios: ${selectedSlots}.`,
-    `Duracao: ${hours} ${hours === 1 ? "hora" : "horas"}.`,
-    `Valor: R$ ${total}.`,
-    "Forma de pagamento: Pix/loja.",
-    "Pode me enviar os dados para pagamento e confirmar a reserva?"
+    `Horário: ${range.startTime} até ${range.endTime}.`,
+    `Duração: ${range.duration} minutos.`,
+    `Valor: ${formatMoney(priceForDuration(range.duration))}.`,
+    "Status: aguardando confirmação da loja.",
   ].filter(Boolean).join("\n");
 }
 
@@ -150,28 +305,60 @@ function whatsappHref(message) {
 
 function renderDays() {
   dayStrip.innerHTML = "";
-  for (let index = 0; index < 3; index += 1) {
-    const date = formatDate(index);
+  for (let index = 0; index < 7; index += 1) {
+    const date = todayDate(index);
+    const active = isActiveDay(index);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `day-card${state.selectedDay === index ? " active" : ""}`;
+    button.disabled = !active;
+    button.className = `day-card${state.selectedDay === index ? " active" : ""}${!active ? " past" : ""}`;
     button.innerHTML = `<strong>${dayLabel(date)}</strong><span>${dateLabel(date)}</span>`;
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       state.selectedDay = index;
       state.selectedSlot = "";
+      state.selectedDate = isoDate(index);
+      await loadReservationsForSelectedDate();
       render();
     });
     dayStrip.appendChild(button);
   }
 }
 
+function renderStations() {
+  stationGrid.innerHTML = "";
+  if (!state.stations.length) {
+    stationGrid.innerHTML = '<div class="empty-state">Nenhum equipamento ativo cadastrado.</div>';
+    return;
+  }
+
+  state.stations.forEach((station) => {
+    const button = document.createElement("button");
+    button.className = `station-card${station.id === state.selectedStationId ? " active" : ""}`;
+    button.type = "button";
+    button.dataset.station = station.type;
+    button.innerHTML = `<span>${station.type === "ps5" ? "PLAYSTATION 5" : "PC GAMER"}</span><strong>${station.name}</strong>`;
+    button.addEventListener("click", () => {
+      state.selectedStationId = station.id;
+      state.selectedSlot = "";
+      render();
+    });
+    stationGrid.appendChild(button);
+  });
+}
+
 function renderSlots() {
-  const highlightedSlots = selectedSlotsForDuration();
+  const range = selectedRange();
   slotGrid.innerHTML = "";
-  slots.forEach((slot) => {
-    const busy = isBusy(slot);
+
+  if (!isActiveDay(state.selectedDay)) {
+    slotGrid.innerHTML = '<div class="empty-state">A Arena não atende neste dia.</div>';
+    return;
+  }
+
+  buildSlots().forEach((slot) => {
+    const busy = slotIsBusy(slot);
     const past = isPastSlot(slot);
-    const selected = highlightedSlots.includes(slot);
+    const selected = range && minutesFromTime(slot) >= range.start && minutesFromTime(slot) < range.end;
     const button = document.createElement("button");
     button.type = "button";
     button.disabled = busy || past;
@@ -186,41 +373,55 @@ function renderSlots() {
   });
 }
 
+function renderDurationOptions() {
+  const selected = durationInput.value || "60";
+  durationInput.innerHTML = [60, 120, 180]
+    .map((minutes) => `<option value="${minutes}">${minutes / 60} ${minutes === 60 ? "hora" : "horas"} - ${formatMoney(priceForDuration(minutes))}</option>`)
+    .join("");
+  durationInput.value = selected;
+}
+
 function renderSummary() {
-  if (!state.selectedSlot) {
-    selectedSummary.textContent = "Selecione um horario";
+  const range = selectedRange();
+  if (!range) {
+    selectedSummary.textContent = "Selecione um horário";
     updateWhatsapp();
     return;
   }
 
-  const hours = Number(durationInput.value);
-  const total = priceForDuration(hours);
-  const slotsText = selectedSlotRange();
   const problem = selectionProblem();
   selectedSummary.textContent = problem
     ? problem
-    : `${stationName(state.selectedStation)} em ${fullDateLabel(state.selectedDay)}, ${slotsText} - ${hours}h - R$ ${total}`;
+    : `${stationName()} em ${fullDateLabel(state.selectedDay)}, ${range.startTime} até ${range.endTime} - ${formatMoney(priceForDuration(range.duration))}`;
   updateWhatsapp();
 }
 
 function renderBookings() {
+  const ownBookings = state.localMode
+    ? state.reservations
+    : state.reservations.filter((reservation) => reservation.customerPhone);
+
   bookingList.innerHTML = "";
-  if (!state.bookings.length) {
-    bookingList.innerHTML = '<div class="empty-state">Nenhuma reserva salva ainda.</div>';
+  if (!ownBookings.length) {
+    bookingList.innerHTML = `<div class="empty-state">${state.localMode ? "Modo local de teste: nenhuma solicitação salva neste navegador." : "Nenhuma solicitação para este dia."}</div>`;
     return;
   }
 
-  state.bookings.forEach((booking) => {
-    const card = document.createElement("article");
-    card.className = "booking-card";
-    card.innerHTML = `
-      <span>${booking.customerName} - ${booking.customerPhone}</span>
-      <strong>${booking.station} - ${booking.day}, ${booking.slotRange || booking.slot}</strong>
-      <span>${booking.duration} ${booking.duration === 1 ? "hora" : "horas"} - R$ ${booking.total}</span>
-      <span class="status">${booking.status}</span>
-    `;
-    bookingList.appendChild(card);
-  });
+  ownBookings
+    .slice()
+    .sort((a, b) => `${a.reservationDate} ${a.startTime}`.localeCompare(`${b.reservationDate} ${b.startTime}`))
+    .forEach((booking) => {
+      const station = state.stations.find((item) => item.id === booking.stationId);
+      const card = document.createElement("article");
+      card.className = "booking-card";
+      card.innerHTML = `
+        <span>${booking.customerName || "Cliente"} - ${booking.customerPhone || "sem telefone"}</span>
+        <strong>${station?.name || "Arena"} - ${booking.reservationDate}, ${booking.startTime} até ${booking.endTime}</strong>
+        <span>${booking.durationMinutes} min - ${formatMoney(booking.totalPrice)}</span>
+        <span class="status">${booking.status}</span>
+      `;
+      bookingList.appendChild(card);
+    });
 }
 
 function updateWhatsapp() {
@@ -230,49 +431,93 @@ function updateWhatsapp() {
 function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
-  window.setTimeout(() => toast.classList.remove("show"), 2600);
+  window.setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
 function switchView(view) {
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.view === view));
   document.querySelectorAll(".view").forEach((section) => section.classList.remove("active"));
   document.querySelector(`#${view}-view`).classList.add("active");
-  if (view === "bookings") {
-    renderBookings();
-  }
+  if (view === "bookings") renderBookings();
 }
 
 function applyStationTheme() {
-  document.body.classList.toggle("theme-pc", state.selectedStation === "pc");
-  document.body.classList.toggle("theme-ps5", state.selectedStation === "ps5");
+  document.body.classList.toggle("theme-pc", stationType() === "pc");
+  document.body.classList.toggle("theme-ps5", stationType() === "ps5");
+}
+
+function renderModeNotice() {
+  if (!noticeText) return;
+  noticeText.textContent = state.localMode
+    ? "Modo local de teste: as solicitações ficam salvas apenas neste navegador porque o Supabase não está configurado."
+    : "Sua solicitação será salva como pendente e confirmada pela NT Informática.";
 }
 
 function render() {
   applyStationTheme();
+  renderModeNotice();
+  renderDurationOptions();
   renderDays();
+  renderStations();
   renderSlots();
   renderSummary();
   renderBookings();
+}
+
+async function createReservation(payload) {
+  if (state.localMode || !isSupabaseConfigured) {
+    const reservation = {
+      id: `local-${Date.now()}`,
+      ...payload,
+      endTime: selectedRange().endTime,
+      totalPrice: priceForDuration(payload.durationMinutes),
+      status: "pendente",
+    };
+    const stored = JSON.parse(localStorage.getItem("nt-arena-local-reservations") || "[]");
+    const conflict = stored.some((item) => (
+      item.stationId === reservation.stationId
+      && item.reservationDate === reservation.reservationDate
+      && isBlockingReservation(item)
+      && overlaps(
+        minutesFromTime(reservation.startTime),
+        minutesFromTime(reservation.endTime),
+        minutesFromTime(item.startTime),
+        minutesFromTime(item.endTime),
+      )
+    ));
+    if (conflict) throw new Error("Horário indisponível.");
+    stored.unshift(reservation);
+    localStorage.setItem("nt-arena-local-reservations", JSON.stringify(stored));
+    state.reservations = stored;
+    return reservation;
+  }
+
+  const rows = await supabaseRequest("/rpc/create_arena_reservation", {
+    method: "POST",
+    body: JSON.stringify({
+      p_station_id: payload.stationId,
+      p_customer_name: payload.customerName,
+      p_customer_phone: payload.customerPhone,
+      p_reservation_date: payload.reservationDate,
+      p_start_time: payload.startTime,
+      p_duration_minutes: payload.durationMinutes,
+      p_notes: payload.notes || null,
+    }),
+  });
+  const created = fromReservation(rows?.[0] || {});
+  await loadReservationsForSelectedDate();
+  return created;
 }
 
 document.querySelectorAll("[data-view]").forEach((control) => {
   control.addEventListener("click", () => switchView(control.dataset.view));
 });
 
-document.querySelectorAll(".station-card").forEach((card) => {
-  card.addEventListener("click", () => {
-    state.selectedStation = card.dataset.station;
-    state.selectedSlot = "";
-    applyStationTheme();
-    document.querySelectorAll(".station-card").forEach((item) => item.classList.toggle("active", item === card));
-    renderSlots();
-    renderSummary();
-  });
-});
-
-document.querySelector("#todayButton").addEventListener("click", () => {
+document.querySelector("#todayButton").addEventListener("click", async () => {
   state.selectedDay = 0;
   state.selectedSlot = "";
+  state.selectedDate = isoDate(0);
+  await loadReservationsForSelectedDate();
   render();
 });
 
@@ -281,7 +526,7 @@ durationInput.addEventListener("change", () => {
   renderSummary();
 });
 
-bookingForm.addEventListener("submit", (event) => {
+bookingForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const problem = selectionProblem();
@@ -291,35 +536,37 @@ bookingForm.addEventListener("submit", (event) => {
   }
 
   const form = new FormData(bookingForm);
-  const hours = Number(durationInput.value);
-  const selectedSlots = selectedSlotsForDuration();
-  const customerName = form.get("customerName");
-  const customerPhone = form.get("customerPhone");
-  const booking = {
-    key: bookingKey(state.selectedDay, state.selectedStation, state.selectedSlot),
-    keys: selectedSlots.map((slot) => bookingKey(state.selectedDay, state.selectedStation, slot)),
-    customerName,
-    customerPhone,
-    station: stationName(state.selectedStation),
-    day: fullDateLabel(state.selectedDay),
-    slot: state.selectedSlot,
-    slotRange: selectedSlots.join(", "),
-    duration: hours,
-    total: priceForDuration(hours),
-    status: "Pre-reserva aguardando pagamento"
-  };
+  const customerName = String(form.get("customerName") || "").trim();
+  const customerPhone = String(form.get("customerPhone") || "").trim();
+  const notes = String(form.get("customerNotes") || "").trim();
 
-  state.bookings.unshift(booking);
-  localStorage.setItem("nt-bookings", JSON.stringify(state.bookings));
+  if (!customerName || !customerPhone) {
+    showToast("Informe nome e WhatsApp para reservar.");
+    return;
+  }
 
-  const message = buildReservationMessage({ customerName, customerPhone });
-  window.open(whatsappHref(message), "_blank", "noopener,noreferrer");
+  try {
+    const range = selectedRange();
+    await createReservation({
+      stationId: state.selectedStationId,
+      customerName,
+      customerPhone,
+      reservationDate: state.selectedDate,
+      startTime: range.startTime,
+      durationMinutes: range.duration,
+      notes,
+    });
 
-  state.selectedSlot = "";
-  bookingForm.reset();
-  render();
-  switchView("bookings");
-  showToast("Pre-reserva salva. Confirme o pagamento pelo WhatsApp.");
+    state.selectedSlot = "";
+    bookingForm.reset();
+    await loadReservationsForSelectedDate();
+    render();
+    switchView("bookings");
+    showToast(state.settings.reservationNotice || fallbackSettings.reservationNotice);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Falha ao salvar reserva.");
+  }
 });
 
 document.querySelector("#copyMessage").addEventListener("click", async () => {
@@ -332,12 +579,18 @@ document.querySelector("#copyMessage").addEventListener("click", async () => {
   showToast(message);
 });
 
-render();
+async function start() {
+  state.selectedDate = isoDate(0);
+  await loadArenaData();
+  render();
+}
+
+start();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/arena/sw.js?v=20260706-1010", { scope: "/arena/" }).catch(() => {
-      showToast("Modo instalavel indisponivel neste navegador.");
+      showToast("Modo instalável indisponível neste navegador.");
     });
   });
 }

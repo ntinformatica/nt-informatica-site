@@ -1,8 +1,9 @@
-const CACHE_NAME = "nt-informatica-arena-v20260706-1030";
+const CACHE_NAME = "nt-informatica-arena-v20260713-1200";
 const ASSETS = [
   "/arena/",
   "/arena/index.html",
   "/arena/styles.css",
+  "/arena/supabase-config.js",
   "/arena/app.js",
   "/arena/manifest.json",
   "/arena/assets/gaming-lounge-banner.png",

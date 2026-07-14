@@ -32,7 +32,10 @@ function normalizeAnonKey(value) {
   return cleanEnvValue(value).replace(/\s+/g, "");
 }
 
-const configPath = resolve("public/produtos/supabase-config.js");
+const configPaths = [
+  resolve("public/produtos/supabase-config.js"),
+  resolve("public/arena/supabase-config.js"),
+];
 loadEnvFile(resolve(".env"));
 loadEnvFile(resolve(".env.local"));
 
@@ -41,12 +44,14 @@ const config = {
   anonKey: normalizeAnonKey(process.env.VITE_SUPABASE_ANON_KEY),
 };
 
-mkdirSync(dirname(configPath), { recursive: true });
-writeFileSync(
-  configPath,
-  `window.NT_SUPABASE_CONFIG = ${JSON.stringify(config, null, 2)};\n`,
-);
+for (const configPath of configPaths) {
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(
+    configPath,
+    `window.NT_SUPABASE_CONFIG = ${JSON.stringify(config, null, 2)};\n`,
+  );
+}
 
 console.log(config.url && config.anonKey
-  ? "Config publica do Supabase criada para /produtos."
-  : "Config publica do Supabase criada vazia; /produtos usara fallback local.");
+  ? "Config publica do Supabase criada para /produtos e /arena."
+  : "Config publica do Supabase criada vazia; /produtos e /arena usarao fallback local.");

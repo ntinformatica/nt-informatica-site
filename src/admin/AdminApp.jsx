@@ -35,6 +35,16 @@ import { adminRecentChanges, adminSessionKey, adminStatuses } from "./adminData"
 import { createCategory, deleteCategory, listCategories, updateCategory } from "./services/categoryService";
 import { slugify } from "./services/localStorageHelpers";
 import {
+  createArenaBlock,
+  createArenaReservation,
+  deleteArenaReservation,
+  deleteArenaStation,
+  listArenaData,
+  saveArenaStation,
+  updateArenaReservationStatus,
+  updateArenaSettings,
+} from "./services/arenaService";
+import {
   createAssembledPc,
   deleteAssembledPc,
   listAssembledPcs,
@@ -1647,18 +1657,241 @@ function CategoriesPage({ categories, products, onCreate, onUpdate, onDelete, er
   );
 }
 
-function ArenaPage() {
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function reservationWhatsappHref(reservation) {
+  const text = [
+    `Olá, ${reservation.customerName}.`,
+    `Sobre sua reserva na NT Arena Gamer:`,
+    `Equipamento: ${reservation.stationName || "Arena Gamer"}.`,
+    `Data: ${reservation.reservationDate}.`,
+    `Horário: ${reservation.startTime} até ${reservation.endTime}.`,
+    `Status: ${reservation.status}.`,
+  ].join("\n");
+  return `https://wa.me/5547999309344?text=${encodeURIComponent(text)}`;
+}
+
+function ArenaStationForm({ stations, onSave, onDelete }) {
+  const [form, setForm] = useState({ id: "", name: "", type: "pc", description: "", active: true, sortOrder: stations.length + 1 });
+
+  function submit(event) {
+    event.preventDefault();
+    onSave(form);
+    setForm({ id: "", name: "", type: "pc", description: "", active: true, sortOrder: stations.length + 1 });
+  }
+
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      {["Reservas de hoje", "Horários aguardando confirmação", "Planos ativos"].map((label) => (
-        <SummaryCard key={label} label={label} value="0" icon={CalendarDays} />
-      ))}
-      <section className="glass rounded-lg p-6 lg:col-span-3">
-        <h2 className="text-2xl font-black">Arena Gamer</h2>
-        <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-          A integração da Arena com banco online fica para uma próxima fase. Produtos e categorias já estão preparados para Supabase.
-        </p>
+    <section className="glass rounded-lg p-5 shadow-card">
+      <h3 className="text-lg font-black">Equipamentos</h3>
+      <form onSubmit={submit} className="mt-4 grid gap-3">
+        <TextField label="Nome" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} required />
+        <SelectField label="Tipo" value={form.type} onChange={(value) => setForm((current) => ({ ...current, type: value }))} options={[["pc", "PC"], ["ps5", "PlayStation 5"]]} />
+        <TextField label="Ordem" type="number" value={form.sortOrder} onChange={(value) => setForm((current) => ({ ...current, sortOrder: Number(value) }))} />
+        <TextareaField label="Descrição" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} rows={2} />
+        <label className="flex items-center gap-3 text-sm font-bold text-slate-200">
+          <input type="checkbox" checked={form.active} onChange={(event) => setForm((current) => ({ ...current, active: event.target.checked }))} />
+          Equipamento ativo
+        </label>
+        <AdminButton type="submit" icon={FilePlus2}>{form.id ? "Salvar equipamento" : "Cadastrar equipamento"}</AdminButton>
+      </form>
+
+      <div className="mt-5 grid gap-3">
+        {stations.length ? stations.map((station) => (
+          <article key={station.id} className="rounded-md border border-white/10 bg-white/5 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <strong>{station.name}</strong>
+                <p className="text-xs text-slate-400">{station.type.toUpperCase()} · ordem {station.sortOrder} · {station.active ? "ativo" : "inativo"}</p>
+              </div>
+              <div className="flex gap-2">
+                <AdminButton type="button" variant="secondary" onClick={() => setForm(station)} icon={Pencil}>Editar</AdminButton>
+                <AdminButton type="button" variant="danger" onClick={() => onDelete(station.id)} icon={Trash2}>Excluir</AdminButton>
+              </div>
+            </div>
+          </article>
+        )) : <p className="text-sm text-slate-400">Nenhum equipamento cadastrado.</p>}
+      </div>
+    </section>
+  );
+}
+
+function ArenaSettingsForm({ settings, onSave }) {
+  const [form, setForm] = useState(settings);
+  const days = [
+    [0, "Dom"],
+    [1, "Seg"],
+    [2, "Ter"],
+    [3, "Qua"],
+    [4, "Qui"],
+    [5, "Sex"],
+    [6, "Sáb"],
+  ];
+
+  useEffect(() => setForm(settings), [settings]);
+
+  function toggleDay(day) {
+    setForm((current) => {
+      const activeDays = current.activeDays.includes(day)
+        ? current.activeDays.filter((item) => item !== day)
+        : [...current.activeDays, day].sort();
+      return { ...current, activeDays };
+    });
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    onSave(form);
+  }
+
+  return (
+    <section className="glass rounded-lg p-5 shadow-card">
+      <h3 className="text-lg font-black">Configurações</h3>
+      <form onSubmit={submit} className="mt-4 grid gap-3">
+        <TextField label="Preço por hora" value={form.pricePerHour} onChange={(value) => setForm((current) => ({ ...current, pricePerHour: value }))} />
+        <TextField label="Abertura" type="time" value={form.openingTime} onChange={(value) => setForm((current) => ({ ...current, openingTime: value }))} />
+        <TextField label="Fechamento" type="time" value={form.closingTime} onChange={(value) => setForm((current) => ({ ...current, closingTime: value }))} />
+        <SelectField label="Intervalo" value={form.slotMinutes} onChange={(value) => setForm((current) => ({ ...current, slotMinutes: Number(value) }))} options={[[15, "15 minutos"], [30, "30 minutos"], [60, "60 minutos"]]} />
+        <div>
+          <p className="text-sm font-bold text-slate-200">Dias ativos</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {days.map(([day, label]) => (
+              <button key={day} type="button" onClick={() => toggleDay(day)} className={`rounded-md border px-3 py-2 text-xs font-bold ${form.activeDays.includes(day) ? "border-nt-cyan bg-nt-cyan/15 text-nt-cyan" : "border-slate-700 bg-white/5 text-slate-300"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <TextareaField label="Aviso após reserva" value={form.reservationNotice} onChange={(value) => setForm((current) => ({ ...current, reservationNotice: value }))} rows={2} />
+        <AdminButton type="submit" icon={CheckCircle2}>Salvar configurações</AdminButton>
+      </form>
+    </section>
+  );
+}
+
+function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCreateReservation, onCreateBlock, onSaveStation, onDeleteStation, onSaveSettings }) {
+  const [filters, setFilters] = useState({ date: todayIsoDate(), status: "", stationId: "", query: "" });
+  const [manual, setManual] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "14:00", durationMinutes: 60, customerName: "", customerPhone: "", notes: "" });
+  const [block, setBlock] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "12:00", endTime: "13:00", reason: "" });
+  const stations = arenaData.stations || [];
+  const reservations = arenaData.reservations || [];
+  const settings = arenaData.settings || {};
+  const today = todayIsoDate();
+
+  useEffect(() => {
+    const firstStation = stations[0]?.id || "";
+    setManual((current) => ({ ...current, stationId: current.stationId || firstStation }));
+    setBlock((current) => ({ ...current, stationId: current.stationId || firstStation }));
+  }, [stations]);
+
+  const filteredReservations = reservations.filter((reservation) => {
+    const matchesDate = !filters.date || reservation.reservationDate === filters.date;
+    const matchesStatus = !filters.status || reservation.status === filters.status;
+    const matchesStation = !filters.stationId || reservation.stationId === filters.stationId;
+    const query = filters.query.trim().toLowerCase();
+    const matchesQuery = !query || `${reservation.customerName} ${reservation.customerPhone}`.toLowerCase().includes(query);
+    return matchesDate && matchesStatus && matchesStation && matchesQuery;
+  });
+
+  const todayReservations = reservations.filter((reservation) => reservation.reservationDate === today);
+  const pending = reservations.filter((reservation) => reservation.status === "pendente");
+  const confirmed = reservations.filter((reservation) => reservation.status === "confirmado");
+  const blocked = reservations.filter((reservation) => reservation.status === "bloqueado");
+
+  function submitManual(event) {
+    event.preventDefault();
+    onCreateReservation(manual);
+    setManual((current) => ({ ...current, customerName: "", customerPhone: "", notes: "" }));
+  }
+
+  function submitBlock(event) {
+    event.preventDefault();
+    onCreateBlock(block);
+    setBlock((current) => ({ ...current, reason: "" }));
+  }
+
+  return (
+    <div className="grid gap-6">
+      {arenaData.localMode ? (
+        <div className="rounded-md border border-amber-300/40 bg-amber-300/10 p-4 text-sm text-amber-100">
+          Supabase não configurado. A Arena está em modo local de teste e não representa reservas reais.
+        </div>
+      ) : null}
+
+      <div className="grid gap-4 lg:grid-cols-4">
+        <SummaryCard label="Reservas de hoje" value={todayReservations.length} icon={CalendarDays} />
+        <SummaryCard label="Pendentes" value={pending.length} icon={CalendarDays} />
+        <SummaryCard label="Confirmadas" value={confirmed.length} icon={CheckCircle2} />
+        <SummaryCard label="Bloqueios" value={blocked.length} icon={X} />
+      </div>
+
+      <section className="glass rounded-lg p-5 shadow-card">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+          <TextField label="Data" type="date" value={filters.date} onChange={(value) => setFilters((current) => ({ ...current, date: value }))} />
+          <SelectField label="Status" value={filters.status} onChange={(value) => setFilters((current) => ({ ...current, status: value }))} options={[["", "Todos"], ["pendente", "Pendente"], ["confirmado", "Confirmado"], ["cancelado", "Cancelado"], ["concluido", "Concluído"], ["bloqueado", "Bloqueado"]]} />
+          <SelectField label="Equipamento" value={filters.stationId} onChange={(value) => setFilters((current) => ({ ...current, stationId: value }))} options={[["", "Todos"], ...stations.map((station) => [station.id, station.name])]} />
+          <TextField label="Buscar cliente" value={filters.query} onChange={(value) => setFilters((current) => ({ ...current, query: value }))} placeholder="Nome ou WhatsApp" />
+        </div>
+
+        <div className="mt-5 grid gap-3">
+          {filteredReservations.length ? filteredReservations.map((reservation) => (
+            <article key={reservation.id} className="rounded-lg border border-white/10 bg-white/5 p-4">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong className="text-lg">{reservation.customerName}</strong>
+                    <span className="rounded-full border border-nt-cyan/30 px-2 py-1 text-xs font-bold text-nt-cyan">{reservation.status}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-300">{reservation.stationName} · {reservation.reservationDate} · {reservation.startTime} até {reservation.endTime}</p>
+                  <p className="mt-1 text-sm text-slate-400">{reservation.customerPhone || "Sem telefone"} · {reservation.durationMinutes} min · {formatCurrency(reservation.totalPrice)}</p>
+                  {reservation.notes ? <p className="mt-2 text-sm text-slate-300">{reservation.notes}</p> : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(reservation.id, "confirmado")} icon={CheckCircle2}>Confirmar</AdminButton>
+                  <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(reservation.id, "concluido")} icon={CheckCircle2}>Concluir</AdminButton>
+                  <AdminButton type="button" variant="secondary" onClick={() => onReservationStatus(reservation.id, "cancelado")} icon={X}>Cancelar</AdminButton>
+                  <a className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan" href={reservationWhatsappHref(reservation)} target="_blank" rel="noreferrer">WhatsApp</a>
+                  <AdminButton type="button" variant="danger" onClick={() => onDeleteReservation(reservation.id)} icon={Trash2}>Excluir</AdminButton>
+                </div>
+              </div>
+            </article>
+          )) : <p className="rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Nenhuma reserva encontrada com os filtros atuais.</p>}
+        </div>
       </section>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <section className="glass rounded-lg p-5 shadow-card">
+          <h3 className="text-lg font-black">Criar reserva manual</h3>
+          <form onSubmit={submitManual} className="mt-4 grid gap-3">
+            <SelectField label="Equipamento" value={manual.stationId} onChange={(value) => setManual((current) => ({ ...current, stationId: value }))} options={stations.map((station) => [station.id, station.name])} />
+            <TextField label="Data" type="date" value={manual.reservationDate} onChange={(value) => setManual((current) => ({ ...current, reservationDate: value }))} required />
+            <TextField label="Início" type="time" value={manual.startTime} onChange={(value) => setManual((current) => ({ ...current, startTime: value }))} required />
+            <SelectField label="Duração" value={manual.durationMinutes} onChange={(value) => setManual((current) => ({ ...current, durationMinutes: Number(value) }))} options={[[30, "30 minutos"], [60, "1 hora"], [120, "2 horas"], [180, "3 horas"]]} />
+            <TextField label="Nome do cliente" value={manual.customerName} onChange={(value) => setManual((current) => ({ ...current, customerName: value }))} required />
+            <TextField label="WhatsApp" value={manual.customerPhone} onChange={(value) => setManual((current) => ({ ...current, customerPhone: value }))} required />
+            <TextareaField label="Observações" value={manual.notes} onChange={(value) => setManual((current) => ({ ...current, notes: value }))} rows={2} />
+            <AdminButton type="submit" icon={Plus}>Criar reserva</AdminButton>
+          </form>
+        </section>
+
+        <section className="glass rounded-lg p-5 shadow-card">
+          <h3 className="text-lg font-black">Bloqueio manual de horário</h3>
+          <form onSubmit={submitBlock} className="mt-4 grid gap-3">
+            <SelectField label="Equipamento" value={block.stationId} onChange={(value) => setBlock((current) => ({ ...current, stationId: value }))} options={stations.map((station) => [station.id, station.name])} />
+            <TextField label="Data" type="date" value={block.reservationDate} onChange={(value) => setBlock((current) => ({ ...current, reservationDate: value }))} required />
+            <TextField label="Início" type="time" value={block.startTime} onChange={(value) => setBlock((current) => ({ ...current, startTime: value }))} required />
+            <TextField label="Fim" type="time" value={block.endTime} onChange={(value) => setBlock((current) => ({ ...current, endTime: value }))} required />
+            <TextareaField label="Motivo" value={block.reason} onChange={(value) => setBlock((current) => ({ ...current, reason: value }))} rows={2} />
+            <AdminButton type="submit" icon={X}>Bloquear horário</AdminButton>
+          </form>
+        </section>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <ArenaStationForm stations={stations} onSave={onSaveStation} onDelete={onDeleteStation} />
+        <ArenaSettingsForm settings={settings} onSave={onSaveSettings} />
+      </div>
     </div>
   );
 }
@@ -1694,6 +1927,7 @@ export function AdminApp() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [pcs, setPcs] = useState([]);
+  const [arenaData, setArenaData] = useState({ stations: [], reservations: [], settings: {}, localMode: !isSupabaseConfigured });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
@@ -1709,9 +1943,11 @@ export function AdminApp() {
       const loadedCategories = await listCategories();
       const loadedProducts = await listProducts(loadedCategories);
       const loadedPcs = await listAssembledPcs();
+      const loadedArenaData = await listArenaData();
       setCategories(loadedCategories);
       setProducts(loadedProducts);
       setPcs(loadedPcs);
+      setArenaData(loadedArenaData);
       setNotice(isSupabaseConfigured ? "" : "Supabase não configurado. O painel está usando localStorage como fallback.");
     } catch (loadError) {
       console.error(loadError);
@@ -1852,6 +2088,34 @@ export function AdminApp() {
     return runAction(async () => deleteCategory(id), "Categoria excluída.");
   }
 
+  async function changeArenaReservationStatus(id, status) {
+    return runAction(async () => updateArenaReservationStatus(id, status), "Reserva atualizada.");
+  }
+
+  async function removeArenaReservation(id) {
+    return runAction(async () => deleteArenaReservation(id), "Reserva excluída.");
+  }
+
+  async function addArenaReservation(reservation) {
+    return runAction(async () => createArenaReservation(reservation), "Reserva criada como pendente.");
+  }
+
+  async function addArenaBlock(block) {
+    return runAction(async () => createArenaBlock(block), "Horário bloqueado.");
+  }
+
+  async function saveArenaStationAction(station) {
+    return runAction(async () => saveArenaStation(station), "Equipamento salvo.");
+  }
+
+  async function removeArenaStation(id) {
+    return runAction(async () => deleteArenaStation(id), "Equipamento excluído.");
+  }
+
+  async function saveArenaSettingsAction(settings) {
+    return runAction(async () => updateArenaSettings(settings), "Configurações da Arena salvas.");
+  }
+
   if (info.page === "login") return <LoginPage />;
 
   const titles = {
@@ -1862,7 +2126,7 @@ export function AdminApp() {
     pcForm: [info.mode === "edit" ? "Editar PC" : "Novo PC", "Cadastro completo de computadores montados."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
     codexAssistant: ["Assistente Codex", "Gere prompts para importacao segura de produtos via SQL."],
-    arena: ["Arena Gamer", "Base visual para futuras reservas online."],
+    arena: ["Arena Gamer", "Reservas, equipamentos e configurações da Arena."],
     settings: ["Configurações", "Status das integrações do painel."],
     placeholder: [info.title, "Área preparada para uma próxima etapa."],
   };
@@ -1889,7 +2153,18 @@ export function AdminApp() {
       {!loading && info.page === "pcForm" ? <PcFormPage mode={info.mode} pcId={info.id} pcs={pcs} onSave={savePc} error={error} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
       {!loading && info.page === "codexAssistant" ? <CodexAssistantPage categories={categories} /> : null}
-      {!loading && info.page === "arena" ? <ArenaPage /> : null}
+      {!loading && info.page === "arena" ? (
+        <ArenaPage
+          arenaData={arenaData}
+          onReservationStatus={changeArenaReservationStatus}
+          onDeleteReservation={removeArenaReservation}
+          onCreateReservation={addArenaReservation}
+          onCreateBlock={addArenaBlock}
+          onSaveStation={saveArenaStationAction}
+          onDeleteStation={removeArenaStation}
+          onSaveSettings={saveArenaSettingsAction}
+        />
+      ) : null}
       {!loading && info.page === "settings" ? <SettingsPage /> : null}
       {!loading && info.page === "placeholder" ? <PlaceholderPage title={info.title} /> : null}
     </AdminShell>

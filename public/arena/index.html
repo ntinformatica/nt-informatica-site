@@ -112,10 +112,15 @@
           <label>
             Duração
             <select id="duration" name="duration">
-              <option value="1">1 hora - R$ 20</option>
-              <option value="2">2 horas - R$ 40</option>
-              <option value="3">3 horas - R$ 50</option>
+              <option value="60">1 hora</option>
+              <option value="120">2 horas</option>
+              <option value="180">3 horas</option>
             </select>
+          </label>
+
+          <label>
+            Observação opcional
+            <textarea id="customerNotes" name="customerNotes" rows="3" placeholder="Ex.: vou com um amigo, preferência de PC, jogo principal..."></textarea>
           </label>
 
           <div class="payment-row">
@@ -124,7 +129,7 @@
           </div>
 
           <button class="primary-button reserve-button" type="submit">Reservar</button>
-          <p class="fine-print">Pré-reserva: o horário fica salvo neste navegador e a confirmação do pagamento acontece pelo WhatsApp.</p>
+          <p class="fine-print">Solicitação de reserva: a NT Informática confirma o horário antes de considerar a reserva finalizada.</p>
         </form>
 
         <aside class="contact-preview-panel" aria-label="Informações rápidas">
@@ -159,7 +164,7 @@
         <div class="section-head">
           <div>
             <p class="eyebrow">Minhas reservas</p>
-            <h2>Agendamentos salvos</h2>
+            <h2>Minhas solicitações</h2>
           </div>
         </div>
         <div class="booking-list" id="bookingList"></div>
@@ -180,7 +185,7 @@
           </details>
           <details>
             <summary>Preciso pagar antes?</summary>
-            <p>A pré-reserva abre o WhatsApp com dia, horário, duração e valor. A loja confirma por Pix ou recebe no balcão.</p>
+            <p>A solicitação fica como pendente e a loja confirma o horário pelo atendimento.</p>
           </details>
           <details>
             <summary>Posso reservar para mais de uma pessoa?</summary>
@@ -194,6 +199,7 @@
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/arena/supabase-config.js?v=20260706-1030"></script>
     <script src="/arena/app.js?v=20260706-1030"></script>
   </body>
 </html>
