@@ -124,12 +124,14 @@ export const productCategories = [
   { name: "Processadores", image: "category-assets/acessorios.svg", icon: Cpu, description: "CPUs para montar, atualizar e ganhar desempenho." },
   { name: "Air Coolers", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Refrigeração eficiente para processadores." },
   { name: "Water Coolers", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Refrigeração líquida para setups potentes." },
-  { name: "Fans e Ventoinhas RGB", image: "category-assets/acessorios.svg", icon: CirclePlay, description: "Refrigeração, visual RGB e opções reversas." },
+  { name: "Ventoinhas", image: "category-assets/acessorios.svg", icon: CirclePlay, description: "Refrigeração para gabinete, modelos RGB, ARGB, normais e reversos." },
   { name: "Controladoras e Hubs", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Controle de fans, PWM, RGB e ARGB." },
   { name: "Controles", image: "category-assets/controles.svg", icon: Gamepad2, description: "Controles para PC, consoles e jogos mobile." },
   { name: "Consoles", image: "category-assets/controles.svg", icon: Tv, description: "Videogames, acessórios e opções para jogar." },
-  { name: "Game Stick", image: "category-assets/controles.svg", icon: Gamepad2, description: "Games retrô em formato compacto e prático." },
   { name: "Carregadores e Cabos", image: "category-assets/carregadores.svg", icon: Smartphone, description: "Carregadores, cabos, HDMI, USB e adaptadores." },
+  { name: "Acessórios", image: "category-assets/acessorios.svg", icon: Wrench, description: "Adaptadores, suportes, cabos, periféricos e utilidades para seu setup." },
+  { name: "Placas-mãe", image: "category-assets/acessorios.svg", icon: Cpu, description: "Modelos Intel e AMD para upgrades e montagem de computadores." },
+  { name: "Cadeiras", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Cadeiras gamer e office para conforto no trabalho e nas partidas." },
 ];
 
 export const products = [

@@ -20,7 +20,6 @@
   ShoppingBag,
   Sparkles,
   Star,
-  Tv,
   Wrench,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -223,6 +222,29 @@ function HubIcon(props) {
   );
 }
 
+function MotherboardIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <rect x="8" y="7" width="5" height="5" rx="1" />
+      <path d="M15 7h2M15 10h2M7 15h10M7 18h4" />
+      <path d="M4 7H2M4 12H2M4 17H2M20 7h2M20 12h2M20 17h2" />
+      <circle cx="16" cy="17" r="1" />
+    </LineSvgIcon>
+  );
+}
+
+function ChairIcon(props) {
+  return (
+    <LineSvgIcon {...props}>
+      <path d="M8 4h8l1 8H7l1-8Z" />
+      <path d="M7 12h10v3a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-3Z" />
+      <path d="M10 17v3M14 17v3M8 20h8" />
+      <path d="M6 10H4v5M18 10h2v5" />
+    </LineSvgIcon>
+  );
+}
+
 const homeCategoryIcons = {
   Monitores: Monitor,
   Teclados: Keyboard,
@@ -236,12 +258,14 @@ const homeCategoryIcons = {
   Processadores: Cpu,
   "Air Coolers": AirCoolerIcon,
   "Water Coolers": WaterCoolerIcon,
-  "Fans e Ventoinhas RGB": Fan,
+  Ventoinhas: Fan,
   "Controladoras e Hubs": HubIcon,
   Controles: Gamepad2,
   Consoles: Server,
-  "Game Stick": Tv,
   "Carregadores e Cabos": Cable,
+  Acessórios: Wrench,
+  "Placas-mãe": MotherboardIcon,
+  Cadeiras: ChairIcon,
 };
 
 const whyChooseCards = [
