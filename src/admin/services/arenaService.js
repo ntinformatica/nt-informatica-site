@@ -14,6 +14,8 @@ const emptyArenaData = {
   ],
   subscriptions: [],
   creditMovements: [],
+  maintenance: [],
+  notifications: [],
   packages: [
     { id: "local-package-60", name: "1 Hora", durationMinutes: 60, price: 20, active: true, sortOrder: 10 },
     { id: "local-package-120", name: "2 Horas", durationMinutes: 120, price: 40, active: true, sortOrder: 20 },
@@ -80,8 +82,17 @@ function fromStation(row = {}) {
     name: row.name || "",
     type: row.type || "pc",
     description: row.description || "",
+    processor: row.processor || "",
+    graphicsCard: row.graphics_card || "",
+    memory: row.memory || "",
+    storage: row.storage || "",
+    monitor: row.monitor || "",
+    accessories: row.accessories || "",
+    imageUrl: row.image_url || "",
     active: row.active !== false,
+    availabilityStatus: row.availability_status || (row.active === false ? "inativo" : "disponivel"),
     sortOrder: Number(row.sort_order || 0),
+    internalNotes: row.internal_notes || "",
   };
 }
 
@@ -90,8 +101,17 @@ function toStation(station = {}) {
     name: station.name || "",
     type: station.type || "pc",
     description: station.description || "",
+    processor: station.processor || "",
+    graphics_card: station.graphicsCard || "",
+    memory: station.memory || "",
+    storage: station.storage || "",
+    monitor: station.monitor || "",
+    accessories: station.accessories || "",
+    image_url: station.imageUrl || "",
     active: station.active !== false,
+    availability_status: station.active === false ? "inativo" : (station.availabilityStatus || "disponivel"),
     sort_order: Number(station.sortOrder || 0),
+    internal_notes: station.internalNotes || "",
   };
 }
 
@@ -254,8 +274,52 @@ function fromReservation(row = {}, stations = []) {
     paymentType: row.payment_type || "avulso",
     creditsConsumedMinutes: Number(row.credits_consumed_minutes || 0),
     creditsProcessed: row.credits_processed === true,
+    sessionStartedAt: row.session_started_at || "",
+    sessionPausedAt: row.session_paused_at || "",
+    sessionResumedAt: row.session_resumed_at || "",
+    sessionEndedAt: row.session_ended_at || "",
+    sessionStatus: row.session_status || "nao_iniciada",
+    pausedSeconds: Number(row.paused_seconds || 0),
+    actualDurationMinutes: Number(row.actual_duration_minutes || 0),
+    overtimeMinutes: Number(row.overtime_minutes || 0),
     createdAt: row.created_at || "",
     updatedAt: row.updated_at || "",
+  };
+}
+
+function fromMaintenance(row = {}, stations = []) {
+  const station = stations.find((item) => item.id === row.station_id);
+  return {
+    id: row.id,
+    stationId: row.station_id,
+    stationName: station?.name || "",
+    title: row.title || "",
+    description: row.description || "",
+    status: row.status || "agendada",
+    startedAt: row.started_at || "",
+    expectedEndAt: row.expected_end_at || "",
+    endedAt: row.ended_at || "",
+    internalNotes: row.internal_notes || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+function fromNotification(row = {}) {
+  return {
+    id: row.id,
+    type: row.type || "",
+    title: row.title || "",
+    message: row.message || "",
+    priority: row.priority || "normal",
+    entityType: row.entity_type || "",
+    entityId: row.entity_id || "",
+    actionUrl: row.action_url || "",
+    read: row.read === true,
+    dismissed: row.dismissed === true,
+    createdAt: row.created_at || "",
+    readAt: row.read_at || "",
+    dismissedAt: row.dismissed_at || "",
   };
 }
 
@@ -273,10 +337,12 @@ export async function listArenaData() {
   const stations = (stationRows || []).map(fromStation);
   const customers = (customerRows || []).map(fromCustomer);
   const monthlyPlans = (planRows || []).map(fromMonthlyPlan);
-  const [subscriptionRows, movementRows, reservationRows] = await Promise.all([
+  const [subscriptionRows, movementRows, reservationRows, maintenanceRows, notificationRows] = await Promise.all([
     supabaseRequest("/arena_customer_subscriptions?select=*&order=created_at.desc&limit=500"),
     supabaseRequest("/arena_credit_movements?select=*&order=created_at.desc&limit=500"),
     supabaseRequest("/arena_reservations?select=*&order=reservation_date.desc,start_time.asc&limit=500"),
+    supabaseRequest("/arena_station_maintenance?select=*&order=created_at.desc&limit=500").catch(() => []),
+    supabaseRequest("/admin_notifications?select=*&dismissed=eq.false&order=created_at.desc&limit=100").catch(() => []),
   ]);
   const subscriptions = (subscriptionRows || []).map((row) => fromSubscription(row, customers, monthlyPlans));
   const settings = fromSettings(settingsRows?.[0]);
@@ -288,6 +354,8 @@ export async function listArenaData() {
     monthlyPlans,
     subscriptions,
     creditMovements: (movementRows || []).map((row) => fromCreditMovement(row, customers, subscriptions)),
+    maintenance: (maintenanceRows || []).map((row) => fromMaintenance(row, stations)),
+    notifications: (notificationRows || []).map(fromNotification),
     packages: (packageRows || []).map(fromPackage),
     settings,
     localMode: false,
@@ -666,6 +734,178 @@ export async function updateArenaReservationStatus(id, status) {
       p_reservation_id: id,
       p_status: status,
     }),
+  });
+}
+
+function updateLocalSession(id, updater) {
+  const data = localData();
+  const now = new Date().toISOString();
+  data.reservations = data.reservations.map((reservation) => (
+    reservation.id === id ? updater({ ...reservation }, now) : reservation
+  ));
+  return saveLocalData(data);
+}
+
+export async function startArenaSession(id) {
+  if (!isSupabaseConfigured) {
+    return updateLocalSession(id, (reservation, now) => ({
+      ...reservation,
+      status: "confirmado",
+      sessionStartedAt: reservation.sessionStartedAt || now,
+      sessionResumedAt: now,
+      sessionPausedAt: "",
+      sessionStatus: "em_andamento",
+    }));
+  }
+
+  return supabaseRequest("/rpc/start_arena_session", {
+    method: "POST",
+    body: JSON.stringify({ p_reservation_id: id }),
+  });
+}
+
+export async function pauseArenaSession(id) {
+  if (!isSupabaseConfigured) {
+    return updateLocalSession(id, (reservation, now) => ({
+      ...reservation,
+      sessionPausedAt: now,
+      sessionStatus: "pausada",
+    }));
+  }
+
+  return supabaseRequest("/rpc/pause_arena_session", {
+    method: "POST",
+    body: JSON.stringify({ p_reservation_id: id }),
+  });
+}
+
+export async function resumeArenaSession(id) {
+  if (!isSupabaseConfigured) {
+    return updateLocalSession(id, (reservation, now) => {
+      const pauseStarted = reservation.sessionPausedAt ? new Date(reservation.sessionPausedAt).getTime() : Date.now();
+      const extraPaused = Math.max(0, Math.floor((Date.now() - pauseStarted) / 1000));
+      return {
+        ...reservation,
+        pausedSeconds: Number(reservation.pausedSeconds || 0) + extraPaused,
+        sessionPausedAt: "",
+        sessionResumedAt: now,
+        sessionStatus: "em_andamento",
+      };
+    });
+  }
+
+  return supabaseRequest("/rpc/resume_arena_session", {
+    method: "POST",
+    body: JSON.stringify({ p_reservation_id: id }),
+  });
+}
+
+export async function endArenaSession(id) {
+  if (!isSupabaseConfigured) {
+    return updateLocalSession(id, (reservation, now) => ({
+      ...reservation,
+      status: "concluido",
+      sessionEndedAt: now,
+      sessionStatus: "encerrada",
+    }));
+  }
+
+  return supabaseRequest("/rpc/end_arena_session", {
+    method: "POST",
+    body: JSON.stringify({ p_reservation_id: id }),
+  });
+}
+
+export async function saveArenaMaintenance(maintenance) {
+  if (!isSupabaseConfigured) {
+    const data = localData();
+    const saved = {
+      id: maintenance.id || `maintenance-${Date.now()}`,
+      ...maintenance,
+      status: maintenance.status || "em_andamento",
+      createdAt: maintenance.createdAt || new Date().toISOString(),
+    };
+    data.maintenance = maintenance.id
+      ? data.maintenance.map((item) => (item.id === maintenance.id ? saved : item))
+      : [saved, ...data.maintenance];
+    data.stations = data.stations.map((station) => (
+      station.id === saved.stationId ? { ...station, availabilityStatus: saved.status === "cancelada" || saved.status === "concluida" ? "disponivel" : "manutencao" } : station
+    ));
+    return saveLocalData(data);
+  }
+
+  if (maintenance.id) {
+    return supabaseRequest(`/arena_station_maintenance?id=eq.${encodeURIComponent(maintenance.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: maintenance.title || "",
+        description: maintenance.description || "",
+        status: maintenance.status || "em_andamento",
+        started_at: maintenance.startedAt || new Date().toISOString(),
+        expected_end_at: maintenance.expectedEndAt || null,
+        ended_at: maintenance.endedAt || null,
+        internal_notes: maintenance.internalNotes || "",
+      }),
+    });
+  }
+
+  return supabaseRequest("/rpc/create_arena_station_maintenance", {
+    method: "POST",
+    body: JSON.stringify({
+      p_station_id: maintenance.stationId,
+      p_title: maintenance.title || "Manutencao",
+      p_description: maintenance.description || "",
+      p_status: maintenance.status || "em_andamento",
+      p_started_at: maintenance.startedAt || null,
+      p_expected_end_at: maintenance.expectedEndAt || null,
+      p_internal_notes: maintenance.internalNotes || "",
+    }),
+  });
+}
+
+export async function finishArenaMaintenance(id) {
+  if (!isSupabaseConfigured) {
+    return saveArenaMaintenance({ id, status: "concluida", endedAt: new Date().toISOString() });
+  }
+
+  return supabaseRequest("/rpc/finish_arena_station_maintenance", {
+    method: "POST",
+    body: JSON.stringify({ p_maintenance_id: id }),
+  });
+}
+
+export async function cancelArenaMaintenance(id) {
+  if (!isSupabaseConfigured) {
+    return saveArenaMaintenance({ id, status: "cancelada", endedAt: new Date().toISOString() });
+  }
+
+  return supabaseRequest("/rpc/cancel_arena_station_maintenance", {
+    method: "POST",
+    body: JSON.stringify({ p_maintenance_id: id }),
+  });
+}
+
+export async function markAdminNotificationRead(id) {
+  if (!isSupabaseConfigured) return localData();
+  return supabaseRequest(`/admin_notifications?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ read: true, read_at: new Date().toISOString() }),
+  });
+}
+
+export async function dismissAdminNotification(id) {
+  if (!isSupabaseConfigured) return localData();
+  return supabaseRequest(`/admin_notifications?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ dismissed: true, dismissed_at: new Date().toISOString() }),
+  });
+}
+
+export async function markAllAdminNotificationsRead() {
+  if (!isSupabaseConfigured) return localData();
+  return supabaseRequest("/admin_notifications?read=eq.false&dismissed=eq.false", {
+    method: "PATCH",
+    body: JSON.stringify({ read: true, read_at: new Date().toISOString() }),
   });
 }
 

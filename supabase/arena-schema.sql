@@ -101,6 +101,41 @@ alter table public.arena_reservations
   add column if not exists credits_consumed_minutes integer not null default 0,
   add column if not exists credits_processed boolean not null default false;
 
+alter table public.arena_stations
+  add column if not exists processor text not null default '',
+  add column if not exists graphics_card text not null default '',
+  add column if not exists memory text not null default '',
+  add column if not exists storage text not null default '',
+  add column if not exists monitor text not null default '',
+  add column if not exists accessories text not null default '',
+  add column if not exists image_url text not null default '',
+  add column if not exists availability_status text not null default 'disponivel',
+  add column if not exists internal_notes text not null default '';
+
+alter table public.arena_stations
+  drop constraint if exists arena_stations_availability_status_check;
+
+alter table public.arena_stations
+  add constraint arena_stations_availability_status_check
+  check (availability_status in ('disponivel', 'ocupado', 'manutencao', 'inativo'));
+
+alter table public.arena_reservations
+  add column if not exists session_started_at timestamptz,
+  add column if not exists session_paused_at timestamptz,
+  add column if not exists session_resumed_at timestamptz,
+  add column if not exists session_ended_at timestamptz,
+  add column if not exists session_status text not null default 'nao_iniciada',
+  add column if not exists paused_seconds integer not null default 0,
+  add column if not exists actual_duration_minutes integer not null default 0,
+  add column if not exists overtime_minutes integer not null default 0;
+
+alter table public.arena_reservations
+  drop constraint if exists arena_reservations_session_status_check;
+
+alter table public.arena_reservations
+  add constraint arena_reservations_session_status_check
+  check (session_status in ('nao_iniciada', 'em_andamento', 'pausada', 'encerrada'));
+
 alter table public.arena_reservations
   drop constraint if exists arena_reservations_payment_type_check;
 
@@ -121,6 +156,36 @@ create table if not exists public.arena_credit_movements (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.arena_station_maintenance (
+  id uuid primary key default gen_random_uuid(),
+  station_id uuid not null references public.arena_stations(id) on delete cascade,
+  title text not null,
+  description text not null default '',
+  status text not null check (status in ('agendada', 'em_andamento', 'concluida', 'cancelada')),
+  started_at timestamptz not null default now(),
+  expected_end_at timestamptz,
+  ended_at timestamptz,
+  internal_notes text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.admin_notifications (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  title text not null,
+  message text not null,
+  priority text not null default 'normal' check (priority in ('baixa', 'normal', 'alta', 'critica')),
+  entity_type text not null default '',
+  entity_id uuid,
+  action_url text not null default '',
+  read boolean not null default false,
+  dismissed boolean not null default false,
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  dismissed_at timestamptz
+);
+
 create index if not exists arena_stations_active_idx
   on public.arena_stations(active, sort_order);
 
@@ -138,6 +203,19 @@ create index if not exists arena_subscriptions_customer_status_idx
 
 create index if not exists arena_credit_movements_customer_idx
   on public.arena_credit_movements(customer_id, created_at desc);
+
+create index if not exists arena_reservations_session_idx
+  on public.arena_reservations(station_id, session_status, reservation_date, start_time);
+
+create index if not exists arena_station_maintenance_status_idx
+  on public.arena_station_maintenance(station_id, status, started_at, expected_end_at);
+
+create index if not exists admin_notifications_lookup_idx
+  on public.admin_notifications(dismissed, read, priority, created_at desc);
+
+create unique index if not exists admin_notifications_dedupe_idx
+  on public.admin_notifications(type, entity_type, entity_id)
+  where dismissed = false;
 
 create or replace function public.set_updated_at()
 returns trigger
@@ -182,6 +260,11 @@ for each row execute function public.set_updated_at();
 drop trigger if exists arena_customer_subscriptions_set_updated_at on public.arena_customer_subscriptions;
 create trigger arena_customer_subscriptions_set_updated_at
 before update on public.arena_customer_subscriptions
+for each row execute function public.set_updated_at();
+
+drop trigger if exists arena_station_maintenance_set_updated_at on public.arena_station_maintenance;
+create trigger arena_station_maintenance_set_updated_at
+before update on public.arena_station_maintenance
 for each row execute function public.set_updated_at();
 
 insert into public.arena_settings (
@@ -794,6 +877,10 @@ begin
     raise exception 'Equipamento indisponível.';
   end if;
 
+  if v_station.availability_status in ('manutencao', 'inativo') then
+    raise exception 'Equipamento indisponível.';
+  end if;
+
   v_day := extract(dow from p_reservation_date)::integer;
   if not (v_day = any(v_settings.active_days)) then
     raise exception 'A Arena não atende neste dia.';
@@ -818,6 +905,17 @@ begin
         and reservation.end_time > p_start_time
   ) then
     raise exception 'Horário indisponível.';
+  end if;
+
+  if exists (
+    select 1
+      from public.arena_station_maintenance maintenance
+      where maintenance.station_id = p_station_id
+        and maintenance.status in ('agendada', 'em_andamento')
+        and maintenance.started_at < ((p_reservation_date + v_end_time)::timestamptz)
+        and coalesce(maintenance.expected_end_at, 'infinity'::timestamptz) > ((p_reservation_date + p_start_time)::timestamptz)
+  ) then
+    raise exception 'Equipamento em manutenção neste período.';
   end if;
 
   if coalesce(p_payment_type, 'avulso') = 'plano' then
@@ -956,6 +1054,10 @@ begin
     raise exception 'Equipamento indisponível.';
   end if;
 
+  if v_station.availability_status in ('manutencao', 'inativo') then
+    raise exception 'Equipamento indisponível.';
+  end if;
+
   if exists (
     select 1
       from public.arena_reservations reservation
@@ -1000,6 +1102,363 @@ begin
 end;
 $$;
 
+create or replace function public.arena_has_active_maintenance(
+  p_station_id uuid,
+  p_start_at timestamptz,
+  p_end_at timestamptz
+)
+returns boolean
+language sql
+stable
+as $$
+  select exists (
+    select 1
+      from public.arena_station_maintenance maintenance
+      where maintenance.station_id = p_station_id
+        and maintenance.status in ('agendada', 'em_andamento')
+        and maintenance.started_at < p_end_at
+        and coalesce(maintenance.expected_end_at, 'infinity'::timestamptz) > p_start_at
+  );
+$$;
+
+create or replace function public.start_arena_session(p_reservation_id uuid)
+returns setof public.arena_reservations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reservation public.arena_reservations;
+begin
+  select *
+    into v_reservation
+    from public.arena_reservations
+    where id = p_reservation_id
+    for update;
+
+  if not found then
+    raise exception 'Reserva nÃ£o encontrada.';
+  end if;
+
+  if v_reservation.status = 'cancelado' then
+    raise exception 'NÃ£o Ã© possÃ­vel iniciar uma reserva cancelada.';
+  end if;
+
+  if v_reservation.status = 'bloqueado' then
+    raise exception 'NÃ£o Ã© possÃ­vel iniciar um bloqueio de horÃ¡rio.';
+  end if;
+
+  if v_reservation.session_status = 'encerrada' then
+    raise exception 'SessÃ£o jÃ¡ encerrada.';
+  end if;
+
+  if exists (
+    select 1
+      from public.arena_reservations reservation
+      where reservation.station_id = v_reservation.station_id
+        and reservation.id <> v_reservation.id
+        and reservation.session_status in ('em_andamento', 'pausada')
+  ) then
+    raise exception 'JÃ¡ existe uma sessÃ£o em andamento neste equipamento.';
+  end if;
+
+  if exists (
+    select 1
+      from public.arena_stations station
+      where station.id = v_reservation.station_id
+        and (station.active = false or station.availability_status in ('manutencao', 'inativo'))
+  ) then
+    raise exception 'Equipamento indisponÃ­vel.';
+  end if;
+
+  if v_reservation.payment_type = 'plano' and not v_reservation.credits_processed then
+    perform public.consume_arena_credits(v_reservation.id);
+  end if;
+
+  update public.arena_reservations
+    set
+      status = case when status = 'pendente' then 'confirmado' else status end,
+      session_started_at = coalesce(session_started_at, now()),
+      session_resumed_at = now(),
+      session_paused_at = null,
+      session_status = 'em_andamento'
+    where id = v_reservation.id
+    returning * into v_reservation;
+
+  update public.arena_stations
+    set availability_status = 'ocupado'
+    where id = v_reservation.station_id
+      and availability_status <> 'manutencao';
+
+  return next v_reservation;
+end;
+$$;
+
+create or replace function public.pause_arena_session(p_reservation_id uuid)
+returns setof public.arena_reservations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reservation public.arena_reservations;
+begin
+  select * into v_reservation
+    from public.arena_reservations
+    where id = p_reservation_id
+    for update;
+
+  if not found then
+    raise exception 'Reserva nÃ£o encontrada.';
+  end if;
+
+  if v_reservation.session_status <> 'em_andamento' then
+    raise exception 'Somente sessÃµes em andamento podem ser pausadas.';
+  end if;
+
+  update public.arena_reservations
+    set session_status = 'pausada', session_paused_at = now()
+    where id = v_reservation.id
+    returning * into v_reservation;
+
+  return next v_reservation;
+end;
+$$;
+
+create or replace function public.resume_arena_session(p_reservation_id uuid)
+returns setof public.arena_reservations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reservation public.arena_reservations;
+  v_extra_pause integer := 0;
+begin
+  select * into v_reservation
+    from public.arena_reservations
+    where id = p_reservation_id
+    for update;
+
+  if not found then
+    raise exception 'Reserva nÃ£o encontrada.';
+  end if;
+
+  if v_reservation.session_status <> 'pausada' then
+    raise exception 'Somente sessÃµes pausadas podem ser retomadas.';
+  end if;
+
+  if v_reservation.session_paused_at is not null then
+    v_extra_pause := greatest(0, extract(epoch from (now() - v_reservation.session_paused_at))::integer);
+  end if;
+
+  update public.arena_reservations
+    set
+      session_status = 'em_andamento',
+      session_resumed_at = now(),
+      session_paused_at = null,
+      paused_seconds = paused_seconds + v_extra_pause
+    where id = v_reservation.id
+    returning * into v_reservation;
+
+  return next v_reservation;
+end;
+$$;
+
+create or replace function public.end_arena_session(p_reservation_id uuid)
+returns setof public.arena_reservations
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_reservation public.arena_reservations;
+  v_paused_seconds integer;
+  v_actual_minutes integer;
+  v_overtime integer;
+begin
+  select * into v_reservation
+    from public.arena_reservations
+    where id = p_reservation_id
+    for update;
+
+  if not found then
+    raise exception 'Reserva nÃ£o encontrada.';
+  end if;
+
+  if v_reservation.session_status = 'encerrada' then
+    return next v_reservation;
+    return;
+  end if;
+
+  if v_reservation.session_started_at is null then
+    raise exception 'SessÃ£o ainda nÃ£o foi iniciada.';
+  end if;
+
+  if v_reservation.payment_type = 'plano' and not v_reservation.credits_processed then
+    perform public.consume_arena_credits(v_reservation.id);
+  end if;
+
+  v_paused_seconds := v_reservation.paused_seconds;
+  if v_reservation.session_status = 'pausada' and v_reservation.session_paused_at is not null then
+    v_paused_seconds := v_paused_seconds + greatest(0, extract(epoch from (now() - v_reservation.session_paused_at))::integer);
+  end if;
+
+  v_actual_minutes := greatest(0, ceil(greatest(0, extract(epoch from (now() - v_reservation.session_started_at))::numeric - v_paused_seconds) / 60.0)::integer);
+  v_overtime := greatest(0, v_actual_minutes - v_reservation.duration_minutes);
+
+  update public.arena_reservations
+    set
+      status = 'concluido',
+      session_status = 'encerrada',
+      session_ended_at = now(),
+      session_paused_at = null,
+      paused_seconds = v_paused_seconds,
+      actual_duration_minutes = v_actual_minutes,
+      overtime_minutes = v_overtime
+    where id = v_reservation.id
+    returning * into v_reservation;
+
+  if not exists (
+    select 1 from public.arena_reservations reservation
+    where reservation.station_id = v_reservation.station_id
+      and reservation.id <> v_reservation.id
+      and reservation.session_status in ('em_andamento', 'pausada')
+  ) and not exists (
+    select 1 from public.arena_station_maintenance maintenance
+    where maintenance.station_id = v_reservation.station_id
+      and maintenance.status in ('agendada', 'em_andamento')
+  ) then
+    update public.arena_stations
+      set availability_status = case when active then 'disponivel' else 'inativo' end
+      where id = v_reservation.station_id;
+  end if;
+
+  return next v_reservation;
+end;
+$$;
+
+create or replace function public.create_arena_station_maintenance(
+  p_station_id uuid,
+  p_title text,
+  p_description text default '',
+  p_status text default 'em_andamento',
+  p_started_at timestamptz default null,
+  p_expected_end_at timestamptz default null,
+  p_internal_notes text default ''
+)
+returns setof public.arena_station_maintenance
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row public.arena_station_maintenance;
+begin
+  if p_status not in ('agendada', 'em_andamento', 'concluida', 'cancelada') then
+    raise exception 'Status de manutenÃ§Ã£o invÃ¡lido.';
+  end if;
+
+  if p_station_id is null then
+    raise exception 'Equipamento obrigatÃ³rio.';
+  end if;
+
+  insert into public.arena_station_maintenance (
+    station_id,
+    title,
+    description,
+    status,
+    started_at,
+    expected_end_at,
+    internal_notes
+  )
+  values (
+    p_station_id,
+    trim(coalesce(nullif(p_title, ''), 'ManutenÃ§Ã£o')),
+    trim(coalesce(p_description, '')),
+    p_status,
+    coalesce(p_started_at, now()),
+    p_expected_end_at,
+    trim(coalesce(p_internal_notes, ''))
+  )
+  returning * into v_row;
+
+  if p_status in ('agendada', 'em_andamento') then
+    update public.arena_stations
+      set availability_status = 'manutencao'
+      where id = p_station_id;
+  end if;
+
+  return next v_row;
+end;
+$$;
+
+create or replace function public.finish_arena_station_maintenance(p_maintenance_id uuid)
+returns setof public.arena_station_maintenance
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row public.arena_station_maintenance;
+begin
+  update public.arena_station_maintenance
+    set status = 'concluida', ended_at = now()
+    where id = p_maintenance_id
+    returning * into v_row;
+
+  if not found then
+    raise exception 'ManutenÃ§Ã£o nÃ£o encontrada.';
+  end if;
+
+  if not exists (
+    select 1 from public.arena_station_maintenance maintenance
+    where maintenance.station_id = v_row.station_id
+      and maintenance.id <> v_row.id
+      and maintenance.status in ('agendada', 'em_andamento')
+  ) then
+    update public.arena_stations
+      set availability_status = case when active then 'disponivel' else 'inativo' end
+      where id = v_row.station_id;
+  end if;
+
+  return next v_row;
+end;
+$$;
+
+create or replace function public.cancel_arena_station_maintenance(p_maintenance_id uuid)
+returns setof public.arena_station_maintenance
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row public.arena_station_maintenance;
+begin
+  update public.arena_station_maintenance
+    set status = 'cancelada', ended_at = now()
+    where id = p_maintenance_id
+    returning * into v_row;
+
+  if not found then
+    raise exception 'ManutenÃ§Ã£o nÃ£o encontrada.';
+  end if;
+
+  if not exists (
+    select 1 from public.arena_station_maintenance maintenance
+    where maintenance.station_id = v_row.station_id
+      and maintenance.id <> v_row.id
+      and maintenance.status in ('agendada', 'em_andamento')
+  ) then
+    update public.arena_stations
+      set availability_status = case when active then 'disponivel' else 'inativo' end
+      where id = v_row.station_id;
+  end if;
+
+  return next v_row;
+end;
+$$;
+
 alter table public.arena_stations disable row level security;
 alter table public.arena_settings disable row level security;
 alter table public.arena_reservations disable row level security;
@@ -1008,3 +1467,5 @@ alter table public.arena_customers disable row level security;
 alter table public.arena_monthly_plans disable row level security;
 alter table public.arena_customer_subscriptions disable row level security;
 alter table public.arena_credit_movements disable row level security;
+alter table public.arena_station_maintenance disable row level security;
+alter table public.admin_notifications disable row level security;

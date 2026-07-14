@@ -1,8 +1,10 @@
 import {
   BarChart3,
+  Bell,
   Boxes,
   CalendarDays,
   CheckCircle2,
+  Clock,
   ClipboardList,
   FilePlus2,
   Gamepad2,
@@ -14,12 +16,16 @@ import {
   MessageSquareText,
   Monitor,
   Pencil,
+  Play,
   Plus,
   Search,
   Settings,
+  Pause,
   Star,
+  Square,
   Trash2,
   UploadCloud,
+  Wrench,
   X,
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -47,9 +53,19 @@ import {
   updateArenaSettings,
   activateArenaSubscription,
   adjustArenaCredits,
+  cancelArenaMaintenance,
+  dismissAdminNotification,
+  endArenaSession,
+  finishArenaMaintenance,
+  markAdminNotificationRead,
+  markAllAdminNotificationsRead,
+  pauseArenaSession,
+  resumeArenaSession,
   saveArenaCustomer,
+  saveArenaMaintenance,
   saveArenaMonthlyPlan,
   deleteArenaMonthlyPlan,
+  startArenaSession,
   updateArenaSubscriptionStatus,
 } from "./services/arenaService";
 import {
@@ -336,8 +352,10 @@ function LoginPage() {
   );
 }
 
-function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice }) {
+function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice, notifications = [], onNotificationRead, onNotificationDismiss, onNotificationsReadAll }) {
   const pathname = window.location.pathname.replace(/\/$/, "") || "/admin";
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const unreadNotifications = notifications.filter((item) => !item.read && !item.dismissed);
 
   function logout() {
     localStorage.removeItem(adminSessionKey);
@@ -383,6 +401,43 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode
               {subtitle ? <p className="mt-1 text-sm text-slate-400">{subtitle}</p> : null}
             </div>
             <div className="flex items-center gap-2">
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setNotificationsOpen((current) => !current)}
+                  className="relative grid h-11 w-11 place-items-center rounded-md border border-slate-700 text-slate-200 transition hover:border-nt-cyan hover:text-nt-cyan"
+                  aria-label="Abrir notificações"
+                >
+                  <Bell size={19} />
+                  {unreadNotifications.length ? <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white">{unreadNotifications.length}</span> : null}
+                </button>
+                {notificationsOpen ? (
+                  <div className="absolute right-0 top-12 z-50 w-[min(92vw,380px)] rounded-lg border border-white/10 bg-[#0b111d] p-3 shadow-card">
+                    <div className="flex items-center justify-between gap-3">
+                      <strong>Notificações</strong>
+                      <button type="button" onClick={onNotificationsReadAll} className="text-xs font-bold text-nt-cyan hover:text-white">Marcar lidas</button>
+                    </div>
+                    <div className="mt-3 grid max-h-96 gap-2 overflow-y-auto pr-1">
+                      {notifications.length ? notifications.slice(0, 12).map((item) => (
+                        <article key={item.id} className={`rounded-md border p-3 text-sm ${item.priority === "critica" || item.priority === "alta" ? "border-red-400/30 bg-red-500/10" : "border-white/10 bg-white/5"}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="font-black text-white">{item.title}</p>
+                              <p className="mt-1 text-xs leading-5 text-slate-300">{item.message}</p>
+                              <p className="mt-2 text-[11px] font-bold uppercase text-slate-500">{item.priority} · {item.type}</p>
+                            </div>
+                            {!item.read ? <button type="button" className="text-xs font-bold text-nt-cyan" onClick={() => onNotificationRead(item.id)}>Lida</button> : null}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {item.actionUrl ? <a href={item.actionUrl} className="text-xs font-bold text-nt-cyan hover:text-white">Abrir</a> : null}
+                            <button type="button" className="text-xs font-bold text-slate-400 hover:text-white" onClick={() => onNotificationDismiss(item.id)}>Dispensar</button>
+                          </div>
+                        </article>
+                      )) : <p className="rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-300">Nenhuma notificação no momento.</p>}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <a href="/" className="hidden rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 hover:border-nt-cyan sm:inline-flex">
                 Ver site
               </a>
@@ -420,7 +475,10 @@ function SummaryCard({ label, value, icon: Icon, tone = "cyan", compact = false 
   );
 }
 
-function Dashboard({ products, categories, pcs }) {
+function Dashboard({ products, categories, pcs, arenaData }) {
+  const arenaReservations = arenaData?.reservations || [];
+  const arenaStations = arenaData?.stations || [];
+  const arenaToday = todayIsoDate();
   const totals = {
     products: products.length,
     featured: products.filter((item) => item.featured).length,
@@ -428,6 +486,9 @@ function Dashboard({ products, categories, pcs }) {
     categories: categories.length,
     pcs: pcs.length,
     pcsPublished: pcs.filter((item) => item.published).length,
+    arenaToday: arenaReservations.filter((item) => item.reservationDate === arenaToday).length,
+    arenaSessions: arenaReservations.filter((item) => item.sessionStatus === "em_andamento").length,
+    arenaMaintenance: arenaStations.filter((item) => item.availabilityStatus === "manutencao").length,
   };
 
   return (
@@ -1810,6 +1871,34 @@ function arenaPackagePrice(packages, durationMinutes, fallbackPricePerHour = 20)
   return (Number(durationMinutes || 0) / 60) * Number(fallbackPricePerHour || 20);
 }
 
+function sessionTiming(reservation, now = Date.now()) {
+  if (!reservation?.sessionStartedAt) {
+    return {
+      elapsedSeconds: 0,
+      remainingSeconds: Number(reservation?.durationMinutes || 0) * 60,
+      remainingMinutes: Number(reservation?.durationMinutes || 0),
+      pausedSeconds: Number(reservation?.pausedSeconds || 0),
+      overtimeSeconds: 0,
+    };
+  }
+
+  const started = new Date(reservation.sessionStartedAt).getTime();
+  const pausedStarted = reservation.sessionStatus === "pausada" && reservation.sessionPausedAt ? new Date(reservation.sessionPausedAt).getTime() : null;
+  const currentPause = pausedStarted ? Math.max(0, Math.floor((now - pausedStarted) / 1000)) : 0;
+  const pausedSeconds = Number(reservation.pausedSeconds || 0) + currentPause;
+  const elapsedSeconds = Math.max(0, Math.floor((now - started) / 1000) - pausedSeconds);
+  const contractedSeconds = Number(reservation.durationMinutes || 0) * 60;
+  const remainingSeconds = contractedSeconds - elapsedSeconds;
+
+  return {
+    elapsedSeconds,
+    remainingSeconds,
+    remainingMinutes: Math.ceil(remainingSeconds / 60),
+    pausedSeconds,
+    overtimeSeconds: Math.max(0, -remainingSeconds),
+  };
+}
+
 function formatMinutesLabel(minutes) {
   const total = Number(minutes || 0);
   const hours = Math.floor(total / 60);
@@ -2272,13 +2361,34 @@ function ArenaSettingsForm({ settings, onSave }) {
   );
 }
 
-function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCreateReservation, onCreateBlock, onSaveStation, onDeleteStation, onSaveSettings, onSavePackage, onDeletePackage }) {
+function ArenaPage({
+  arenaData,
+  onReservationStatus,
+  onDeleteReservation,
+  onCreateReservation,
+  onCreateBlock,
+  onSaveStation,
+  onDeleteStation,
+  onSaveSettings,
+  onSavePackage,
+  onDeletePackage,
+  onStartSession,
+  onPauseSession,
+  onResumeSession,
+  onEndSession,
+  onSaveMaintenance,
+  onFinishMaintenance,
+  onCancelMaintenance,
+}) {
   const [filters, setFilters] = useState({ date: todayIsoDate(), status: "", stationId: "", query: "" });
   const [manual, setManual] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "14:00", durationMinutes: 60, customerName: "", customerPhone: "", notes: "", paymentType: "avulso", subscriptionId: "" });
   const [block, setBlock] = useState({ stationId: "", reservationDate: todayIsoDate(), startTime: "12:00", endTime: "13:00", reason: "" });
+  const [maintenanceForm, setMaintenanceForm] = useState({ stationId: "", title: "Manutenção", description: "", status: "em_andamento", startedAt: "", expectedEndAt: "", internalNotes: "" });
+  const [now, setNow] = useState(() => Date.now());
   const [selectedReservationId, setSelectedReservationId] = useState("");
   const stations = arenaData.stations || [];
   const reservations = arenaData.reservations || [];
+  const maintenance = arenaData.maintenance || [];
   const settings = arenaData.settings || {};
   const packages = arenaData.packages || [];
   const customers = arenaData.customers || [];
@@ -2290,7 +2400,13 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
     const firstStation = stations[0]?.id || "";
     setManual((current) => ({ ...current, stationId: current.stationId || firstStation }));
     setBlock((current) => ({ ...current, stationId: current.stationId || firstStation }));
+    setMaintenanceForm((current) => ({ ...current, stationId: current.stationId || firstStation }));
   }, [stations]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const filteredReservations = reservations.filter((reservation) => {
     const matchesDate = !filters.date || reservation.reservationDate === filters.date;
@@ -2305,6 +2421,19 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
   const pending = dayReservations.filter((reservation) => reservation.status === "pendente");
   const confirmed = dayReservations.filter((reservation) => reservation.status === "confirmado");
   const blocked = dayReservations.filter((reservation) => reservation.status === "bloqueado");
+  const activeSessions = reservations.filter((reservation) => ["em_andamento", "pausada"].includes(reservation.sessionStatus));
+  const endingSessions = activeSessions.filter((reservation) => sessionTiming(reservation, now).remainingMinutes <= 10 && sessionTiming(reservation, now).remainingMinutes >= 0);
+  const lateSessions = activeSessions.filter((reservation) => sessionTiming(reservation, now).remainingSeconds < 0);
+  const nextReservations = reservations
+    .filter((reservation) => ["pendente", "confirmado"].includes(reservation.status) && reservation.sessionStatus !== "encerrada")
+    .sort((a, b) => `${a.reservationDate} ${a.startTime}`.localeCompare(`${b.reservationDate} ${b.startTime}`))
+    .slice(0, 8);
+  const monthPrefix = today.slice(0, 7);
+  const monthRevenue = reservations
+    .filter((reservation) => String(reservation.reservationDate || "").startsWith(monthPrefix) && ["pendente", "confirmado", "concluido"].includes(reservation.status))
+    .reduce((total, reservation) => total + Number(reservation.totalPrice || 0), 0);
+  const occupiedStations = stations.filter((station) => station.availabilityStatus === "ocupado" || activeSessions.some((session) => session.stationId === station.id));
+  const maintenanceStations = stations.filter((station) => station.availabilityStatus === "manutencao");
   const reservedMinutes = dayReservations
     .filter((reservation) => ["pendente", "confirmado"].includes(reservation.status))
     .reduce((total, reservation) => total + Number(reservation.durationMinutes || 0), 0);
@@ -2347,6 +2476,12 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
     setBlock((current) => ({ ...current, reason: "" }));
   }
 
+  function submitMaintenance(event) {
+    event.preventDefault();
+    onSaveMaintenance(maintenanceForm);
+    setMaintenanceForm((current) => ({ ...current, title: "Manutenção", description: "", status: "em_andamento", expectedEndAt: "", internalNotes: "" }));
+  }
+
   return (
     <div className="grid w-full max-w-full min-w-0 gap-4 overflow-x-hidden">
       {arenaData.localMode ? (
@@ -2361,6 +2496,89 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
         <SummaryCard compact label="Confirmadas" value={confirmed.length} icon={CheckCircle2} />
         <SummaryCard compact label="Horas reservadas" value={`${Math.round((reservedMinutes / 60) * 10) / 10}h`} icon={CalendarDays} />
         <SummaryCard compact label="Receita prevista" value={formatCurrency(expectedRevenue)} icon={Star} />
+        <SummaryCard compact label="Ocupados agora" value={occupiedStations.length} icon={Gamepad2} tone="green" />
+        <SummaryCard compact label="Livres" value={Math.max(0, stations.filter((station) => station.active !== false).length - occupiedStations.length - maintenanceStations.length)} icon={CheckCircle2} tone="green" />
+        <SummaryCard compact label="Em manutenção" value={maintenanceStations.length} icon={Wrench} tone="amber" />
+        <SummaryCard compact label="Terminando" value={endingSessions.length} icon={Clock} tone="amber" />
+        <SummaryCard compact label="Receita mês" value={formatCurrency(monthRevenue)} icon={BarChart3} />
+      </div>
+
+      <section className="glass min-w-0 rounded-lg p-4 shadow-card">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-lg font-black">Sessões em andamento</h3>
+            <p className="mt-1 text-sm text-slate-400">Controle operacional com temporizador baseado nos horários salvos no Supabase.</p>
+          </div>
+          <span className="text-xs font-bold text-slate-500">Atualiza a cada segundo</span>
+        </div>
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {activeSessions.length ? activeSessions.map((session) => {
+            const timing = sessionTiming(session, now);
+            const remainingLabel = timing.remainingSeconds <= 0 ? "Tempo encerrado" : formatMinutesLabel(Math.ceil(timing.remainingSeconds / 60));
+            const danger = timing.remainingSeconds <= 300;
+            const warning = timing.remainingSeconds <= 600;
+            return (
+              <article key={session.id} className={`rounded-lg border p-4 ${danger ? "border-red-400/40 bg-red-500/10" : warning ? "border-amber-300/40 bg-amber-300/10" : "border-white/10 bg-white/5"}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">{session.stationName || "Arena"}</p>
+                    <h4 className="mt-1 text-lg font-black">{session.customerName}</h4>
+                    <p className="mt-1 text-sm text-slate-300">{session.customerPhone || "Sem telefone"} · {session.startTime} até {session.endTime}</p>
+                  </div>
+                  <span className="rounded-full border border-white/10 px-3 py-1 text-xs font-black uppercase text-white">{session.sessionStatus}</span>
+                </div>
+                <div className="mt-4 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                  <p><strong className="text-white">Restante:</strong> {remainingLabel}</p>
+                  <p><strong className="text-white">Pausado:</strong> {formatMinutesLabel(Math.floor(timing.pausedSeconds / 60))}</p>
+                  <p><strong className="text-white">Excedido:</strong> {formatMinutesLabel(Math.ceil(timing.overtimeSeconds / 60))}</p>
+                  <p><strong className="text-white">Pagamento:</strong> {session.paymentType === "plano" ? `Plano · ${formatMinutesLabel(session.creditsConsumedMinutes || session.durationMinutes)}` : "Avulso"}</p>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {session.sessionStatus === "em_andamento" ? <AdminButton type="button" variant="secondary" onClick={() => onPauseSession(session.id)} icon={Pause}>Pausar</AdminButton> : null}
+                  {session.sessionStatus === "pausada" ? <AdminButton type="button" variant="secondary" onClick={() => onResumeSession(session.id)} icon={Play}>Retomar</AdminButton> : null}
+                  <AdminButton type="button" variant="secondary" onClick={() => onEndSession(session.id)} icon={Square}>Encerrar</AdminButton>
+                  <a className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan" href={reservationWhatsappHref(session)} target="_blank" rel="noreferrer">WhatsApp</a>
+                  {session.customerId ? <a className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan" href={`/admin/arena/clientes/editar/${session.customerId}`}>Ver cliente</a> : null}
+                </div>
+              </article>
+            );
+          }) : <p className="rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Nenhuma sessão em andamento agora.</p>}
+        </div>
+      </section>
+
+      <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <section className="glass min-w-0 rounded-lg p-4 shadow-card">
+          <h3 className="text-lg font-black">Próximas reservas</h3>
+          <div className="mt-4 grid gap-2">
+            {nextReservations.length ? nextReservations.map((reservation) => (
+              <article key={reservation.id} className="rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-300">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <strong className="text-white">{reservation.startTime} · {reservation.customerName}</strong>
+                    <p>{reservation.reservationDate} · {reservation.stationName} · {reservation.paymentType}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {reservation.status === "confirmado" && reservation.sessionStatus === "nao_iniciada" ? <AdminButton type="button" variant="secondary" onClick={() => onStartSession(reservation.id)} icon={Play}>Iniciar</AdminButton> : null}
+                    <a className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 bg-white/5 px-4 py-2 text-sm font-bold text-slate-100 transition hover:border-nt-cyan" href={reservationWhatsappHref(reservation)} target="_blank" rel="noreferrer">WhatsApp</a>
+                  </div>
+                </div>
+              </article>
+            )) : <p className="rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Nenhuma próxima reserva encontrada.</p>}
+          </div>
+        </section>
+
+        <section className="glass min-w-0 rounded-lg p-4 shadow-card">
+          <h3 className="text-lg font-black">Sessões terminando</h3>
+          <div className="mt-4 grid gap-2">
+            {endingSessions.length ? endingSessions.map((session) => (
+              <article key={session.id} className="rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">
+                <strong>{session.stationName} · {session.customerName}</strong>
+                <p className="mt-1">Restante: {formatMinutesLabel(Math.max(0, sessionTiming(session, now).remainingMinutes))}</p>
+              </article>
+            )) : <p className="rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Nenhuma sessão terminando nos próximos 10 minutos.</p>}
+            {lateSessions.length ? <p className="rounded-md border border-red-400/40 bg-red-500/10 p-3 text-sm font-bold text-red-100">{lateSessions.length} sessão(ões) em tempo excedido.</p> : null}
+          </div>
+        </section>
       </div>
 
       <section className="glass min-w-0 rounded-lg p-4 shadow-card">
@@ -2536,6 +2754,42 @@ function ArenaPage({ arenaData, onReservationStatus, onDeleteReservation, onCrea
       </div>
 
       <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+        <section className="glass min-w-0 rounded-lg p-4 shadow-card">
+          <h3 className="text-lg font-black">Manutenção de equipamentos</h3>
+          <form onSubmit={submitMaintenance} className="mt-4 grid min-w-0 gap-3 sm:grid-cols-2">
+            <SelectField label="Equipamento" value={maintenanceForm.stationId} onChange={(value) => setMaintenanceForm((current) => ({ ...current, stationId: value }))} options={stations.map((station) => [station.id, station.name])} />
+            <SelectField label="Status" value={maintenanceForm.status} onChange={(value) => setMaintenanceForm((current) => ({ ...current, status: value }))} options={[["agendada", "Agendada"], ["em_andamento", "Em andamento"]]} />
+            <TextField label="Título" value={maintenanceForm.title} onChange={(value) => setMaintenanceForm((current) => ({ ...current, title: value }))} required />
+            <TextField label="Previsão de retorno" type="datetime-local" value={maintenanceForm.expectedEndAt} onChange={(value) => setMaintenanceForm((current) => ({ ...current, expectedEndAt: value }))} />
+            <div className="sm:col-span-2">
+              <TextareaField label="Descrição / motivo" value={maintenanceForm.description} onChange={(value) => setMaintenanceForm((current) => ({ ...current, description: value }))} rows={2} />
+            </div>
+            <div className="sm:col-span-2">
+              <TextareaField label="Observações internas" value={maintenanceForm.internalNotes} onChange={(value) => setMaintenanceForm((current) => ({ ...current, internalNotes: value }))} rows={2} />
+            </div>
+            <AdminButton type="submit" icon={Wrench}>Registrar manutenção</AdminButton>
+          </form>
+
+          <div className="mt-5 grid gap-3">
+            {maintenance.length ? maintenance.slice(0, 8).map((item) => (
+              <article key={item.id} className="rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-300">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <strong className="text-white">{item.stationName || "Equipamento"} · {item.title}</strong>
+                    <p className="mt-1">{item.status} · início {item.startedAt ? new Date(item.startedAt).toLocaleString("pt-BR") : "-"}</p>
+                    {item.expectedEndAt ? <p>Previsão: {new Date(item.expectedEndAt).toLocaleString("pt-BR")}</p> : null}
+                  </div>
+                  {["agendada", "em_andamento"].includes(item.status) ? (
+                    <div className="flex flex-wrap gap-2">
+                      <AdminButton type="button" variant="secondary" onClick={() => onFinishMaintenance(item.id)} icon={CheckCircle2}>Concluir</AdminButton>
+                      <AdminButton type="button" variant="secondary" onClick={() => onCancelMaintenance(item.id)} icon={X}>Cancelar</AdminButton>
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            )) : <p className="rounded-md border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Nenhuma manutenção registrada.</p>}
+          </div>
+        </section>
         <ArenaStationForm stations={stations} onSave={onSaveStation} onDelete={onDeleteStation} />
         <ArenaPackageForm packages={packages} onSave={onSavePackage} onDelete={onDeletePackage} />
         <ArenaSettingsForm settings={settings} onSave={onSaveSettings} />
@@ -2753,6 +3007,46 @@ export function AdminApp() {
     return runAction(async () => updateArenaReservationStatus(id, status), "Reserva atualizada.");
   }
 
+  async function startArenaSessionAction(id) {
+    return runAction(async () => startArenaSession(id), "Sessão iniciada.");
+  }
+
+  async function pauseArenaSessionAction(id) {
+    return runAction(async () => pauseArenaSession(id), "Sessão pausada.");
+  }
+
+  async function resumeArenaSessionAction(id) {
+    return runAction(async () => resumeArenaSession(id), "Sessão retomada.");
+  }
+
+  async function endArenaSessionAction(id) {
+    return runAction(async () => endArenaSession(id), "Sessão encerrada.");
+  }
+
+  async function saveArenaMaintenanceAction(maintenance) {
+    return runAction(async () => saveArenaMaintenance(maintenance), "Manutenção registrada.");
+  }
+
+  async function finishArenaMaintenanceAction(id) {
+    return runAction(async () => finishArenaMaintenance(id), "Manutenção concluída.");
+  }
+
+  async function cancelArenaMaintenanceAction(id) {
+    return runAction(async () => cancelArenaMaintenance(id), "Manutenção cancelada.");
+  }
+
+  async function readNotification(id) {
+    return runAction(async () => markAdminNotificationRead(id), "");
+  }
+
+  async function dismissNotification(id) {
+    return runAction(async () => dismissAdminNotification(id), "");
+  }
+
+  async function readAllNotifications() {
+    return runAction(async () => markAllAdminNotificationsRead(), "");
+  }
+
   async function removeArenaReservation(id) {
     return runAction(async () => deleteArenaReservation(id), "Reserva excluída.");
   }
@@ -2830,10 +3124,21 @@ export function AdminApp() {
   const [title, subtitle] = titles[info.page] || titles.dashboard;
 
   return (
-    <AdminShell title={title} subtitle={subtitle} mobileOpen={mobileOpen} setMobileOpen={setMobileOpen} mode={mode} notice={notice}>
+    <AdminShell
+      title={title}
+      subtitle={subtitle}
+      mobileOpen={mobileOpen}
+      setMobileOpen={setMobileOpen}
+      mode={mode}
+      notice={notice}
+      notifications={arenaData.notifications || []}
+      onNotificationRead={readNotification}
+      onNotificationDismiss={dismissNotification}
+      onNotificationsReadAll={readAllNotifications}
+    >
       {error ? <div className="mb-5 rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
       {loading ? <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando dados do painel...</p> : null}
-      {!loading && info.page === "dashboard" ? <Dashboard products={products} categories={categories} pcs={pcs} /> : null}
+      {!loading && info.page === "dashboard" ? <Dashboard products={products} categories={categories} pcs={pcs} arenaData={arenaData} /> : null}
       {!loading && info.page === "products" ? (
         <ProductsPage
           products={products}
@@ -2882,6 +3187,13 @@ export function AdminApp() {
           onSaveSettings={saveArenaSettingsAction}
           onSavePackage={saveArenaPackageAction}
           onDeletePackage={removeArenaPackage}
+          onStartSession={startArenaSessionAction}
+          onPauseSession={pauseArenaSessionAction}
+          onResumeSession={resumeArenaSessionAction}
+          onEndSession={endArenaSessionAction}
+          onSaveMaintenance={saveArenaMaintenanceAction}
+          onFinishMaintenance={finishArenaMaintenanceAction}
+          onCancelMaintenance={cancelArenaMaintenanceAction}
         />
       ) : null}
       {!loading && info.page === "settings" ? <SettingsPage /> : null}

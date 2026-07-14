@@ -170,6 +170,7 @@ function fromStation(row) {
     type: row.type,
     description: row.description || "",
     active: row.active !== false,
+    availabilityStatus: row.availability_status || "disponivel",
     sortOrder: Number(row.sort_order || 0),
   };
 }
@@ -251,7 +252,7 @@ async function loadArenaData() {
     }
 
     const [stations, settings, packages] = await Promise.all([
-      supabaseRequest("/arena_stations?select=*&active=eq.true&order=sort_order.asc,name.asc"),
+      supabaseRequest("/arena_stations?select=*&active=eq.true&availability_status=eq.disponivel&order=sort_order.asc,name.asc"),
       supabaseRequest("/arena_settings?select=*&order=created_at.asc&limit=1"),
       supabaseRequest("/arena_packages?select=*&active=eq.true&order=sort_order.asc,duration_minutes.asc"),
     ]);
