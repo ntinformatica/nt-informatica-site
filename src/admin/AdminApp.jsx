@@ -1041,7 +1041,7 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
   }, [pcs, search, category, pcType, published, featured, stockStatus, sort]);
 
   function copyPublicLink(pc) {
-    const url = window.location.origin + "/computadores/" + pc.slug;
+    const url = window.location.origin + "/computadores/" + encodeURIComponent(pc.slug);
     navigator.clipboard?.writeText(url);
   }
 
@@ -1129,7 +1129,7 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
                   <a href={'/admin/pcs/editar/' + pc.id} className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:border-nt-cyan">
                     <Pencil size={15} /> Editar
                   </a>
-                  <a href={'/computadores/' + pc.slug} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:border-nt-cyan">Ver</a>
+                  <a href={'/computadores/' + encodeURIComponent(pc.slug)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-200 hover:border-nt-cyan">Ver</a>
                   <AdminButton variant="secondary" onClick={() => copyPublicLink(pc)}>Copiar link</AdminButton>
                   <AdminButton variant="secondary" onClick={() => onDuplicate(pc)}>Duplicar</AdminButton>
                   <AdminButton variant="secondary" onClick={() => onPublished(pc, !pc.published)}>{pc.published ? "Despublicar" : "Publicar"}</AdminButton>
@@ -1185,8 +1185,13 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
   }
 
   function validateForm() {
+    const normalizedSlug = slugify(form.slug);
+    const duplicateSlug = pcs.find((pc) => pc.slug === normalizedSlug && pc.id !== existingPc?.id);
+
     if (!form.name.trim()) return "Informe o nome comercial do PC.";
-    if (!form.slug.trim()) return "Informe o slug do PC.";
+    if (!normalizedSlug) return "Informe um slug válido para o PC.";
+    if (normalizedSlug !== form.slug) return "O slug deve usar apenas letras minúsculas, números e hífens.";
+    if (duplicateSlug) return "Já existe outro PC usando este slug. Escolha um slug único.";
     if (!form.processor.trim()) return "Informe o processador.";
     if (!form.memory.trim()) return "Informe a memória RAM.";
     if (!form.storage.trim()) return "Informe o armazenamento principal.";
@@ -1205,6 +1210,7 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
     }
     const payload = {
       ...form,
+      slug: slugify(form.slug),
       stock: Number(form.stock || 0),
       warrantyMonths: Number(form.warrantyMonths || 0),
       status: form.published ? (Number(form.stock || 0) > 0 ? "publicado" : "esgotado") : form.status,
