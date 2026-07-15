@@ -2,6 +2,8 @@
   Cable,
   CalendarCheck,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Cpu,
   Fan,
@@ -17,10 +19,12 @@
   PcCase,
   PlayCircle,
   Server,
+  Share2,
   ShoppingBag,
   Sparkles,
   Star,
   Wrench,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import heroImage from "./assets/hero-nt-gaming.png";
@@ -117,13 +121,32 @@ function pcSummary(pc) {
   ].filter(Boolean).join(" | ");
 }
 
+function pcPublicUrl(pc) {
+  return window.location.origin + "/computadores/" + encodeURIComponent(pc.slug);
+}
+
 function pcWhatsappMessage(pc) {
-  const url = `${window.location.origin}/computadores/${pc.slug}`;
+  const url = pcPublicUrl(pc);
   return `Olá! Tenho interesse no computador ${pc.name}.
 Configuração:
 ${pcSummary(pc) || "Configuração a consultar"}
 Preço à vista: ${formatCurrency(pcCashPrice(pc))}
 Link: ${url}`;
+}
+
+function pcShareMessage(pc) {
+  return "Confira este computador montado pela NT Informática:\n\n" + pc.name + "\n\n" + (pcSummary(pc) || "Configuração a consultar") + "\n\nPreço à vista: " + formatCurrency(pcCashPrice(pc)) + "\n\nLink: " + pcPublicUrl(pc);
+}
+
+function getComputerSlugFromPath(pathname) {
+  const withoutPrefix = pathname.replace(/^\/computadores\/?/, "").replace(/\/$/, "");
+  if (!withoutPrefix) return "";
+
+  try {
+    return decodeURIComponent(withoutPrefix);
+  } catch {
+    return withoutPrefix;
+  }
 }
 
 function sortPcs(items, sort = "relevance") {
@@ -676,7 +699,7 @@ function PcCard({ pc }) {
         </dl>
         <PcPriceBlock pc={pc} />
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <Button href={'/computadores/' + pc.slug} variant="secondary">Ver detalhes</Button>
+          <Button href={'/computadores/' + encodeURIComponent(pc.slug)} variant="secondary">Ver detalhes</Button>
           {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
         </div>
       </div>
@@ -684,13 +707,179 @@ function PcCard({ pc }) {
   );
 }
 
-function PcDetail({ pc }) {
+function PcImageGallery({ pc }) {
   const images = pcGallery(pc);
-  const [selectedImage, setSelectedImage] = useState(images[0] || "");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [zoomStyle, setZoomStyle] = useState({ transformOrigin: "center center" });
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const selectedImage = images[selectedIndex] || "";
+
+  useEffect(() => {
+    setSelectedIndex(0);
+    setLightboxOpen(false);
+  }, [pc.id]);
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") setLightboxOpen(false);
+      if (event.key === "ArrowLeft") setSelectedIndex((current) => (current - 1 + images.length) % images.length);
+      if (event.key === "ArrowRight") setSelectedIndex((current) => (current + 1) % images.length);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [lightboxOpen, images.length]);
+
+  function handleZoom(event) {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    setZoomStyle({ transformOrigin: x + "% " + y + "%" });
+  }
+
+  function previousImage() {
+    setSelectedIndex((current) => (current - 1 + images.length) % images.length);
+  }
+
+  function nextImage() {
+    setSelectedIndex((current) => (current + 1) % images.length);
+  }
+
+  if (!selectedImage) {
+    return <TechPlaceholder label="Foto do PC" icon={Monitor} />;
+  }
+
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setLightboxOpen(true)}
+        onMouseMove={handleZoom}
+        onMouseLeave={() => setZoomStyle({ transformOrigin: "center center" })}
+        className="group relative block w-full overflow-hidden rounded-lg border border-white/10 bg-slate-950 text-left shadow-card outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan"
+        aria-label={"Ampliar imagem de " + pc.name}
+      >
+        <img
+          src={selectedImage}
+          alt={"Imagem principal do computador " + pc.name}
+          className="aspect-[4/3] w-full object-cover transition-transform duration-300 ease-out md:group-hover:scale-125"
+          style={zoomStyle}
+        />
+      </button>
+
+      {images.length > 1 ? (
+        <div className="mt-4 grid grid-cols-4 gap-3 sm:grid-cols-6" aria-label="Fotos do computador">
+          {images.map((image, index) => (
+            <button
+              key={image}
+              type="button"
+              onClick={() => setSelectedIndex(index)}
+              className={'overflow-hidden rounded-md border bg-slate-950 outline-none transition focus-visible:ring-2 focus-visible:ring-nt-cyan ' + (selectedIndex === index ? "border-nt-cyan" : "border-white/10 hover:border-white/30")}
+              aria-label={"Selecionar imagem " + (index + 1) + " de " + pc.name}
+            >
+              <img src={image} alt={"Miniatura " + (index + 1) + " de " + pc.name} className="aspect-square w-full object-cover" />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {lightboxOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pc-lightbox-title"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setLightboxOpen(false);
+          }}
+        >
+          <h2 id="pc-lightbox-title" className="sr-only">Galeria de imagens de {pc.name}</h2>
+          <button
+            type="button"
+            onClick={() => setLightboxOpen(false)}
+            className="absolute right-4 top-4 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/20 bg-slate-950/90 text-white outline-none hover:border-nt-cyan focus-visible:ring-2 focus-visible:ring-nt-cyan"
+            aria-label="Fechar visualização ampliada"
+          >
+            <X size={22} />
+          </button>
+          {images.length > 1 ? (
+            <button
+              type="button"
+              onClick={previousImage}
+              className="absolute left-4 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-slate-950/90 text-white outline-none hover:border-nt-cyan focus-visible:ring-2 focus-visible:ring-nt-cyan"
+              aria-label="Imagem anterior"
+            >
+              <ChevronLeft size={24} />
+            </button>
+          ) : null}
+          <img src={selectedImage} alt={"Imagem ampliada do computador " + pc.name} className="max-h-[86vh] max-w-[92vw] rounded-lg object-contain shadow-card" />
+          {images.length > 1 ? (
+            <button
+              type="button"
+              onClick={nextImage}
+              className="absolute right-4 top-1/2 inline-flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-slate-950/90 text-white outline-none hover:border-nt-cyan focus-visible:ring-2 focus-visible:ring-nt-cyan"
+              aria-label="Próxima imagem"
+            >
+              <ChevronRight size={24} />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PcShareButton({ pc }) {
+  const [message, setMessage] = useState("");
+
+  async function handleShare() {
+    const url = pcPublicUrl(pc);
+    const text = "Confira este computador montado pela NT Informática: " + pc.name;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: pc.name, text, url });
+        return;
+      }
+
+      await navigator.clipboard?.writeText(url);
+      setMessage("Link copiado para a área de transferência.");
+      window.setTimeout(() => setMessage(""), 3000);
+    } catch {
+      setMessage("Não foi possível compartilhar agora.");
+      window.setTimeout(() => setMessage(""), 3000);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={handleShare}
+        className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md border border-nt-cyan/40 px-5 py-3 text-sm font-bold text-nt-cyan transition hover:bg-nt-cyan/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan"
+        aria-label={"Compartilhar " + pc.name}
+      >
+        <Share2 size={18} /> Compartilhar
+      </button>
+      {message ? <p className="mt-2 text-xs font-semibold text-lime-200" role="status">{message}</p> : null}
+    </div>
+  );
+}
+
+function PcDetail({ pc }) {
   const available = Number(pc.stock || 0) >= 1;
   const targetUses = pcList(pc.targetUses);
   const recommendedGames = pcList(pc.recommendedGames);
   const qualityChecks = pcList(pc.qualityChecks);
+  const whatsappShareUrl = "https://wa.me/?text=" + encodeURIComponent(pcShareMessage(pc));
   const specs = [
     ["Processador", pc.processor],
     ["Cooler do processador", pc.processorCooler],
@@ -712,23 +901,11 @@ function PcDetail({ pc }) {
     ["Garantia", pc.warranty || (pc.warrantyMonths ? String(pc.warrantyMonths) + " meses" : "")],
   ].filter(([, value]) => Boolean(value));
 
-  useEffect(() => { setSelectedImage(images[0] || ""); }, [pc.id]);
-
   return (
     <Section eyebrow={pcTypeLabel(pc.pcType)} title={pc.name} description={pc.shortDescription}>
+      <a href="/computadores" className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-nt-cyan outline-none transition hover:text-white focus-visible:ring-2 focus-visible:ring-nt-cyan" aria-label="Voltar para computadores">← Voltar para computadores</a>
       <div className="grid gap-8 lg:grid-cols-[1fr_0.9fr]">
-        <div>
-          {selectedImage ? <img src={selectedImage} alt={pc.name} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover shadow-card" /> : <TechPlaceholder label="Foto do PC" icon={Monitor} />}
-          {images.length > 1 ? (
-            <div className="mt-4 grid grid-cols-4 gap-3 sm:grid-cols-6">
-              {images.map((image) => (
-                <button key={image} type="button" onClick={() => setSelectedImage(image)} className={'overflow-hidden rounded-md border ' + (selectedImage === image ? "border-nt-cyan" : "border-white/10")}>
-                  <img src={image} alt="" className="aspect-square w-full object-cover" />
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+        <PcImageGallery pc={pc} />
         <Card>
           <div className="flex flex-wrap gap-2">
             <span className="inline-flex rounded-full border border-nt-cyan/30 bg-nt-cyan/10 px-3 py-1 text-xs font-bold text-nt-cyan">{pc.category || pcTypeLabel(pc.pcType)}</span>
@@ -737,7 +914,9 @@ function PcDetail({ pc }) {
           <PcPriceBlock pc={pc} detail />
           <p className="mt-5 text-sm leading-6 text-slate-300">{pc.fullDescription || pc.shortDescription || "Computador montado e revisado pela NT Informática."}</p>
           <div className="mt-6 grid gap-3">
-            {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))} className="w-full">Comprar via WhatsApp</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'} className="w-full">Consultar disponibilidade</WhatsAppButton>}
+            {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))} className="w-full">Comprar pelo WhatsApp</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'} className="w-full">Consultar disponibilidade</WhatsAppButton>}
+            <PcShareButton pc={pc} />
+            <Button href={whatsappShareUrl} variant="secondary" className="w-full">Compartilhar no WhatsApp</Button>
             <Button href="/computadores" variant="secondary" className="w-full">Voltar para computadores</Button>
           </div>
         </Card>
@@ -782,7 +961,7 @@ function ComputersPage() {
   const [category, setCategory] = useState("Todas");
   const [pcType, setPcType] = useState("Todos");
   const [sort, setSort] = useState("relevance");
-  const slug = decodeURIComponent(window.location.pathname.replace(/^\/computadores\/?/, "")).replace(/\/$/, "");
+  const slug = getComputerSlugFromPath(window.location.pathname);
   const selectedPc = slug ? pcs.find((pc) => pc.slug === slug || pc.id === slug) : null;
 
   const filteredPcs = useMemo(() => sortPcs(pcs.filter((pc) => {
