@@ -76,6 +76,7 @@ const adminFallbackRoutes = [
   "admin/avaliacoes",
   "admin/conteudo",
   "computadores",
+  "computadores/pc-exemplo",
 ];
 
 for (const route of adminFallbackRoutes) {
@@ -127,7 +128,8 @@ if (supabaseUrl && supabaseAnonKey && isValidSupabaseUrl(supabaseUrl)) {
     for (const pc of pcs) {
       for (const id of [pc.id, pc.slug].filter(Boolean)) {
         writeFallback(`admin/pcs/editar/${encodeURIComponent(id)}`);
-        dynamicEditFallbacks += 1;
+        writeFallback(`computadores/${encodeURIComponent(pc.slug || id)}`);
+        dynamicEditFallbacks += 2;
       }
     }
   } catch (error) {

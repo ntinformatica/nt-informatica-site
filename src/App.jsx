@@ -118,23 +118,12 @@ function pcSummary(pc) {
 }
 
 function pcWhatsappMessage(pc) {
-  const url = `${window.location.origin}/computadores/${encodeURIComponent(pc.slug)}`;
+  const url = `${window.location.origin}/computadores/${pc.slug}`;
   return `Olá! Tenho interesse no computador ${pc.name}.
 Configuração:
 ${pcSummary(pc) || "Configuração a consultar"}
 Preço à vista: ${formatCurrency(pcCashPrice(pc))}
 Link: ${url}`;
-}
-
-function getComputerSlugFromPath(pathname) {
-  const withoutPrefix = pathname.replace(/^\/computadores\/?/, "").replace(/\/$/, "");
-  if (!withoutPrefix) return "";
-
-  try {
-    return decodeURIComponent(withoutPrefix);
-  } catch {
-    return withoutPrefix;
-  }
 }
 
 function sortPcs(items, sort = "relevance") {
@@ -687,7 +676,7 @@ function PcCard({ pc }) {
         </dl>
         <PcPriceBlock pc={pc} />
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <Button href={'/computadores/' + encodeURIComponent(pc.slug)} variant="secondary">Ver detalhes</Button>
+          <Button href={'/computadores/' + pc.slug} variant="secondary">Ver detalhes</Button>
           {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
         </div>
       </div>
@@ -770,7 +759,7 @@ function PcDetail({ pc }) {
   );
 }
 
-function PcNotFound({ slug, error, queryFinished }) {
+function PcNotFound({ slug }) {
   return (
     <Section eyebrow="PCs Montados" title="Computador não encontrado." description="O computador solicitado não está disponível no catálogo público ou o link foi alterado.">
       <Card className="max-w-2xl">
@@ -778,14 +767,6 @@ function PcNotFound({ slug, error, queryFinished }) {
           Verifique o endereço acessado ou consulte a NT Informática para confirmar disponibilidade.
           {slug ? <span className="mt-2 block text-slate-400">Código pesquisado: {slug}</span> : null}
         </p>
-        {error ? (
-          <div className="mt-4 rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-xs leading-5 text-amber-100">
-            <strong className="block text-sm text-amber-50">Diagnóstico da consulta</strong>
-            <span className="block">Slug solicitado: {slug || "-"}</span>
-            <span className="block">Consulta concluída: {queryFinished ? "sim" : "não"}</span>
-            <span className="block">Mensagem: {error}</span>
-          </div>
-        ) : null}
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
           <Button href="/computadores" variant="secondary">Ver computadores</Button>
           <WhatsAppButton message="Olá! Gostaria de consultar computadores montados disponíveis na NT Informática.">Consultar no WhatsApp</WhatsAppButton>
@@ -801,7 +782,7 @@ function ComputersPage() {
   const [category, setCategory] = useState("Todas");
   const [pcType, setPcType] = useState("Todos");
   const [sort, setSort] = useState("relevance");
-  const slug = getComputerSlugFromPath(window.location.pathname);
+  const slug = decodeURIComponent(window.location.pathname.replace(/^\/computadores\/?/, "")).replace(/\/$/, "");
   const selectedPc = slug ? pcs.find((pc) => pc.slug === slug || pc.id === slug) : null;
 
   const filteredPcs = useMemo(() => sortPcs(pcs.filter((pc) => {
@@ -815,7 +796,7 @@ function ComputersPage() {
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
       <Header />
       <main className="pt-20">
-        {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : selectedPc ? <PcDetail pc={selectedPc} /> : slug ? <PcNotFound slug={slug} error={error} queryFinished={!loading} /> : (
+        {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : selectedPc ? <PcDetail pc={selectedPc} /> : slug ? <PcNotFound slug={slug} /> : (
           <Section eyebrow="PCs Montados" title="Computadores prontos da NT Informática" description="Filtre por tipo, compare configurações e chame no WhatsApp para comprar.">
             {(error || localMode) ? <div className="mb-6 rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">{error || "Supabase não configurado. Nenhum PC real será exibido no modo local."}</div> : null}
             <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 lg:grid-cols-[1fr_0.5fr_0.5fr_0.45fr]">
