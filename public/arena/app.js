@@ -215,27 +215,44 @@ function fromReservation(row) {
   };
 }
 
+function fromBusySlot(row) {
+  return {
+    id: `${row.station_id}-${row.reservation_date}-${cleanTime(row.start_time)}-${cleanTime(row.end_time)}`,
+    stationId: row.station_id,
+    customerName: "",
+    customerPhone: "",
+    reservationDate: row.reservation_date,
+    startTime: cleanTime(row.start_time),
+    endTime: cleanTime(row.end_time),
+    durationMinutes: Math.max(0, minutesFromTime(row.end_time) - minutesFromTime(row.start_time)),
+    totalPrice: 0,
+    status: row.status || "pendente",
+    notes: "",
+    paymentType: "",
+    subscriptionId: "",
+  };
+}
+
 function fromCustomerPlan(row = {}) {
-  const plan = row.arena_monthly_plans || {};
-  const customer = row.arena_customers || {};
   const today = new Date().toISOString().slice(0, 10);
   const remainingMinutes = Number(row.remaining_minutes || 0);
-  const activeSubscription = row.status === "ativo";
-  const activePlan = plan.active !== false;
-  const activeCustomer = customer.active !== false;
-  const expired = Boolean(row.expiration_date && row.expiration_date < today);
-  const hasBalance = remainingMinutes > 0;
+  const activeSubscription = row.has_active_plan === true || row.status === "ativo";
+  const activePlan = row.plan_active !== false;
+  const activeCustomer = row.customer_active !== false;
+  const expired = row.expired === true || Boolean(row.expiration_date && row.expiration_date < today);
+  const hasBalance = row.has_balance === true || remainingMinutes > 0;
+  const hasActivePlan = row.has_active_plan === true || (activeCustomer && activePlan && activeSubscription && !expired && hasBalance);
 
   return {
     subscriptionId: row.id || row.subscription_id || "",
-    planName: plan.name || row.plan_name || "",
+    planName: row.plan_name || "",
     remainingMinutes,
     expirationDate: row.expiration_date || "",
     activeSubscription,
     expired,
     hasBalance,
-    hasActivePlan: activeCustomer && activePlan && activeSubscription && !expired && hasBalance,
-    hasPlan: Boolean(row.id || row.subscription_id || row.has_active_plan),
+    hasActivePlan,
+    hasPlan: Boolean(row.id || row.subscription_id || row.has_plan || row.has_active_plan),
   };
 }
 
@@ -282,8 +299,11 @@ async function loadArenaData() {
 async function loadReservationsForSelectedDate() {
   state.selectedDate = isoDate();
   if (!isSupabaseConfigured || state.localMode) return;
-  const rows = await supabaseRequest(`/arena_reservations?select=*&reservation_date=eq.${state.selectedDate}`);
-  state.reservations = (rows || []).map(fromReservation);
+  const rows = await supabaseRequest("/rpc/list_public_arena_busy_slots", {
+    method: "POST",
+    body: JSON.stringify({ p_reservation_date: state.selectedDate }),
+  });
+  state.reservations = (rows || []).map(fromBusySlot);
 }
 
 function buildSlots() {
@@ -508,20 +528,14 @@ async function lookupCustomerPlan() {
   }
 
   try {
-    const rows = await supabaseRequest(`/arena_customer_subscriptions?select=id,status,remaining_minutes,expiration_date,arena_monthly_plans(name,active),arena_customers!inner(active)&arena_customers.normalized_phone=eq.${encodeURIComponent(phone)}&order=expiration_date.desc&limit=1`);
+    const rows = await supabaseRequest("/rpc/find_arena_customer_plan_by_phone", {
+      method: "POST",
+      body: JSON.stringify({ p_phone: phone }),
+    });
     state.customerPlan = fromCustomerPlan(rows?.[0] || {});
   } catch (error) {
     console.error(error);
-    try {
-      const rows = await supabaseRequest("/rpc/find_arena_customer_plan_by_phone", {
-        method: "POST",
-        body: JSON.stringify({ p_phone: phone }),
-      });
-      state.customerPlan = fromCustomerPlan(rows?.[0] || {});
-    } catch (fallbackError) {
-      console.error(fallbackError);
-      state.customerPlan = null;
-    }
+    state.customerPlan = null;
   }
   renderPaymentOptions();
 }
