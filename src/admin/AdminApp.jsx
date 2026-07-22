@@ -36,6 +36,7 @@ import {
   storagePathFromPublicUrl,
   supabase,
   supabaseDiagnostics,
+  supabaseRequest,
   uploadStorageFile,
 } from "../lib/supabase";
 import { adminRecentChanges, adminStatuses } from "./adminData";
@@ -184,7 +185,6 @@ const emptyPc = {
 const pcImageBucket = "assembled-pcs";
 const maxPcImageSize = 8 * 1024 * 1024;
 const allowedPcImageTypes = ["image/jpeg", "image/png", "image/webp"];
-const allowedAdminUserId = "2b7a321d-47c8-4056-b285-7941dd8fd00f";
 
 const pcTargetUseOptions = [
   "Estudo",
@@ -379,7 +379,7 @@ function LoadingAdminSession() {
 }
 
 function LoginPage({ onLogin, authError = "" }) {
-  const [email, setEmail] = useState("umjogadordanka@gmail.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(authError);
@@ -3093,7 +3093,21 @@ export function AdminApp() {
       return false;
     }
 
-    if (session.user.id !== allowedAdminUserId) {
+    let isAuthorized = false;
+    try {
+      isAuthorized = await supabaseRequest("/rpc/is_admin", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    } catch (adminCheckError) {
+      console.error(adminCheckError);
+      setAdminUser(null);
+      setAuthError("Não foi possível validar sua autorização administrativa.");
+      await supabase.auth.signOut();
+      return false;
+    }
+
+    if (isAuthorized !== true) {
       setAdminUser(null);
       setAuthError("Acesso não autorizado para este usuário.");
       await supabase.auth.signOut();
