@@ -1,63 +1,28 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "framework": "vite",
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/arena",
-      "destination": "/arena/index.html"
-    },
-    {
-      "source": "/arena/",
-      "destination": "/arena/index.html"
-    },
-    {
       "source": "/produtos",
       "destination": "/produtos/index.html"
     },
     {
-      "source": "/produtos/",
+      "source": "/produtos/:path*",
       "destination": "/produtos/index.html"
     },
     {
-      "source": "/computadores",
-      "destination": "/index.html"
+      "source": "/arena",
+      "destination": "/arena/index.html"
     },
     {
-      "source": "/computadores/",
-      "destination": "/index.html"
+      "source": "/arena/:path*",
+      "destination": "/arena/index.html"
     },
     {
-      "source": "/computadores/:slug",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/computadores/:slug/",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/computadores/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/produtos/editar/:id",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/pcs/editar/:id",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/admin/:path*",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
