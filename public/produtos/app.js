@@ -2462,6 +2462,17 @@ function formatProductCount(total) {
   return `${total} ${total === 1 ? "produto" : "produtos"}`;
 }
 
+function categoryName(category) {
+  return String(category?.[0] || "").trim();
+}
+
+function sortedCategories() {
+  return categories
+    .filter((category) => categoryName(category))
+    .slice()
+    .sort((first, second) => categoryName(first).localeCompare(categoryName(second), "pt-BR", { sensitivity: "base" }));
+}
+
 function productSearchText(product) {
   return [
     product.name,
@@ -2513,7 +2524,7 @@ function assetPath(path) {
 function categoryFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get("categoria");
-  if (!requested) return categories[0]?.[0] || "";
+  if (!requested) return sortedCategories()[0]?.[0] || "";
   const category = findCategoryByParam(requested);
   return category ? category[0] : "";
 }
@@ -3082,7 +3093,7 @@ function setCategory(category, options = {}) {
 }
 
 function renderCategoryButtons() {
-  strip.innerHTML = categories
+  strip.innerHTML = sortedCategories()
     .map(([name, description, image]) => `
       <button class="category-button" type="button" data-category="${name}">
         <img class="category-media" src="${assetPath(image)}" alt="" aria-hidden="true">

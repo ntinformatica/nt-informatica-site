@@ -60,6 +60,12 @@ const messages = {
   contact: "Olá, gostaria de falar com a NT Informática, Celulares e Games.",
 };
 
+function sortByPortugueseName(items, getName = (item) => item?.name) {
+  return [...items]
+    .filter((item) => String(getName(item) || "").trim())
+    .sort((first, second) => getName(first).localeCompare(getName(second), "pt-BR", { sensitivity: "base" }));
+}
+
 function parseMoney(value) {
   if (value === "" || value === null || value === undefined) return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -569,10 +575,12 @@ function Services() {
 }
 
 function Products() {
+  const sortedCategories = sortByPortugueseName(productCategories);
+
   return (
     <Section id="produtos" eyebrow="Produtos" title="Escolha uma categoria para abrir a vitrine." description="Cada segmento abre uma página própria com os produtos daquela linha, deixando a loja mais organizada para o cliente.">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] lg:gap-4">
-        {productCategories.map(({ name, slug, description, icon }) => {
+        {sortedCategories.map(({ name, slug, description, icon }) => {
           const categoryUrl = `/produtos?categoria=${encodeURIComponent(slug || name)}`;
           const Icon = homeCategoryIcons[name] || icon || ShoppingBag;
 
