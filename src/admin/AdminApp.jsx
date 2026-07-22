@@ -34,10 +34,11 @@ import {
   deleteStorageFile,
   isSupabaseConfigured,
   storagePathFromPublicUrl,
+  supabase,
   supabaseDiagnostics,
   uploadStorageFile,
 } from "../lib/supabase";
-import { adminRecentChanges, adminSessionKey, adminStatuses } from "./adminData";
+import { adminRecentChanges, adminStatuses } from "./adminData";
 import { createCategory, deleteCategory, listCategories, updateCategory } from "./services/categoryService";
 import { slugify } from "./services/localStorageHelpers";
 import {
@@ -183,6 +184,7 @@ const emptyPc = {
 const pcImageBucket = "assembled-pcs";
 const maxPcImageSize = 8 * 1024 * 1024;
 const allowedPcImageTypes = ["image/jpeg", "image/png", "image/webp"];
+const allowedAdminUserId = "2b7a321d-47c8-4056-b285-7941dd8fd00f";
 
 const pcTargetUseOptions = [
   "Estudo",
@@ -364,13 +366,46 @@ function AdminButton({ children, icon: Icon, variant = "primary", className = ""
   );
 }
 
-function LoginPage() {
-  const [email, setEmail] = useState("admin@ntinformatica.local");
+function LoadingAdminSession() {
+  return (
+    <main className="grid min-h-screen place-items-center bg-nt-ink px-4 text-white">
+      <div className="glass w-full max-w-md rounded-lg p-7 text-center shadow-card">
+        <p className="text-sm font-bold uppercase tracking-[0.24em] text-nt-cyan">Painel NT</p>
+        <h1 className="mt-3 text-2xl font-black">Verificando sessão</h1>
+        <p className="mt-3 text-sm leading-6 text-slate-300">Aguarde enquanto validamos seu acesso administrativo.</p>
+      </div>
+    </main>
+  );
+}
 
-  function handleSubmit(event) {
+function LoginPage({ onLogin, authError = "" }) {
+  const [email, setEmail] = useState("umjogadordanka@gmail.com");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(authError);
+
+  async function handleSubmit(event) {
     event.preventDefault();
-    localStorage.setItem(adminSessionKey, JSON.stringify({ email, startedAt: new Date().toISOString() }));
-    window.location.href = "/admin";
+    setError("");
+
+    if (!isSupabaseConfigured) {
+      setError("Supabase não configurado. Cadastre VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY para acessar o painel.");
+      return;
+    }
+
+    if (!email.trim() || !password) {
+      setError("Informe e-mail e senha para entrar.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onLogin(email.trim(), password);
+    } catch (loginError) {
+      setError(loginError.message || "Não foi possível entrar. Confira o e-mail e a senha.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -380,11 +415,14 @@ function LoginPage() {
           <p className="text-sm font-bold uppercase tracking-[0.24em] text-nt-cyan">Painel NT</p>
           <h1 className="mt-3 text-3xl font-black">Entrar no administrativo</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300">
-            Painel preparado para Supabase, com fallback local quando as variáveis não estiverem configuradas.
+            Acesso protegido por Supabase Auth. Use o e-mail administrador cadastrado no Supabase.
           </p>
-          <TextField label="E-mail" value={email} onChange={setEmail} className="mt-6" />
-          <TextField label="Senha" value="prototipo" onChange={() => {}} type="password" readOnly />
-          <AdminButton type="submit" className="mt-6 w-full" icon={CheckCircle2}>Acessar painel</AdminButton>
+          {error ? <div className="mt-5 rounded-md border border-red-400/40 bg-red-500/10 p-3 text-sm text-red-100">{error}</div> : null}
+          <TextField label="E-mail" value={email} onChange={setEmail} className="mt-6" autoComplete="email" />
+          <TextField label="Senha" value={password} onChange={setPassword} type="password" autoComplete="current-password" />
+          <AdminButton type="submit" className="mt-6 w-full" icon={CheckCircle2} disabled={loading}>
+            {loading ? "Entrando..." : "Entrar"}
+          </AdminButton>
           <a href="/" className="mt-4 block text-center text-sm font-semibold text-slate-400 hover:text-white">Voltar ao site</a>
         </form>
       </section>
@@ -392,15 +430,10 @@ function LoginPage() {
   );
 }
 
-function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice, notifications = [], onNotificationRead, onNotificationDismiss, onNotificationsReadAll }) {
+function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice, notifications = [], onNotificationRead, onNotificationDismiss, onNotificationsReadAll, onLogout }) {
   const pathname = window.location.pathname.replace(/\/$/, "") || "/admin";
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const unreadNotifications = notifications.filter((item) => !item.read && !item.dismissed);
-
-  function logout() {
-    localStorage.removeItem(adminSessionKey);
-    window.location.href = "/admin/login";
-  }
 
   return (
     <div className="min-h-screen bg-[#070b12] text-white">
@@ -425,7 +458,7 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode
               </a>
             );
           })}
-          <button onClick={logout} className="mt-5 flex items-center gap-3 rounded-md px-3 py-3 text-left text-sm font-bold text-slate-300 hover:bg-white/5 hover:text-white">
+          <button onClick={onLogout} className="mt-5 flex items-center gap-3 rounded-md px-3 py-3 text-left text-sm font-bold text-slate-300 hover:bg-white/5 hover:text-white">
             <LogOut size={18} />
             Sair
           </button>
@@ -3037,11 +3070,40 @@ export function AdminApp() {
   const [arenaData, setArenaData] = useState({ stations: [], reservations: [], settings: {}, localMode: !isSupabaseConfigured });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [authChecking, setAuthChecking] = useState(true);
+  const [adminUser, setAdminUser] = useState(null);
+  const [authError, setAuthError] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const info = routeInfo(currentPath);
   const mode = isSupabaseConfigured ? "Supabase" : "Local";
+
+  function navigateToAdmin(path, replace = false) {
+    if (window.location.pathname === path) return;
+    if (replace) window.history.replaceState({}, "", path);
+    else window.history.pushState({}, "", path);
+    setCurrentPath(path);
+  }
+
+  async function validateAdminSession(session, fallbackMessage = "") {
+    if (!session?.user) {
+      setAdminUser(null);
+      if (fallbackMessage) setAuthError(fallbackMessage);
+      return false;
+    }
+
+    if (session.user.id !== allowedAdminUserId) {
+      setAdminUser(null);
+      setAuthError("Acesso não autorizado para este usuário.");
+      await supabase.auth.signOut();
+      return false;
+    }
+
+    setAdminUser(session.user);
+    setAuthError("");
+    return true;
+  }
 
   async function loadAdminData() {
     setLoading(true);
@@ -3065,11 +3127,45 @@ export function AdminApp() {
   }
 
   useEffect(() => {
-    if (info.page !== "login" && !localStorage.getItem(adminSessionKey)) {
-      localStorage.setItem(adminSessionKey, JSON.stringify({ email: "prototipo@nt.local", startedAt: new Date().toISOString() }));
+    let active = true;
+
+    async function checkSession() {
+      setAuthChecking(true);
+      if (!isSupabaseConfigured) {
+        if (!active) return;
+        setAdminUser(null);
+        setAuthError("Supabase não configurado. Cadastre as variáveis VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.");
+        setAuthChecking(false);
+        return;
+      }
+
+      const { data, error: sessionError } = await supabase.auth.getSession();
+      if (!active) return;
+      await validateAdminSession(data?.session, sessionError ? "Sessão inválida ou expirada." : "");
+      setAuthChecking(false);
+    }
+
+    checkSession();
+    const { data } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!active) return;
+      await validateAdminSession(session);
+      setAuthChecking(false);
+    });
+
+    return () => {
+      active = false;
+      data?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!adminUser) return;
+    if (info.page === "login") {
+      navigateToAdmin("/admin", true);
+      return;
     }
     loadAdminData();
-  }, [info.page]);
+  }, [adminUser, info.page]);
 
   useEffect(() => {
     function handlePopState() {
@@ -3296,7 +3392,31 @@ export function AdminApp() {
     return runAction(async () => updateArenaSubscriptionStatus(id, status), message);
   }
 
-  if (info.page === "login") return <LoginPage />;
+  async function loginAdmin(email, password) {
+    const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
+    if (loginError) {
+      throw new Error("Não foi possível entrar. Confira o e-mail e a senha.");
+    }
+
+    const valid = await validateAdminSession(data?.session);
+    if (!valid) throw new Error("Acesso não autorizado para este usuário.");
+    navigateToAdmin("/admin", true);
+  }
+
+  async function logoutAdmin() {
+    await supabase.auth.signOut();
+    setAdminUser(null);
+    setProducts([]);
+    setCategories([]);
+    setPcs([]);
+    setArenaData({ stations: [], reservations: [], settings: {}, localMode: !isSupabaseConfigured });
+    setNotice("");
+    setError("");
+    navigateToAdmin("/admin/login");
+  }
+
+  if (authChecking) return <LoadingAdminSession />;
+  if (!adminUser) return <LoginPage onLogin={loginAdmin} authError={authError} />;
 
   const titles = {
     dashboard: ["Dashboard", "Resumo rápido do catálogo e da operação."],
@@ -3327,6 +3447,7 @@ export function AdminApp() {
       onNotificationRead={readNotification}
       onNotificationDismiss={dismissNotification}
       onNotificationsReadAll={readAllNotifications}
+      onLogout={logoutAdmin}
     >
       {error ? <div className="mb-5 rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
       {loading ? <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando dados do painel...</p> : null}

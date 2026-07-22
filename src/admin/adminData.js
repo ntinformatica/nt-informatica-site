@@ -1,5 +1,4 @@
 export const adminStorageKey = "nt-admin-products-v2";
-export const adminSessionKey = "nt-admin-session-v1";
 
 export const adminCategories = [
   "Monitores",
