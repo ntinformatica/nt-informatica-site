@@ -2,6 +2,7 @@ import { parseServiceOrderMoney, serviceOrderStatusTones } from "../../services/
 
 export const serviceOrderCompany = {
   name: "NT Informática, Celulares e Games",
+  subtitle: "Celulares, Games e Assistência Técnica",
   addressLines: ["Rua Johann Sachse, 2891, Sala 1", "Badenfurt", "Blumenau - SC"],
   whatsapp: "(47) 99930-9344",
   email: "ntinformaticacomercial@gmail.com",
@@ -10,17 +11,20 @@ export const serviceOrderCompany = {
 };
 
 export const accessoryLabels = {
-  charger: "Carregador",
   power_supply: "Fonte",
-  power_cable: "Cabo de energia",
+  charger: "Carregador",
   usb_cable: "Cabo USB",
-  case: "Capa",
-  screen_protector: "Película",
-  sim_card: "Chip",
-  memory_card: "Cartão de memória",
-  removable_battery: "Bateria removível",
+  hdmi_cable: "Cabo HDMI",
   controller: "Controle",
-  other: "Outros",
+  mouse: "Mouse",
+  keyboard: "Teclado",
+  case: "Bolsa ou case",
+  screen_protector: "Película",
+  memory_card: "Cartão SD",
+  sim_card: "Chip",
+  removable_battery: "Bateria removível",
+  power_cable: "Cabo de energia",
+  other: "Outro",
 };
 
 export const conditionLabels = {
@@ -33,12 +37,12 @@ export const conditionLabels = {
   scratched_cover: "Tampa riscada",
   broken_housing: "Carcaça quebrada",
   damaged_buttons: "Botões danificados",
-  oxidation_signs: "Sinais de oxidação",
+  oxidation_signs: "Oxidação",
   wet_device: "Equipamento molhado",
   broken_seals: "Lacres violados",
-  previously_opened: "Equipamento já aberto",
+  previously_opened: "Já aberto por terceiros",
   missing_parts: "Peças faltando",
-  other: "Outros",
+  other: "Outro",
 };
 
 export const requestedServiceLabels = {
@@ -46,38 +50,130 @@ export const requestedServiceLabels = {
   repair: "Reparo",
   screen_replacement: "Troca de tela",
   battery_replacement: "Troca de bateria",
-  connector_replacement: "Troca de conector",
+  board_repair: "Reparo de placa",
   formatting: "Formatação",
-  preventive_cleaning: "Limpeza preventiva",
-  data_recovery: "Recuperação de dados",
+  preventive_cleaning: "Limpeza",
   upgrade: "Upgrade",
-  board_repair: "Reparo em placa",
+  data_recovery: "Recuperação de dados",
+  connector_replacement: "Troca de conector",
   quote: "Orçamento",
-  other: "Outros",
+  other: "Outro",
 };
 
 export const authorizationLabels = {
-  diagnostic: ["Diagnóstico", "Autorizado", "Não autorizado"],
-  device_opening: ["Abertura do equipamento", "Autorizada", "Não autorizada"],
-  testing: ["Testes", "Autorizados", "Não autorizados"],
-  formatting_if_needed: ["Formatação, se necessária", "Autorizada", "Não autorizada"],
-  whatsapp_contact: ["Contato por WhatsApp", "Autorizado", "Não autorizado"],
-  data_loss_risk: ["Risco de perda de dados", "Ciente", "Não confirmado"],
-  budget_may_change: ["Possibilidade de alteração do orçamento", "Ciente", "Não confirmado"],
+  diagnostic: "Autorizo somente análise técnica.",
+  device_opening: "Autorizo abertura e desmontagem do equipamento.",
+  whatsapp_contact: "Autorizo contato via WhatsApp.",
+  quote: "Desejo receber orçamento antes de qualquer reparo.",
+  image_use: "Autorizo uso de imagens e vídeos do equipamento.",
+  testing: "Autorizo testes técnicos no equipamento.",
+  formatting_if_needed: "Autorizo formatação, se necessária.",
+  data_loss_risk: "Estou ciente do risco de perda de dados.",
+  budget_may_change: "Estou ciente de que o orçamento pode mudar após diagnóstico.",
 };
 
-export const serviceOrderTerms = [
-  "O cliente declara que as informações fornecidas sobre o equipamento, acessórios e defeitos são verdadeiras.",
-  "A análise técnica poderá exigir a abertura e desmontagem parcial ou completa do equipamento.",
-  "O orçamento inicial poderá ser alterado após o diagnóstico técnico, especialmente quando forem identificados defeitos adicionais ou necessidade de substituição de peças.",
-  "Nenhum serviço adicional será executado sem autorização do cliente, salvo quando previamente autorizado nesta Ordem de Serviço.",
-  "A assistência não se responsabiliza por dados, arquivos, aplicativos, senhas ou configurações armazenadas no equipamento. Sempre que possível, o cliente deverá realizar cópia de segurança antes da entrega.",
-  "Equipamentos com sinais de oxidação, contato com líquido, danos severos, componentes alterados, reparos anteriores ou lacres violados poderão apresentar falhas adicionais durante a análise ou reparo.",
-  "Em serviços que envolvam placa, processador, memória, soldagem, retrabalho, recuperação de dados ou equipamentos que já não ligam, existe risco técnico de agravamento do defeito ou perda definitiva de funcionamento.",
-  "O prazo informado é uma estimativa e poderá sofrer alteração por complexidade do serviço, necessidade de testes ou indisponibilidade de peças.",
-  "A garantia cobre exclusivamente o serviço executado e as peças substituídas pela assistência. Não cobre quedas, impactos, líquidos, oxidação, mau uso, violação, intervenção de terceiros, problemas diferentes do serviço realizado ou danos decorrentes de acessórios externos.",
-  "Equipamentos não retirados após a conclusão do serviço poderão permanecer armazenados conforme as regras internas da empresa. Não há cobrança automática ou prazo de abandono definido nesta Ordem de Serviço.",
-  "Ao assinar esta Ordem de Serviço, o cliente declara que leu, compreendeu e concorda com as informações e autorizações registradas.",
+export const responsibilityTerms = [
+  {
+    title: "1. Autorização para análise",
+    paragraphs: [
+      "O cliente autoriza a abertura, desmontagem parcial ou total e a realização dos procedimentos técnicos necessários para análise, diagnóstico e testes do equipamento.",
+    ],
+  },
+  {
+    title: "2. Aprovação de orçamento",
+    paragraphs: [
+      "Nenhum reparo adicional será realizado sem autorização prévia do cliente, salvo quando houver autorização expressa registrada nesta Ordem de Serviço.",
+    ],
+  },
+  {
+    title: "3. Responsabilidade sobre dados",
+    paragraphs: [
+      "A NT Informática recomenda que o cliente mantenha cópia de segurança de arquivos, documentos, fotos, vídeos, aplicativos, contas, senhas, sistemas e demais dados armazenados no equipamento.",
+      "Procedimentos técnicos, falhas do equipamento, problemas no armazenamento, formatação, restauração ou substituição de componentes podem resultar em perda de dados.",
+      "A assistência não garante a preservação ou recuperação de dados, especialmente quando o equipamento ou o dispositivo de armazenamento já apresenta falhas.",
+    ],
+  },
+  {
+    title: "4. Equipamentos com líquido ou oxidação",
+    paragraphs: [
+      "Equipamentos com sinais de contato com líquidos, umidade ou oxidação podem apresentar novos defeitos durante ou após a análise ou o reparo, em razão de danos já existentes nos componentes eletrônicos.",
+    ],
+  },
+  {
+    title: "5. Defeitos ocultos e reparos anteriores",
+    paragraphs: [
+      "Durante a desmontagem e os testes poderão ser identificados defeitos não aparentes no momento da entrada.",
+      "Equipamentos já abertos, violados, modificados ou reparados por terceiros também podem apresentar danos adicionais, peças faltantes, componentes incompatíveis ou falhas provocadas por intervenções anteriores.",
+      "Caso sejam identificados novos problemas, o cliente será informado antes da continuidade do serviço, quando aplicável.",
+    ],
+  },
+  {
+    title: "6. Riscos técnicos",
+    paragraphs: [
+      "Serviços que envolvem placa eletrônica, processador, memória, soldagem, retrabalho, recuperação de dados ou equipamentos que já não ligam possuem riscos técnicos.",
+      "Dependendo do estado do equipamento, poderá ocorrer agravamento da falha ou perda definitiva do funcionamento, mesmo quando os procedimentos forem realizados de forma técnica.",
+    ],
+  },
+  {
+    title: "7. Garantia",
+    paragraphs: [
+      "A NT Informática, Celulares e Games concede garantia legal de 90 dias sobre o serviço executado e sobre as peças substituídas pela assistência, contados a partir da conclusão ou entrega do serviço, conforme aplicável.",
+      "A garantia cobre exclusivamente o defeito relacionado ao serviço executado ou à peça substituída.",
+      "A garantia não cobre quedas, impactos, trincas, mau uso, contato com líquidos, umidade, oxidação, surtos elétricos, violação ou abertura do equipamento, reparos realizados por terceiros, danos provocados por acessórios inadequados, novos defeitos, defeitos diferentes do serviço executado ou danos físicos ocorridos após a entrega.",
+      "O equipamento deverá ser apresentado para avaliação da garantia. A existência da garantia não significa substituição ou devolução automática; o equipamento deverá passar por análise técnica para confirmação da relação entre o defeito apresentado e o serviço executado.",
+    ],
+  },
+  {
+    title: "8. Garantia em troca de telas",
+    paragraphs: [
+      "Nos serviços de troca de tela, a NT Informática poderá fornecer película de proteção como brinde.",
+      "A película auxilia na proteção contra riscos e pequenos impactos, mas não torna a tela resistente a quedas, pressão, torção ou danos físicos.",
+      "A garantia da tela cobre defeitos de fabricação ou falhas relacionadas à instalação.",
+      "Não são cobertos: tela trincada, vidro quebrado, manchas causadas por impacto, display danificado, vazamento de cristal, riscos profundos, marcas de pressão, danos decorrentes de queda, contato com líquido ou mau uso.",
+      "A análise da garantia deverá considerar a existência ou não de dano físico e a relação do defeito com o serviço executado.",
+    ],
+  },
+  {
+    title: "9. Prazos",
+    paragraphs: [
+      "Os prazos informados são estimados e poderão sofrer alterações em razão da complexidade do serviço, necessidade de testes adicionais, disponibilidade de peças ou surgimento de defeitos não identificados inicialmente.",
+    ],
+  },
+  {
+    title: "10. Peças e orçamentos",
+    paragraphs: [
+      "Valores e disponibilidade de peças poderão sofrer alteração até a aprovação definitiva do orçamento.",
+      "Nenhuma peça adicional será instalada sem a autorização do cliente.",
+      "Peças substituídas poderão ser descartadas após a conclusão do serviço, salvo quando o cliente solicitar previamente sua devolução e não existir impedimento técnico, sanitário, ambiental ou de garantia.",
+    ],
+  },
+  {
+    title: "11. Retirada do equipamento",
+    paragraphs: [
+      "Após a comunicação de conclusão, cancelamento ou impossibilidade de reparo, o cliente deverá providenciar a retirada do equipamento.",
+      "Qualquer medida referente a equipamentos não retirados deverá respeitar a legislação aplicável e as políticas internas previamente comunicadas ao cliente.",
+    ],
+  },
+  {
+    title: "12. Comunicação",
+    paragraphs: [
+      "O cliente autoriza contato por telefone, WhatsApp ou e-mail para envio de orçamento, solicitação de autorização, atualização do atendimento, comunicação de conclusão e informações relacionadas ao equipamento.",
+    ],
+  },
+  {
+    title: "13. Uso de imagens e vídeos",
+    paragraphs: [
+      "A utilização de imagens e vídeos do equipamento para divulgação institucional, redes sociais ou produção de conteúdo somente será permitida quando o cliente marcar expressamente essa autorização na Ordem de Serviço.",
+      "A NT Informática deverá preservar dados pessoais, notificações, fotos, arquivos, conversas, contas, documentos e demais conteúdos particulares do cliente.",
+      "A autorização poderá ser recusada sem impedir a prestação do serviço.",
+    ],
+  },
+  {
+    title: "14. Declaração",
+    paragraphs: [
+      "O cliente declara que as informações fornecidas são verdadeiras, conferiu os acessórios entregues, foi informado sobre as condições aparentes do equipamento, leu e compreendeu os termos desta Ordem de Serviço, recebeu oportunidade para esclarecer dúvidas e concorda com as autorizações expressamente marcadas.",
+    ],
+  },
 ];
 
 export function emptyText(value, fallback = "Não informado") {
@@ -86,7 +182,7 @@ export function emptyText(value, fallback = "Não informado") {
 }
 
 export function formatOsNumber(order) {
-  return order?.osNumber ? `OS ${order.osNumber}` : "OS sem número";
+  return order?.osNumber ? `OS Nº ${order.osNumber}` : "OS sem número";
 }
 
 export function formatDate(value) {
@@ -132,32 +228,36 @@ export function statusTone(status) {
   return serviceOrderStatusTones[status] || "slate";
 }
 
+function normalizeLegacyItem(key, labels, value) {
+  if (key === "other" && value?.other_description) return `${labels[key]}: ${value.other_description}`;
+  return labels[key] || key;
+}
+
 export function checkedItems(value, labels) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { items: [], unknown: Boolean(value) };
+  if (value === null || value === undefined || value === "") return { items: [], unknown: false };
+  if (Array.isArray(value)) {
+    return { items: value.map((item) => String(item).trim()).filter(Boolean), unknown: false };
   }
+  if (typeof value === "string") return { items: [], unknown: true };
+  if (typeof value !== "object") return { items: [], unknown: true };
 
   const items = Object.entries(labels)
     .filter(([key]) => value[key] === true)
-    .map(([key, label]) => {
-      if (key === "other" && value.other_description) return `${label}: ${value.other_description}`;
-      return label;
-    });
+    .map(([key]) => normalizeLegacyItem(key, labels, value));
 
   return { items, unknown: false };
 }
 
 export function authorizationItems(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { items: [], unknown: Boolean(value) };
-  }
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const unknown = Boolean(value) && (typeof value !== "object" || Array.isArray(value));
 
   return {
-    unknown: false,
-    items: Object.entries(authorizationLabels).map(([key, [label, yes, no]]) => ({
+    unknown,
+    items: Object.entries(authorizationLabels).map(([key, label]) => ({
+      key,
       label,
-      result: value[key] ? yes : no,
-      checked: Boolean(value[key]),
+      checked: Boolean(source[key]),
     })),
   };
 }

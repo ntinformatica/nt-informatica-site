@@ -137,7 +137,7 @@ export function ServiceOrderViewPage({ serviceOrderId }) {
               <StatusPill status={order.status} />
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
-              Confira os dados antes da impressão. Na janela de impressão, selecione "Salvar como PDF" para gerar o arquivo digital.
+              Confira os dados antes da impressão. O documento possui Página 1 — Ordem de Serviço e Página 2 — Termo de Responsabilidade.
             </p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs font-bold text-slate-400">
               <span>Criada em: {formatDateTime(order.createdAt)}</span>
@@ -162,7 +162,7 @@ export function ServiceOrderViewPage({ serviceOrderId }) {
           <div className="flex items-start gap-3">
             <FileText className="mt-0.5 shrink-0 text-nt-cyan" size={18} />
             <p>
-              A pré-visualização abaixo representa o documento de impressão com duas vias. A via da loja inclui dados internos, senha e padrão quando informados. A via do cliente protege essas informações.
+              A pré-visualização abaixo representa exatamente o documento impresso. Para manter uma cópia na loja e entregar outra ao cliente, selecione 2 cópias na janela de impressão. Para gerar o arquivo digital, selecione "Salvar como PDF".
             </p>
           </div>
         </div>

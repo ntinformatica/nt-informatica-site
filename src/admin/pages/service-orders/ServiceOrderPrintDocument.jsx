@@ -14,8 +14,8 @@ import {
   formatTime,
   parseUnlockPattern,
   requestedServiceLabels,
+  responsibilityTerms,
   serviceOrderCompany,
-  serviceOrderTerms,
 } from "./serviceOrderPrintUtils";
 import "./serviceOrderPrint.css";
 
@@ -37,13 +37,13 @@ function PrintSection({ title, children, className = "" }) {
   );
 }
 
-function ItemsList({ value, labels, emptyLabel = "Não informado" }) {
+function CheckedList({ value, labels, emptyLabel = "Não informado" }) {
   const { items, unknown } = checkedItems(value, labels);
   if (unknown) return <p className="print-text">Informação registrada, mas não disponível para exibição estruturada.</p>;
   if (!items.length) return <p className="print-text">{emptyLabel}</p>;
   return (
-    <div className="print-list">
-      {items.map((item) => <span key={item} className="print-chip">{item}</span>)}
+    <div className="print-check-list">
+      {items.map((item) => <span key={item} className="print-check">☑ {item}</span>)}
     </div>
   );
 }
@@ -53,9 +53,9 @@ function AuthorizationsList({ value }) {
   if (unknown) return <p className="print-text">Informação registrada, mas não disponível para exibição estruturada.</p>;
 
   return (
-    <div className="print-grid two">
+    <div className="print-check-list two-cols">
       {items.map((item) => (
-        <PrintField key={item.label} label={item.label} value={item.result} />
+        <span key={item.key} className="print-check">{item.checked ? "☑" : "☐"} {item.label}</span>
       ))}
     </div>
   );
@@ -80,13 +80,13 @@ function UnlockPatternGrid({ pattern }) {
   const linePoints = parsed.points.map((point) => positions[point]).filter(Boolean);
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
+    <div className="unlock-wrap">
       <svg className="unlock-pattern" viewBox="0 0 112 112" role="img" aria-label="Padrão de desbloqueio informado">
         {linePoints.length > 1 ? (
           <polyline
             points={linePoints.map(([x, y]) => `${x},${y}`).join(" ")}
             fill="none"
-            stroke="#2563eb"
+            stroke="#1d4ed8"
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeWidth="4"
@@ -96,195 +96,206 @@ function UnlockPatternGrid({ pattern }) {
           const active = parsed.points.includes(Number(point));
           return (
             <g key={point}>
-              <circle cx={x} cy={y} r="8" fill={active ? "#2563eb" : "#fff"} stroke="#111827" strokeWidth="2" />
+              <circle cx={x} cy={y} r="8" fill={active ? "#1d4ed8" : "#fff"} stroke="#111827" strokeWidth="2" />
               <text x={x} y={y + 3} textAnchor="middle" fontSize="8" fontWeight="800" fill={active ? "#fff" : "#111827"}>{point}</text>
             </g>
           );
         })}
       </svg>
-      <p className="print-text text-xs">Sequência: {parsed.text}</p>
+      <p className="print-text small">Sequência registrada: {parsed.text}</p>
     </div>
   );
 }
 
-function PrintHeader({ order, copyLabel }) {
+function DocumentHeader({ order, title = "Ordem de Serviço", compact = false }) {
   return (
-    <header className="mb-3 flex flex-col gap-3 border-b border-slate-300 pb-3 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex min-w-0 gap-3">
-        <img src={logoUrl} alt="NT Informática" className="h-14 w-14 rounded-md object-contain" />
-        <div className="min-w-0">
-          <h2 className="text-base font-black text-slate-950">{serviceOrderCompany.name}</h2>
-          <p className="mt-1 text-[10px] font-semibold leading-4 text-slate-700">
-            {serviceOrderCompany.addressLines.join(" | ")}<br />
-            WhatsApp: {serviceOrderCompany.whatsapp} | CNPJ: {serviceOrderCompany.cnpj}<br />
-            {serviceOrderCompany.email}
-          </p>
+    <header className={`os-header ${compact ? "compact" : ""}`}>
+      <div className="os-brand">
+        <img src={logoUrl} alt="NT Informática" className="os-logo" />
+        <div>
+          <h2>{serviceOrderCompany.name}</h2>
+          <p className="brand-subtitle">{serviceOrderCompany.subtitle}</p>
+          <p>{serviceOrderCompany.addressLines.join(" | ")}</p>
+          <p>WhatsApp: {serviceOrderCompany.whatsapp} | CNPJ: {serviceOrderCompany.cnpj}</p>
         </div>
       </div>
-
-      <div className="text-left sm:text-right">
-        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Ordem de Serviço</p>
-        <p className="mt-1 text-2xl font-black text-slate-950">{formatOsNumber(order)}</p>
-        <p className="mt-1 inline-flex rounded border border-slate-400 px-2 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-800">{copyLabel}</p>
-        <div className="mt-2 text-[10px] font-bold leading-4 text-slate-700">
-          Entrada: {formatDate(order.entryDate)} às {formatTime(order.entryTime)}<br />
-          Status: {emptyText(order.status)}
-        </div>
+      <div className="os-title-box">
+        <p className="os-title">{title}</p>
+        <strong>{formatOsNumber(order)}</strong>
+        {!compact ? (
+          <div className="os-title-meta">
+            <span>Data: {formatDate(order.entryDate)}</span>
+            <span>Hora: {formatTime(order.entryTime)}</span>
+            <span>Status: {emptyText(order.status)}</span>
+          </div>
+        ) : null}
       </div>
     </header>
   );
 }
 
-function WarrantyBlock({ order }) {
-  const days = Number(order.warrantyDays || 0);
+function DocumentNotice({ order }) {
+  const archived = Boolean(order.deletedAt);
+  const canceled = order.status === "Cancelado";
+  if (!archived && !canceled) return null;
   return (
-    <PrintSection title="Garantia">
-      <p className="print-text">
-        {days > 0 ? `Garantia do serviço: ${days} dias.` : "Serviço sem prazo adicional de garantia informado."}
-      </p>
-      <p className="print-text mt-2">
-        A garantia cobre exclusivamente o serviço executado e as peças substituídas pela assistência, dentro das condições descritas nesta Ordem de Serviço.
-      </p>
-    </PrintSection>
+    <div className="document-notice">
+      {archived ? "ORDEM DE SERVIÇO ARQUIVADA" : "ORDEM DE SERVIÇO CANCELADA"}
+    </div>
   );
 }
 
-function TermsBlock() {
-  return (
-    <PrintSection title="Termos da Ordem de Serviço">
-      <ol className="print-terms">
-        {serviceOrderTerms.map((term) => <li key={term}>{term}</li>)}
-      </ol>
-    </PrintSection>
-  );
+function WarrantyLine({ order }) {
+  const days = Number(order.warrantyDays ?? 90);
+  if (!Number.isFinite(days) || days <= 0) return "Garantia: serviço sem prazo adicional informado.";
+  return `Garantia: ${days} dias.`;
 }
 
-function Signatures({ copyType }) {
+function PageFooter({ order, generatedAt }) {
   return (
-    <PrintSection title="Assinaturas">
-      <p className="print-text mb-4">
-        {copyType === "store"
-          ? "Declaro que li e concordo com as condições desta Ordem de Serviço."
-          : "Recebi uma via desta Ordem de Serviço."}
-      </p>
-      <div className="signature-grid">
-        <div className="signature-line">Assinatura do cliente</div>
-        <div className="signature-line">Responsável pela loja</div>
-      </div>
-      <div className="signature-grid">
-        <div className="signature-line">Nome legível</div>
-        <div className="signature-line">Data</div>
-      </div>
-    </PrintSection>
-  );
-}
-
-function PrintFooter({ generatedAt }) {
-  return (
-    <footer className="mt-3 border-t border-slate-300 pt-2 text-center text-[9px] font-bold leading-4 text-slate-600">
+    <footer className="os-footer">
       {serviceOrderCompany.name} | WhatsApp: {serviceOrderCompany.whatsapp} | CNPJ: {serviceOrderCompany.cnpj}<br />
-      Documento gerado em {formatDateTime(generatedAt)}
+      Documento referente à {formatOsNumber(order)} | Gerado em {formatDateTime(generatedAt)}
     </footer>
   );
 }
 
-function ServiceOrderPrintCopy({ order, copyType, generatedAt }) {
-  const isStore = copyType === "store";
-  const copyLabel = isStore ? "Via da loja" : "Via do cliente";
-  const archived = Boolean(order.deletedAt);
-  const canceled = order.status === "Cancelado";
-
+function Signatures({ responsibility = false }) {
   return (
-    <article className="service-order-copy">
-      <div className="service-order-copy-inner">
-        <PrintHeader order={order} copyLabel={copyLabel} />
+    <PrintSection title="Assinaturas" className="signature-section">
+      {responsibility ? <p className="print-text mb-3">Declaro que li e concordo com os termos desta Ordem de Serviço.</p> : null}
+      <div className="signature-grid">
+        <div>
+          <div className="signature-line" />
+          <p>Assinatura do cliente ou responsável</p>
+          <p>Nome: _______________________________</p>
+        </div>
+        <div>
+          <div className="signature-line" />
+          <p>Responsável pela NT Informática</p>
+          <p>Nome: _______________________________</p>
+        </div>
+      </div>
+      <p className="signature-date">Data: ____/____/________</p>
+    </PrintSection>
+  );
+}
 
-        {archived || canceled ? (
-          <div className="mb-3 rounded border border-slate-400 bg-slate-100 px-3 py-2 text-center text-[11px] font-black uppercase tracking-[0.16em] text-slate-900">
-            {archived ? "Documento arquivado" : "Ordem de Serviço cancelada"}
-          </div>
-        ) : null}
+function ServiceOrderPage({ order, generatedAt }) {
+  return (
+    <article className="service-order-sheet service-order-page">
+      <div className="service-order-sheet-inner">
+        <DocumentHeader order={order} />
+        <DocumentNotice order={order} />
 
-        <div className="print-grid">
+        <div className="print-grid page-one-grid">
           <PrintSection title="Dados do cliente">
             <div className="print-grid three">
-              <PrintField label="Nome" value={emptyText(order.customerName)} />
-              <PrintField label="CPF/CNPJ" value={formatDocument(order.customerDocument)} />
-              <PrintField label="WhatsApp/telefone" value={formatPhone(order.customerPhone)} />
+              <PrintField label="Nome completo" value={emptyText(order.customerName)} />
+              <PrintField label="CPF/RG ou CPF/CNPJ" value={formatDocument(order.customerDocument)} />
+              <PrintField label="WhatsApp" value={formatPhone(order.customerPhone)} />
+              <PrintField label="Data de entrada" value={formatDate(order.entryDate)} />
+              <PrintField label="Hora de entrada" value={formatTime(order.entryTime)} />
             </div>
           </PrintSection>
 
-          <PrintSection title="Equipamento">
-            <div className="print-grid three">
+          <PrintSection title="Dados do equipamento">
+            <div className="print-grid four">
               <PrintField label="Marca" value={emptyText(order.deviceBrand)} />
               <PrintField label="Modelo" value={emptyText(order.deviceModel)} />
               <PrintField label="Cor" value={emptyText(order.deviceColor, "-")} />
-              <PrintField label="Série/IMEI" value={emptyText(order.deviceSerialImei, "-")} />
-              <PrintField
-                label="Senha"
-                value={isStore ? emptyText(order.devicePassword, "Não informada") : (order.devicePassword ? "Senha fornecida à assistência" : "Não informada")}
-              />
-              <PrintField
-                label="Padrão de desbloqueio"
-                value={isStore ? (order.unlockPattern ? "Ver grade abaixo" : "Não informado") : (order.unlockPattern ? "Padrão fornecido à assistência" : "Não informado")}
-              />
+              <PrintField label="Número de série ou IMEI" value={emptyText(order.deviceSerialImei, "-")} />
             </div>
-            {isStore && order.unlockPattern ? (
-              <div className="mt-3">
+          </PrintSection>
+
+          <PrintSection title="Senha / desbloqueio">
+            <div className="print-grid two unlock-section">
+              <div>
+                <PrintField label="Senha digitada" value={emptyText(order.devicePassword, "Não informada")} />
+                <p className="print-text small mt-2">Informação fornecida pelo cliente para realização dos testes técnicos.</p>
+              </div>
+              <div>
+                <span className="print-label">Padrão Android</span>
                 <UnlockPatternGrid pattern={order.unlockPattern} />
               </div>
-            ) : null}
+            </div>
           </PrintSection>
 
           <div className="print-grid two">
-            <PrintSection title="Acessórios recebidos">
-              <ItemsList value={order.accessories} labels={accessoryLabels} emptyLabel="Nenhum acessório informado" />
+            <PrintSection title="Acessórios entregues">
+              <CheckedList value={order.accessories} labels={accessoryLabels} emptyLabel="Nenhum acessório informado." />
             </PrintSection>
             <PrintSection title="Estado do equipamento na entrada">
-              <ItemsList value={order.deviceCondition} labels={conditionLabels} />
+              <CheckedList value={order.deviceCondition} labels={conditionLabels} />
             </PrintSection>
           </div>
 
-          <PrintSection title="Defeito informado pelo cliente">
+          <PrintSection title="Defeito informado pelo cliente" className="highlight-section">
             <p className="print-text">{emptyText(order.reportedDefect)}</p>
           </PrintSection>
 
           <div className="print-grid two">
-            <PrintSection title="Serviços solicitados">
-              <ItemsList value={order.requestedServices} labels={requestedServiceLabels} />
+            <PrintSection title="Serviço solicitado">
+              <CheckedList value={order.requestedServices} labels={requestedServiceLabels} />
             </PrintSection>
-            <PrintSection title="Valores e prazo">
+            <PrintSection title="Análise e prazo">
               <div className="print-grid">
                 <PrintField label="Valor da análise" value={formatMoney(order.analysisPrice)} />
                 <PrintField label="Valor do serviço" value={formatMoney(order.servicePrice)} />
                 <PrintField label="Prazo estimado" value={emptyText(order.estimatedDeadline, "A definir após diagnóstico")} />
               </div>
-              <p className="print-text mt-2 text-[10px]">
-                O prazo poderá sofrer alteração em razão da disponibilidade de peças, complexidade do reparo ou necessidade de testes adicionais.
-              </p>
+              <p className="print-text small mt-2">O prazo informado é uma estimativa e poderá sofrer alteração em razão da complexidade do serviço, necessidade de testes ou disponibilidade de peças.</p>
             </PrintSection>
           </div>
 
-          <PrintSection title="Autorizações e ciência do cliente">
-            <AuthorizationsList value={order.authorizations} />
-          </PrintSection>
-
-          <PrintSection title={isStore ? "Observações para o cliente" : "Observações"}>
+          <PrintSection title="Observações">
             <p className="print-text">{emptyText(order.customerNotes, "Sem observações adicionais.")}</p>
           </PrintSection>
 
-          {isStore && order.internalNotes ? (
-            <PrintSection title="Observações internas">
-              <p className="print-text">{order.internalNotes}</p>
-            </PrintSection>
-          ) : null}
+          <PrintSection title="Autorizações">
+            <AuthorizationsList value={order.authorizations} />
+          </PrintSection>
 
-          <WarrantyBlock order={order} />
-          <TermsBlock />
-          <Signatures copyType={copyType} />
+          <PrintSection title="Declaração resumida">
+            <p className="print-text">
+              Declaro que as informações fornecidas são verdadeiras e que recebi as orientações iniciais referentes à análise do equipamento. Declaro também que li e concordo com os termos apresentados na segunda página desta Ordem de Serviço.
+            </p>
+            <p className="print-text mt-2 font-bold">{WarrantyLine({ order })}</p>
+          </PrintSection>
+
+          <Signatures />
         </div>
 
-        <PrintFooter generatedAt={generatedAt} />
+        <PageFooter order={order} generatedAt={generatedAt} />
+      </div>
+    </article>
+  );
+}
+
+function TermsPage({ order, generatedAt }) {
+  return (
+    <article className="service-order-sheet terms-page">
+      <div className="service-order-sheet-inner">
+        <DocumentHeader order={order} title="Termo de Responsabilidade" compact />
+
+        <section className="terms-identification">
+          <PrintField label="Cliente" value={emptyText(order.customerName)} />
+          <PrintField label="Equipamento" value={[order.deviceBrand, order.deviceModel].filter(Boolean).join(" ") || "Não informado"} />
+          <PrintField label="Ordem de Serviço" value={formatOsNumber(order)} />
+        </section>
+
+        <h1 className="terms-title">Termo de Responsabilidade</h1>
+        <div className="responsibility-terms">
+          {responsibilityTerms.map((term) => (
+            <section key={term.title} className="term-block">
+              <h2>{term.title}</h2>
+              {term.paragraphs.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+            </section>
+          ))}
+        </div>
+
+        <Signatures responsibility />
+        <PageFooter order={order} generatedAt={generatedAt} />
       </div>
     </article>
   );
@@ -293,8 +304,8 @@ function ServiceOrderPrintCopy({ order, copyType, generatedAt }) {
 export function ServiceOrderPrintDocument({ order, generatedAt }) {
   return (
     <div className="service-order-document service-order-print-root">
-      <ServiceOrderPrintCopy order={order} copyType="store" generatedAt={generatedAt} />
-      <ServiceOrderPrintCopy order={order} copyType="customer" generatedAt={generatedAt} />
+      <ServiceOrderPage order={order} generatedAt={generatedAt} />
+      <TermsPage order={order} generatedAt={generatedAt} />
     </div>
   );
 }

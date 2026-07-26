@@ -3453,7 +3453,7 @@ export function AdminApp() {
     productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
     serviceOrders: ["Ordens de Serviço", "Base técnica para controle de atendimentos e manutenção."],
     serviceOrderForm: [info.mode === "edit" ? "Editar Ordem de Serviço" : "Nova Ordem de Serviço", "Estrutura inicial do módulo de OS."],
-    serviceOrderView: ["Ordem de Serviço", "Visualização e impressão em duas vias."],
+    serviceOrderView: ["Ordem de Serviço", "Visualização e impressão A4."],
     pcs: ["PCs Montados", "Computadores prontos da loja para Home e página pública."],
     pcForm: [info.mode === "edit" ? "Editar PC" : "Novo PC", "Cadastro completo de computadores montados."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],

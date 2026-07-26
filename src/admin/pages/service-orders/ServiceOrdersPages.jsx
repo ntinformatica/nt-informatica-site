@@ -736,7 +736,7 @@ function ServiceOrderForm({ mode, orderId }) {
   const archived = Boolean(existingOrder?.deletedAt);
 
   return (
-    <form ref={formRef} className="grid gap-5" onSubmit={(event) => event.preventDefault()}>
+    <form ref={formRef} className="grid gap-5" autoComplete="off" onSubmit={(event) => event.preventDefault()}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-2xl font-black text-white">{isEdit ? `Editar OS ${existingOrder?.osNumber || ""}` : "Nova Ordem de Serviço"}</h2>
@@ -785,9 +785,9 @@ function ServiceOrderForm({ mode, orderId }) {
           <div data-field="deviceBrand"><TextField label="Marca" value={form.deviceBrand} onChange={(value) => updateField("deviceBrand", value)} error={errors.deviceBrand} /></div>
           <div data-field="deviceModel"><TextField label="Modelo" value={form.deviceModel} onChange={(value) => updateField("deviceModel", value)} error={errors.deviceModel} /></div>
           <TextField label="Cor" value={form.deviceColor} onChange={(value) => updateField("deviceColor", value)} />
-          <TextField label="Número de série ou IMEI" value={form.deviceSerialImei} onChange={(value) => updateField("deviceSerialImei", value)} />
-          <TextField label="Senha do aparelho" type={showPassword ? "text" : "password"} value={form.devicePassword} onChange={(value) => updateField("devicePassword", value)} helper="Informação sensível, exibida apenas nesta tela." />
-          <TextField label="Padrão de desbloqueio" value={form.unlockPattern} onChange={(value) => updateField("unlockPattern", value)} placeholder="Ex.: 1-2-5-8" />
+          <TextField label="Número de série ou IMEI" name="device_serial_imei" id="device_serial_imei" autoComplete="off" value={form.deviceSerialImei} onChange={(value) => updateField("deviceSerialImei", value)} />
+          <TextField label="Senha do aparelho" name="service_device_password" id="service_device_password" autoComplete="new-password" type={showPassword ? "text" : "password"} value={form.devicePassword} onChange={(value) => updateField("devicePassword", value)} helper="Informação sensível, exibida apenas nesta tela." />
+          <TextField label="Padrão de desbloqueio" name="device_unlock_pattern" id="device_unlock_pattern" autoComplete="off" value={form.unlockPattern} onChange={(value) => updateField("unlockPattern", value)} placeholder="Ex.: 1-2-5-8" />
         </div>
         <label className="mt-4 flex items-center gap-3 text-sm font-bold text-slate-200">
           <input type="checkbox" checked={showPassword} onChange={(event) => setShowPassword(event.target.checked)} />
