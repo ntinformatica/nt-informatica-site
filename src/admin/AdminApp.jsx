@@ -89,12 +89,14 @@ import {
   updateProductFeatured,
   updateProductStatus,
 } from "./services/productService";
+import { getNextServiceOrderNumber } from "./services/serviceOrdersService";
 import { createStockMovement, listStockMovements, previewStockMovement } from "./services/stockService";
 
 const menuItems = [
   ["Dashboard", "/admin", Home],
   ["Produtos", "/admin/produtos", Boxes],
   ["PCs Montados", "/admin/pcs", Monitor],
+  ["Ordens de Serviço", "/admin/os", ClipboardList],
   ["Categorias", "/admin/categorias", Layers3],
   ["Assistente Codex", "/admin/assistente-codex", FilePlus2],
   ["Arena Gamer", "/admin/arena", Gamepad2],
@@ -302,6 +304,11 @@ function calculateCashPrice(value) {
 function routeInfo(pathname) {
   const cleanPath = pathname.replace(/\/$/, "") || "/admin";
   if (cleanPath === "/admin/login") return { page: "login" };
+  if (cleanPath === "/admin/os/nova") return { page: "serviceOrderForm", mode: "new" };
+  if (cleanPath.startsWith("/admin/os/editar/")) {
+    return { page: "serviceOrderForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/os/editar/", "")) };
+  }
+  if (cleanPath === "/admin/os") return { page: "serviceOrders" };
   if (cleanPath === "/admin/pcs/novo") return { page: "pcForm", mode: "new" };
   if (cleanPath.startsWith("/admin/pcs/editar/")) {
     return { page: "pcForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/pcs/editar/", "")) };
@@ -1036,6 +1043,114 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
       </div>
       <StockMovementModal product={existingProduct} open={stockModalOpen} onClose={() => setStockModalOpen(false)} onMove={handleStockMove} />
     </form>
+  );
+}
+
+function ServiceOrdersPage() {
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/5 p-6 shadow-card">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-nt-cyan">Etapa 1</p>
+          <h2 className="mt-2 text-2xl font-black text-white">Ordens de Serviço</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            A base técnica do módulo está preparada. A listagem completa, filtros, impressão e formulário detalhado entram nas próximas etapas.
+          </p>
+        </div>
+        <a href="/admin/os/nova" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-nt-blue px-4 py-2 text-sm font-bold text-white transition hover:bg-nt-cyan">
+          <Plus size={17} />
+          Nova OS
+        </a>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-dashed border-slate-700 bg-slate-950/70 p-6 text-sm leading-6 text-slate-300">
+        <p className="font-bold text-slate-100">Listagem em preparação</p>
+        <p className="mt-2">
+          Nesta etapa nenhum dado de cliente é exibido ainda. A tabela `service_orders`, a numeração automática e as permissões RLS ficam prontas para a próxima fase.
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function NewServiceOrderPage() {
+  const [nextNumber, setNextNumber] = useState(null);
+  const [numberNotice, setNumberNotice] = useState("Consultando próxima numeração...");
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadNextNumber() {
+      try {
+        const number = await getNextServiceOrderNumber();
+        if (!active) return;
+        setNextNumber(number);
+        setNumberNotice("");
+      } catch (numberError) {
+        if (!active) return;
+        console.warn(numberError);
+        setNextNumber(null);
+        setNumberNotice("Execute o SQL da Etapa 1 no Supabase para habilitar a consulta segura da próxima OS.");
+      }
+    }
+
+    loadNextNumber();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/5 p-6 shadow-card">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-nt-cyan">Nova OS</p>
+          <h2 className="mt-2 text-2xl font-black text-white">Nova Ordem de Serviço</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            O formulário completo será implementado na próxima etapa. Por enquanto, esta tela valida a rota e a infraestrutura de numeração.
+          </p>
+        </div>
+        <a href="/admin/os" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 transition hover:border-nt-cyan">
+          Voltar
+        </a>
+      </div>
+
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-white/10 bg-slate-950/70 p-5">
+          <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">Próximo número</p>
+          <p className="mt-3 text-4xl font-black text-white">{nextNumber ? `OS ${nextNumber}` : "--"}</p>
+          {numberNotice ? <p className="mt-3 text-sm leading-6 text-amber-100">{numberNotice}</p> : null}
+        </div>
+        <div className="rounded-lg border border-dashed border-slate-700 bg-slate-950/70 p-5 text-sm leading-6 text-slate-300">
+          <p className="font-bold text-slate-100">Formulário em preparação</p>
+          <p className="mt-2">Campos de cliente, equipamento, defeito, termos, impressão A4 e anexos ficam para as próximas etapas.</p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function EditServiceOrderPage({ serviceOrderId }) {
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/5 p-6 shadow-card">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-bold uppercase tracking-[0.2em] text-nt-cyan">Editar OS</p>
+          <h2 className="mt-2 text-2xl font-black text-white">Editar Ordem de Serviço</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            A edição completa será implementada na próxima etapa. Esta tela já recebe o identificador da rota dinâmica.
+          </p>
+        </div>
+        <a href="/admin/os" className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-700 px-4 py-2 text-sm font-bold text-slate-200 transition hover:border-nt-cyan">
+          Voltar
+        </a>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-dashed border-slate-700 bg-slate-950/70 p-5 text-sm leading-6 text-slate-300">
+        <p className="font-bold text-slate-100">ID recebido pela rota</p>
+        <code className="mt-3 block break-all rounded-md border border-white/10 bg-black/30 p-3 text-nt-cyan">{serviceOrderId || "Não informado"}</code>
+      </div>
+    </section>
   );
 }
 
@@ -3436,6 +3551,8 @@ export function AdminApp() {
     dashboard: ["Dashboard", "Resumo rápido do catálogo e da operação."],
     products: ["Produtos", "Busca, filtros, estoque, publicação e ações rápidas."],
     productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
+    serviceOrders: ["Ordens de Serviço", "Base técnica para controle de atendimentos e manutenção."],
+    serviceOrderForm: [info.mode === "edit" ? "Editar Ordem de Serviço" : "Nova Ordem de Serviço", "Estrutura inicial do módulo de OS."],
     pcs: ["PCs Montados", "Computadores prontos da loja para Home e página pública."],
     pcForm: [info.mode === "edit" ? "Editar PC" : "Novo PC", "Cadastro completo de computadores montados."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
@@ -3478,6 +3595,9 @@ export function AdminApp() {
         />
       ) : null}
       {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} error={error} /> : null}
+      {!loading && info.page === "serviceOrders" ? <ServiceOrdersPage /> : null}
+      {!loading && info.page === "serviceOrderForm" && info.mode === "new" ? <NewServiceOrderPage /> : null}
+      {!loading && info.page === "serviceOrderForm" && info.mode === "edit" ? <EditServiceOrderPage serviceOrderId={info.id} /> : null}
       {!loading && info.page === "pcs" ? <PcsPage pcs={pcs} onDelete={removePc} onDuplicate={duplicatePc} onPublished={changePcPublished} onFeatured={changePcFeatured} /> : null}
       {!loading && info.page === "pcForm" ? <PcFormPage mode={info.mode} pcId={info.id} pcs={pcs} onSave={savePc} error={error} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
