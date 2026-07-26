@@ -86,6 +86,7 @@ import {
   NewServiceOrderManagerPage,
   ServiceOrdersManagerPage,
 } from "./pages/service-orders/ServiceOrdersPages";
+import { ServiceOrderViewPage } from "./pages/service-orders/ServiceOrderViewPage";
 import {
   createProduct,
   deleteProduct,
@@ -308,6 +309,9 @@ function calculateCashPrice(value) {
 function routeInfo(pathname) {
   const cleanPath = pathname.replace(/\/$/, "") || "/admin";
   if (cleanPath === "/admin/login") return { page: "login" };
+  if (cleanPath.startsWith("/admin/os/visualizar/")) {
+    return { page: "serviceOrderView", id: decodeURIComponent(cleanPath.replace("/admin/os/visualizar/", "")) };
+  }
   if (cleanPath === "/admin/os/nova") return { page: "serviceOrderForm", mode: "new" };
   if (cleanPath.startsWith("/admin/os/editar/")) {
     return { page: "serviceOrderForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/os/editar/", "")) };
@@ -3449,6 +3453,7 @@ export function AdminApp() {
     productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
     serviceOrders: ["Ordens de Serviço", "Base técnica para controle de atendimentos e manutenção."],
     serviceOrderForm: [info.mode === "edit" ? "Editar Ordem de Serviço" : "Nova Ordem de Serviço", "Estrutura inicial do módulo de OS."],
+    serviceOrderView: ["Ordem de Serviço", "Visualização e impressão em duas vias."],
     pcs: ["PCs Montados", "Computadores prontos da loja para Home e página pública."],
     pcForm: [info.mode === "edit" ? "Editar PC" : "Novo PC", "Cadastro completo de computadores montados."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
@@ -3492,6 +3497,7 @@ export function AdminApp() {
       ) : null}
       {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} error={error} /> : null}
       {!loading && info.page === "serviceOrders" ? <ServiceOrdersManagerPage /> : null}
+      {!loading && info.page === "serviceOrderView" ? <ServiceOrderViewPage serviceOrderId={info.id} /> : null}
       {!loading && info.page === "serviceOrderForm" && info.mode === "new" ? <NewServiceOrderManagerPage /> : null}
       {!loading && info.page === "serviceOrderForm" && info.mode === "edit" ? <EditServiceOrderManagerPage serviceOrderId={info.id} /> : null}
       {!loading && info.page === "pcs" ? <PcsPage pcs={pcs} onDelete={removePc} onDuplicate={duplicatePc} onPublished={changePcPublished} onFeatured={changePcFeatured} /> : null}

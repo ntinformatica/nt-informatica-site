@@ -1,4 +1,4 @@
-import { CheckCircle2, FilePlus2, Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, Eye, FilePlus2, Pencil, Plus, Printer, RefreshCw, Search, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   archiveServiceOrder,
@@ -132,7 +132,8 @@ function normalizeForm(order) {
 function goToAdmin(path, replace = false) {
   if (replace) window.history.replaceState({}, "", path);
   else window.history.pushState({}, "", path);
-  window.dispatchEvent(new PopStateEvent("popstate"));
+  const event = typeof PopStateEvent === "function" ? new PopStateEvent("popstate") : new Event("popstate");
+  window.dispatchEvent(event);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -333,7 +334,7 @@ function ServiceOrdersTable({ orders, onStatus, onArchive }) {
   return (
     <>
       <div className="hidden overflow-hidden rounded-lg border border-white/10 xl:block">
-        <div className="grid grid-cols-[0.55fr_0.8fr_1fr_0.8fr_1fr_0.8fr_0.8fr_0.85fr_1.1fr] border-b border-white/10 bg-slate-950/80 px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
+        <div className="grid grid-cols-[0.55fr_0.8fr_1fr_0.8fr_1fr_0.8fr_0.8fr_0.85fr_1.35fr] border-b border-white/10 bg-slate-950/80 px-4 py-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-400">
           <span>OS</span>
           <span>Entrada</span>
           <span>Cliente</span>
@@ -346,7 +347,7 @@ function ServiceOrdersTable({ orders, onStatus, onArchive }) {
         </div>
         <div className="divide-y divide-white/10">
           {orders.map((order) => (
-            <article key={order.id} className="grid grid-cols-[0.55fr_0.8fr_1fr_0.8fr_1fr_0.8fr_0.8fr_0.85fr_1.1fr] items-center gap-3 px-4 py-4 text-sm">
+            <article key={order.id} className="grid grid-cols-[0.55fr_0.8fr_1fr_0.8fr_1fr_0.8fr_0.8fr_0.85fr_1.35fr] items-center gap-3 px-4 py-4 text-sm">
               <strong className="text-white">OS {order.osNumber}</strong>
               <span className="text-slate-300">{formatDateTime(order.entryDate, order.entryTime)}</span>
               <span className="font-bold text-slate-100">{order.customerName || "Sem nome"}</span>
@@ -356,6 +357,10 @@ function ServiceOrdersTable({ orders, onStatus, onArchive }) {
               <span className="font-bold text-slate-100">{serviceOrderValue(order)}</span>
               <span className="text-slate-300">{formatDateTimeFromIso(order.updatedAt)}</span>
               <div className="flex flex-wrap gap-2">
+                <a href={`/admin/os/visualizar/${order.id}`} className="inline-flex min-h-9 items-center justify-center gap-1 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan">
+                  <Eye size={14} />
+                  Visualizar
+                </a>
                 <a href={`/admin/os/editar/${order.id}`} className="inline-flex min-h-9 items-center justify-center gap-1 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan">
                   <Pencil size={14} />
                   Editar
@@ -394,7 +399,11 @@ function ServiceOrdersTable({ orders, onStatus, onArchive }) {
               <p><span className="font-bold text-slate-100">Equipamento:</span> {equipmentLabel(order)}</p>
               <p><span className="font-bold text-slate-100">Valor:</span> {serviceOrderValue(order)}</p>
             </div>
-            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <div className="mt-4 grid gap-2 sm:grid-cols-4">
+              <a href={`/admin/os/visualizar/${order.id}`} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm font-bold text-slate-100 hover:border-nt-cyan">
+                <Eye size={15} />
+                Visualizar
+              </a>
               <a href={`/admin/os/editar/${order.id}`} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm font-bold text-slate-100 hover:border-nt-cyan">
                 <Pencil size={15} />
                 Editar
@@ -843,6 +852,7 @@ function ServiceOrderForm({ mode, orderId }) {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         {isEdit ? <AdminButton type="button" variant="danger" icon={Trash2} disabled={saving || archived} onClick={archiveCurrentOrder}>Arquivar OS</AdminButton> : null}
+        {isEdit && existingOrder ? <AdminButton type="button" variant="secondary" icon={Printer} disabled={saving} onClick={() => goToAdmin(`/admin/os/visualizar/${existingOrder.id}`)}>Visualizar impressão</AdminButton> : null}
         <AdminButton type="button" variant="secondary" disabled={saving} onClick={cancel}>Cancelar</AdminButton>
         {isEdit ? (
           <>
