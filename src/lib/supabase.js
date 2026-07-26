@@ -260,22 +260,23 @@ export async function supabaseRequest(path, options = {}) {
     throw new Error("Supabase nao configurado.");
   }
 
+  const { returnMeta = false, ...requestOptions } = options;
   const headers = {
     apikey: supabaseAnonKey,
     Authorization: `Bearer ${readAuthSession()?.access_token || supabaseAnonKey}`,
     Accept: "application/json",
     Prefer: "return=representation",
-    ...options.headers,
+    ...requestOptions.headers,
   };
 
-  if (options.body !== undefined && !headers["Content-Type"]) {
+  if (requestOptions.body !== undefined && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
 
   let response;
   try {
     response = await fetch(buildUrl(path), {
-      ...options,
+      ...requestOptions,
       headers,
     });
   } catch (error) {
@@ -288,7 +289,16 @@ export async function supabaseRequest(path, options = {}) {
   }
 
   if (response.status === 204) return null;
-  return response.json();
+  const data = await response.json();
+  if (!returnMeta) return data;
+
+  const contentRange = response.headers.get("content-range") || "";
+  const total = contentRange.includes("/") ? Number(contentRange.split("/").pop()) : null;
+  return {
+    data,
+    total: Number.isFinite(total) ? total : null,
+    contentRange,
+  };
 }
 
 export function storagePublicUrl(bucket, path) {
