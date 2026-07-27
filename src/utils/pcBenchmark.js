@@ -89,6 +89,7 @@ function parseLegacyRecommendedGame(text) {
 export function normalizeBenchmarkGame(game = {}) {
   return {
     id: String(game.id || createBenchmarkGameId()),
+    gameId: String(game.gameId || game.game_id || ""),
     externalGameId: String(game.externalGameId || game.external_game_id || ""),
     name: String(game.name || "").trim(),
     coverUrl: cleanUrl(game.coverUrl || game.cover_url),
@@ -140,13 +141,43 @@ export function benchmarkGameToSupabase(game = {}) {
   const normalized = normalizeBenchmarkGame(game);
   return {
     id: normalized.id,
+    gameId: normalized.gameId,
+    game_id: normalized.gameId,
     externalGameId: normalized.externalGameId,
+    external_game_id: normalized.externalGameId,
     name: normalized.name,
+    cover_url: normalized.coverUrl,
     coverUrl: normalized.coverUrl,
     graphicsPreset: normalized.graphicsPreset,
+    graphics_preset: normalized.graphicsPreset,
     resolution: normalized.resolution,
     resolutionDetail: normalized.resolutionDetail,
+    resolution_detail: normalized.resolutionDetail,
     averageFps: normalized.averageFps === "" ? null : normalized.averageFps,
+    average_fps: normalized.averageFps === "" ? null : normalized.averageFps,
     videoUrl: normalized.videoUrl,
+    video_url: normalized.videoUrl,
   };
+}
+
+export function normalizeGameLibraryName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function resolveBenchmarkGamesWithLibrary(games = [], library = []) {
+  const byId = new Map((library || []).map((game) => [String(game.id), game]));
+  return normalizeBenchmarkGames(games).map((benchmark) => {
+    const libraryGame = benchmark.gameId ? byId.get(String(benchmark.gameId)) : null;
+    if (!libraryGame) return benchmark;
+    return {
+      ...benchmark,
+      name: libraryGame.name || benchmark.name,
+      coverUrl: libraryGame.coverUrl || benchmark.coverUrl,
+    };
+  });
 }

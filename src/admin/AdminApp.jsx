@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { businessName } from "../data/siteData";
-import { createBenchmarkGameId, duplicateBenchmarkGames, normalizeProductBenchmark } from "../utils/pcBenchmark";
+import { createBenchmarkGameId, duplicateBenchmarkGames, normalizeGameLibraryName, normalizeProductBenchmark } from "../utils/pcBenchmark";
 import {
   deleteStorageFile,
   isSupabaseConfigured,
@@ -83,6 +83,15 @@ import {
   updateAssembledPcPublished,
 } from "./services/assembledPcService";
 import {
+  countGameUsage,
+  createGame,
+  deleteGame,
+  gameUsageDetails,
+  listGames,
+  updateGame,
+  upsertGameByName,
+} from "./services/gameLibraryService";
+import {
   EditServiceOrderManagerPage,
   NewServiceOrderManagerPage,
   ServiceOrdersManagerPage,
@@ -102,6 +111,7 @@ const menuItems = [
   ["Dashboard", "/admin", Home],
   ["Produtos", "/admin/produtos", Boxes],
   ["PCs Montados", "/admin/pcs", Monitor],
+  ["Biblioteca de Jogos", "/admin/jogos", Gamepad2],
   ["Ordens de Serviço", "/admin/os", ClipboardList],
   ["Categorias", "/admin/categorias", Layers3],
   ["Assistente Codex", "/admin/assistente-codex", FilePlus2],
@@ -327,6 +337,7 @@ function routeInfo(pathname) {
     return { page: "pcForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/pcs/editar/", "")) };
   }
   if (cleanPath === "/admin/pcs") return { page: "pcs" };
+  if (cleanPath === "/admin/jogos") return { page: "gameLibrary" };
   if (cleanPath === "/admin/produtos/novo") return { page: "productForm", mode: "new" };
   if (cleanPath.startsWith("/admin/produtos/editar/")) {
     return { page: "productForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/produtos/editar/", "")) };
@@ -1067,6 +1078,7 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
 function normalizeAdminBenchmarkGame(game = {}) {
   return {
     id: game.id || createBenchmarkGameId(),
+    gameId: game.gameId || game.game_id || "",
     externalGameId: game.externalGameId || "",
     name: game.name || "",
     coverUrl: game.coverUrl || "",
@@ -1163,9 +1175,11 @@ function GameCoverSearch({ game, onSelect }) {
     </div>
   );
 }
-function BenchmarkGameEditor({ game, index, total, onChange, onMove, onDuplicate, onRemove }) {
+function BenchmarkGameEditor({ game, index, total, libraryGame, onChange, onMove, onDuplicate, onRemove, onSaveToLibrary }) {
   const [expanded, setExpanded] = useState(index === 0);
-  const title = `Jogo ${index + 1} — ${game.name?.trim() || "Novo jogo"}`;
+  const displayName = libraryGame?.name || game.name;
+  const displayCover = libraryGame?.coverUrl || game.coverUrl;
+  const title = `Jogo ${index + 1} — ${displayName?.trim() || "Novo jogo"}`;
 
   function updateGame(field, value) {
     onChange({ ...game, [field]: value });
@@ -1189,15 +1203,17 @@ function BenchmarkGameEditor({ game, index, total, onChange, onMove, onDuplicate
       {expanded ? (
         <div className="grid gap-4 p-4 lg:grid-cols-[180px_1fr]">
           <div>
-            {game.coverUrl ? <img src={game.coverUrl} alt={"Capa selecionada de " + (game.name || "jogo")} className="aspect-[3/4] w-full rounded-lg border border-white/10 object-cover" /> : <div className="grid aspect-[3/4] place-items-center rounded-lg border border-dashed border-slate-700 bg-white/5 p-4 text-center text-sm text-slate-400">Capa selecionada</div>}
+            {displayCover ? <img src={displayCover} alt={"Capa selecionada de " + (displayName || "jogo")} className="aspect-[3/4] w-full rounded-lg border border-white/10 object-cover" /> : <div className="grid aspect-[3/4] place-items-center rounded-lg border border-dashed border-slate-700 bg-white/5 p-4 text-center text-sm text-slate-400">Capa selecionada</div>}
+            {libraryGame ? <p className="mt-3 rounded-full border border-nt-cyan/30 bg-nt-cyan/10 px-3 py-1 text-center text-xs font-bold text-nt-cyan">Vinculado à biblioteca</p> : null}
           </div>
           <div className="grid gap-4">
             <div className="grid gap-4 md:grid-cols-2">
-              <TextField label="Nome do jogo" value={game.name} onChange={(value) => updateGame("name", value)} placeholder="Cyberpunk 2077" />
+              <TextField label="Nome do jogo" value={libraryGame?.name || game.name} onChange={(value) => updateGame("name", value)} placeholder="Cyberpunk 2077" readOnly={Boolean(libraryGame)} />
               <TextField label="ID externo" value={game.externalGameId} onChange={(value) => updateGame("externalGameId", value)} placeholder="Opcional" />
             </div>
-            <GameCoverSearch game={game} onSelect={(result) => onChange({ ...game, ...result })} />
-            <TextField label="URL manual da capa" value={game.coverUrl} onChange={(value) => updateGame("coverUrl", value)} placeholder="https://..." />
+            {!libraryGame ? <GameCoverSearch game={game} onSelect={(result) => onChange({ ...game, ...result })} /> : null}
+            <TextField label="URL manual da capa" value={libraryGame?.coverUrl || game.coverUrl} onChange={(value) => updateGame("coverUrl", value)} placeholder="https://..." readOnly={Boolean(libraryGame)} />
+            {!libraryGame && game.name ? <AdminButton type="button" variant="secondary" onClick={() => onSaveToLibrary(index)}>Salvar este jogo na biblioteca</AdminButton> : null}
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <TextField label="Preset gráfico" value={game.graphicsPreset} onChange={(value) => updateGame("graphicsPreset", value)} placeholder="Alto, Médio, Baixo, Ultra..." />
               <TextField label="Resolução" value={game.resolution} onChange={(value) => updateGame("resolution", value)} placeholder="Full HD, 1920x1080, Quad HD..." />
@@ -1212,10 +1228,20 @@ function BenchmarkGameEditor({ game, index, total, onChange, onMove, onDuplicate
   );
 }
 
-function BenchmarkAdminSection({ form, pcs, updateField }) {
+function BenchmarkAdminSection({ form, pcs, gameLibrary, updateField, onSaveGameToLibrary }) {
   const games = Array.isArray(form.benchmarkGames) ? form.benchmarkGames.map(normalizeAdminBenchmarkGame) : [];
   const otherPcs = pcs.filter((pc) => pc.id !== form.id && normalizeProductBenchmark(pc).benchmarkGames.length);
   const [copyFromId, setCopyFromId] = useState("");
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const libraryById = useMemo(() => new Map((gameLibrary || []).map((game) => [String(game.id), game])), [gameLibrary]);
+  const filteredLibrary = useMemo(() => {
+    const term = librarySearch.trim().toLowerCase();
+    return (gameLibrary || [])
+      .filter((game) => !term || game.name.toLowerCase().includes(term))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }))
+      .slice(0, 12);
+  }, [gameLibrary, librarySearch]);
 
   function updateGames(nextGames) {
     updateField("benchmarkGames", nextGames.map(normalizeAdminBenchmarkGame));
@@ -1223,6 +1249,21 @@ function BenchmarkAdminSection({ form, pcs, updateField }) {
 
   function addGame() {
     updateGames([...games, normalizeAdminBenchmarkGame({ id: createBenchmarkGameId() })]);
+    if (!form.showBenchmarkSection) updateField("showBenchmarkSection", true);
+  }
+
+  function addLibraryGame(game) {
+    updateGames([
+      ...games,
+      normalizeAdminBenchmarkGame({
+        id: createBenchmarkGameId(),
+        gameId: game.id,
+        name: game.name,
+        coverUrl: game.coverUrl,
+      }),
+    ]);
+    setLibraryOpen(false);
+    setLibrarySearch("");
     if (!form.showBenchmarkSection) updateField("showBenchmarkSection", true);
   }
 
@@ -1285,21 +1326,186 @@ function BenchmarkAdminSection({ form, pcs, updateField }) {
           <BenchmarkGameEditor
             key={game.id}
             game={game}
+            libraryGame={game.gameId ? libraryById.get(String(game.gameId)) : null}
             index={index}
             total={games.length}
             onChange={(nextGame) => updateGames(games.map((item, currentIndex) => (currentIndex === index ? nextGame : item)))}
             onMove={moveGame}
             onDuplicate={duplicateGame}
             onRemove={removeGame}
+            onSaveToLibrary={async (gameIndex) => {
+              const saved = await onSaveGameToLibrary(games[gameIndex]);
+              if (saved) {
+                updateGames(games.map((item, currentIndex) => (
+                  currentIndex === gameIndex ? { ...item, gameId: saved.id, name: saved.name, coverUrl: saved.coverUrl } : item
+                )));
+              }
+            }}
           />
         ))}
         {!games.length ? <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">Nenhum jogo cadastrado ainda. Produtos sem jogos não mostram a seção no site.</p> : null}
       </div>
 
       <div>
-        <AdminButton type="button" icon={Plus} onClick={addGame}>+ Adicionar jogo</AdminButton>
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <AdminButton type="button" icon={Plus} onClick={() => setLibraryOpen((current) => !current)}>Adicionar jogo da biblioteca</AdminButton>
+          <AdminButton type="button" variant="secondary" icon={Plus} onClick={addGame}>Adicionar jogo manualmente</AdminButton>
+        </div>
       </div>
+
+      {libraryOpen ? (
+        <div className="rounded-lg border border-slate-700 bg-slate-950 p-4">
+          <TextField label="Pesquisar jogo na biblioteca" value={librarySearch} onChange={setLibrarySearch} placeholder="Digite o nome do jogo" />
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {filteredLibrary.map((game) => (
+              <button key={game.id} type="button" onClick={() => addLibraryGame(game)} className="grid grid-cols-[56px_1fr] gap-3 rounded-md border border-slate-700 bg-white/5 p-3 text-left hover:border-nt-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan">
+                <GameLibraryImage game={game} className="aspect-[3/4] w-14" />
+                <span className="self-center text-sm font-black text-white">{game.name}</span>
+              </button>
+            ))}
+            {!filteredLibrary.length ? <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400 md:col-span-2 xl:col-span-3">Nenhum jogo encontrado. Use “Adicionar jogo manualmente”.</p> : null}
+          </div>
+        </div>
+      ) : null}
     </section>
+  );
+}
+
+function GameLibraryImage({ game, className = "h-16 w-12" }) {
+  const [failed, setFailed] = useState(false);
+  if (!game.coverUrl || failed) {
+    return <div className={`grid place-items-center rounded-md border border-white/10 bg-white/5 text-xs font-black text-slate-500 ${className}`}>Jogo</div>;
+  }
+  return <img src={game.coverUrl} alt="" onError={() => setFailed(true)} className={`rounded-md border border-white/10 object-cover ${className}`} />;
+}
+
+function GameLibraryPage({ games, pcs, onCreate, onUpdate, onDelete, onMigrate }) {
+  const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState("");
+  const [form, setForm] = useState({ name: "", coverUrl: "" });
+  const [usageOpen, setUsageOpen] = useState("");
+  const [formError, setFormError] = useState("");
+
+  const filteredGames = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return [...games]
+      .filter((game) => !term || game.name.toLowerCase().includes(term))
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+  }, [games, search]);
+
+  function resetForm() {
+    setEditingId("");
+    setForm({ name: "", coverUrl: "" });
+    setFormError("");
+  }
+
+  function editGame(game) {
+    setEditingId(game.id);
+    setForm({ name: game.name, coverUrl: game.coverUrl || "" });
+    setFormError("");
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setFormError("");
+    if (!form.name.trim()) {
+      setFormError("Informe o nome do jogo.");
+      return;
+    }
+
+    const ok = editingId ? await onUpdate(editingId, form) : await onCreate(form);
+    if (ok) resetForm();
+  }
+
+  async function requestDelete(game) {
+    const usage = countGameUsage(game.id, pcs);
+    if (!usage) {
+      if (window.confirm(`Excluir ${game.name} da biblioteca?`)) await onDelete(game, false);
+      return;
+    }
+
+    const confirmed = window.confirm(`${game.name} está vinculado a ${usage} benchmark(s). Deseja desvincular e manter nome/capa atuais nos computadores antes de excluir?`);
+    if (confirmed) await onDelete(game, true);
+  }
+
+  return (
+    <div className="grid gap-6">
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-[1fr_0.75fr]">
+        <div>
+          <h2 className="text-xl font-black text-white">Biblioteca Central de Jogos</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-300">Cadastre nome e capa uma vez. Cada PC usa o jogo da biblioteca, mas mantém FPS, resolução, preset e vídeo próprios.</p>
+        </div>
+        <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
+          <AdminButton type="button" variant="secondary" onClick={onMigrate}>Migrar benchmarks existentes</AdminButton>
+        </div>
+      </section>
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-[0.85fr_1.15fr]">
+        <form onSubmit={submit} className="grid gap-4 rounded-lg border border-slate-700 bg-slate-950 p-4">
+          <div>
+            <h3 className="text-lg font-black text-white">{editingId ? "Editar jogo" : "Novo jogo"}</h3>
+            <p className="mt-1 text-sm text-slate-400">A URL da capa é manual nesta etapa. Upload pode ser adicionado depois.</p>
+          </div>
+          {formError ? <p className="rounded-md border border-red-400/40 bg-red-500/10 p-3 text-sm text-red-100">{formError}</p> : null}
+          <TextField label="Nome do jogo" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} placeholder="Pragmata" />
+          <TextField label="URL da capa" value={form.coverUrl} onChange={(value) => setForm((current) => ({ ...current, coverUrl: value.trim() }))} placeholder="https://..." />
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="mb-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Pré-visualização</p>
+            <GameLibraryImage game={form} className="aspect-[3/4] w-32" />
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <AdminButton type="submit" icon={FilePlus2}>{editingId ? "Salvar alterações" : "Salvar jogo"}</AdminButton>
+            {editingId ? <AdminButton type="button" variant="secondary" onClick={resetForm}>Cancelar edição</AdminButton> : null}
+          </div>
+        </form>
+
+        <div className="min-w-0">
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-3 text-slate-500" size={18} />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar jogo pelo nome" className="w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
+          </label>
+
+          <div className="mt-4 overflow-hidden rounded-lg border border-white/10 bg-[#0b111d]">
+            <div className="hidden grid-cols-[0.8fr_1fr_0.35fr_0.85fr] border-b border-white/10 px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-400 lg:grid">
+              <span>Jogo</span>
+              <span>URL da capa</span>
+              <span>Uso</span>
+              <span>Ações</span>
+            </div>
+            <div className="divide-y divide-white/10">
+              {filteredGames.map((game) => {
+                const usage = countGameUsage(game.id, pcs);
+                const details = gameUsageDetails(game.id, pcs);
+                return (
+                  <article key={game.id} className="grid gap-4 p-4 lg:grid-cols-[0.8fr_1fr_0.35fr_0.85fr] lg:items-center">
+                    <div className="flex items-center gap-3">
+                      <GameLibraryImage game={game} />
+                      <div>
+                        <p className="font-black text-white">{game.name}</p>
+                        <p className="mt-1 text-xs text-slate-500">{game.slug}</p>
+                      </div>
+                    </div>
+                    <p className="break-all text-xs text-slate-400">{game.coverUrl || "Sem capa cadastrada"}</p>
+                    <p className="font-bold text-slate-200">{usage}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <AdminButton type="button" variant="secondary" onClick={() => editGame(game)} icon={Pencil}>Editar</AdminButton>
+                      <AdminButton type="button" variant="secondary" onClick={() => setUsageOpen(usageOpen === game.id ? "" : game.id)}>Visualizar uso</AdminButton>
+                      <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => requestDelete(game)}>Excluir</AdminButton>
+                    </div>
+                    {usageOpen === game.id ? (
+                      <div className="rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-300 lg:col-span-4">
+                        {details.length ? details.map(({ pc, count }) => <p key={pc.id}>{pc.name}: {count} uso(s)</p>) : <p>Este jogo ainda não está vinculado a nenhum computador.</p>}
+                      </div>
+                    ) : null}
+                  </article>
+                );
+              })}
+              {!filteredGames.length ? <p className="p-6 text-center text-sm text-slate-400">Nenhum jogo encontrado na biblioteca.</p> : null}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1449,7 +1655,7 @@ function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
   );
 }
 
-function PcFormPage({ mode, pcId, pcs, onSave, error }) {
+function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary, error }) {
   const existingPc = pcs.find((pc) => pc.id === pcId);
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => normalizePcForm(isEdit ? existingPc : emptyPc));
@@ -1624,7 +1830,7 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
         </div>
       </section>
 
-      <BenchmarkAdminSection form={form} pcs={pcs} updateField={updateField} />
+      <BenchmarkAdminSection form={form} pcs={pcs} gameLibrary={gameLibrary} updateField={updateField} onSaveGameToLibrary={onSaveGameToLibrary} />
 
       <PcImageUploader form={form} updateField={updateField} />
 
@@ -3334,6 +3540,7 @@ export function AdminApp() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [pcs, setPcs] = useState([]);
+  const [gameLibrary, setGameLibrary] = useState([]);
   const [arenaData, setArenaData] = useState({ stations: [], reservations: [], settings: {}, localMode: !isSupabaseConfigured });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -3393,10 +3600,12 @@ export function AdminApp() {
       const loadedCategories = await listCategories();
       const loadedProducts = await listProducts(loadedCategories);
       const loadedPcs = await listAssembledPcs();
+      const loadedGameLibrary = await listGames();
       const loadedArenaData = await listArenaData();
       setCategories(loadedCategories);
       setProducts(loadedProducts);
       setPcs(loadedPcs);
+      setGameLibrary(loadedGameLibrary);
       setArenaData(loadedArenaData);
       setNotice(isSupabaseConfigured ? "" : "Supabase não configurado. O painel está usando localStorage como fallback.");
     } catch (loadError) {
@@ -3561,6 +3770,92 @@ export function AdminApp() {
     return runAction(async () => updateAssembledPcFeatured(pc.id, featured), "Destaque do PC atualizado.");
   }
 
+  async function addGameLibraryItem(game) {
+    return runAction(async () => createGame(game), "Jogo salvo na biblioteca.");
+  }
+
+  async function editGameLibraryItem(id, game) {
+    return runAction(async () => updateGame(id, game), "Jogo atualizado na biblioteca.");
+  }
+
+  async function saveBenchmarkGameToLibrary(game) {
+    setError("");
+    try {
+      const saved = await upsertGameByName({ name: game.name, coverUrl: game.coverUrl });
+      await loadAdminData();
+      setNotice("Jogo salvo e vinculado à biblioteca.");
+      return saved;
+    } catch (saveError) {
+      console.error(saveError);
+      setError(saveError.message || "Não foi possível salvar este jogo na biblioteca.");
+      return null;
+    }
+  }
+
+  async function removeGameLibraryItem(game, unlinkBeforeDelete = false) {
+    return runAction(async () => {
+      if (unlinkBeforeDelete) {
+        const affectedPcs = gameUsageDetails(game.id, pcs).map(({ pc }) => pc);
+        for (const pc of affectedPcs) {
+          const nextGames = (pc.benchmarkGames || []).map((benchmark) => {
+            if (String(benchmark.gameId || benchmark.game_id || "") !== String(game.id)) return benchmark;
+            const { gameId, game_id, ...rest } = benchmark;
+            return {
+              ...rest,
+              name: game.name || benchmark.name,
+              coverUrl: game.coverUrl || benchmark.coverUrl,
+            };
+          });
+          await updateAssembledPc(pc.id, { ...pc, benchmarkGames: nextGames });
+        }
+      }
+      await deleteGame(game.id);
+    }, unlinkBeforeDelete ? "Jogo desvinculado dos PCs e excluído." : "Jogo excluído da biblioteca.");
+  }
+
+  async function migrateBenchmarkGamesToLibrary() {
+    return runAction(async () => {
+      let updatedPcs = 0;
+      let linkedGames = 0;
+      let createdGames = 0;
+      let reusedGames = 0;
+      let ignoredGames = 0;
+      const knownNames = new Set(gameLibrary.map((game) => normalizeGameLibraryName(game.name)));
+
+      for (const pc of pcs) {
+        const benchmark = normalizeProductBenchmark(pc);
+        if (!benchmark.benchmarkGames.length) continue;
+
+        let changed = false;
+        const nextGames = [];
+        for (const game of benchmark.benchmarkGames) {
+          if (game.gameId || !game.name) {
+            nextGames.push(game);
+            if (!game.name) ignoredGames += 1;
+            continue;
+          }
+
+          const normalizedName = normalizeGameLibraryName(game.name);
+          const wasKnown = knownNames.has(normalizedName);
+          const saved = await upsertGameByName({ name: game.name, coverUrl: game.coverUrl });
+          knownNames.add(normalizedName);
+          nextGames.push({ ...game, gameId: saved.id, name: saved.name, coverUrl: saved.coverUrl || game.coverUrl });
+          linkedGames += 1;
+          if (wasKnown) reusedGames += 1;
+          else createdGames += 1;
+          changed = true;
+        }
+
+        if (changed) {
+          await updateAssembledPc(pc.id, { ...pc, benchmarkGames: nextGames });
+          updatedPcs += 1;
+        }
+      }
+
+      console.info("Migração da biblioteca de jogos:", { createdGames, reusedGames, linkedGames, updatedPcs, ignoredGames, conflicts: 0 });
+    }, "Migração concluída. Jogos existentes foram vinculados à biblioteca quando possível.");
+  }
+
   async function addCategory(category) {
     return runAction(async () => createCategory(category), "Categoria criada.");
   }
@@ -3691,6 +3986,7 @@ export function AdminApp() {
     setProducts([]);
     setCategories([]);
     setPcs([]);
+    setGameLibrary([]);
     setArenaData({ stations: [], reservations: [], settings: {}, localMode: !isSupabaseConfigured });
     setNotice("");
     setError("");
@@ -3709,6 +4005,7 @@ export function AdminApp() {
     serviceOrderView: ["Ordem de Serviço", "Visualização e impressão A4."],
     pcs: ["PCs Montados", "Computadores prontos da loja para Home e página pública."],
     pcForm: [info.mode === "edit" ? "Editar PC" : "Novo PC", "Cadastro completo de computadores montados."],
+    gameLibrary: ["Biblioteca de Jogos", "Capas e nomes centralizados para o Benchmark NT."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
     codexAssistant: ["Assistente Codex", "Gere prompts para importacao segura de produtos via SQL."],
     arena: ["Arena Gamer", "Reservas, equipamentos e configurações da Arena."],
@@ -3754,7 +4051,8 @@ export function AdminApp() {
       {!loading && info.page === "serviceOrderForm" && info.mode === "new" ? <NewServiceOrderManagerPage /> : null}
       {!loading && info.page === "serviceOrderForm" && info.mode === "edit" ? <EditServiceOrderManagerPage serviceOrderId={info.id} /> : null}
       {!loading && info.page === "pcs" ? <PcsPage pcs={pcs} onDelete={removePc} onDuplicate={duplicatePc} onPublished={changePcPublished} onFeatured={changePcFeatured} /> : null}
-      {!loading && info.page === "pcForm" ? <PcFormPage mode={info.mode} pcId={info.id} pcs={pcs} onSave={savePc} error={error} /> : null}
+      {!loading && info.page === "pcForm" ? <PcFormPage mode={info.mode} pcId={info.id} pcs={pcs} gameLibrary={gameLibrary} onSave={savePc} onSaveGameToLibrary={saveBenchmarkGameToLibrary} error={error} /> : null}
+      {!loading && info.page === "gameLibrary" ? <GameLibraryPage games={gameLibrary} pcs={pcs} onCreate={addGameLibraryItem} onUpdate={editGameLibraryItem} onDelete={removeGameLibraryItem} onMigrate={migrateBenchmarkGamesToLibrary} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
       {!loading && info.page === "codexAssistant" ? <CodexAssistantPage categories={categories} /> : null}
       {!loading && info.page === "arenaCustomers" ? <ArenaCustomersPage arenaData={arenaData} /> : null}

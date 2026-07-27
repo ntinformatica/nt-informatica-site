@@ -37,8 +37,9 @@ import { TechPlaceholder } from "./components/Placeholder";
 import { Section } from "./components/Section";
 import { AdminApp } from "./admin/AdminApp";
 import { isSupabaseConfigured } from "./lib/supabase";
+import { listPublicGames } from "./admin/services/gameLibraryService";
 import { listPublicAssembledPcs, pcCategories, pcTypeLabel, pcTypeOptions } from "./admin/services/assembledPcService";
-import { classifyFps, formatBenchmarkResolution, formatFps, isValidHttpUrl, normalizeProductBenchmark } from "./utils/pcBenchmark";
+import { classifyFps, formatBenchmarkResolution, formatFps, isValidHttpUrl, normalizeProductBenchmark, resolveBenchmarkGamesWithLibrary } from "./utils/pcBenchmark";
 import {
   arenaFeatures,
   arenaBookingUrl,
@@ -385,8 +386,21 @@ function usePublicPcs() {
       setLoading(true);
       setError("");
       try {
-        const pcsList = await listPublicAssembledPcs();
-        if (mounted) setItems(pcsList);
+        const [pcsList, gamesList] = await Promise.all([
+          listPublicAssembledPcs(),
+          listPublicGames().catch((libraryError) => {
+            console.warn("Nao foi possivel carregar a biblioteca de jogos publica:", libraryError);
+            return [];
+          }),
+        ]);
+        const enrichedPcs = pcsList.map((pc) => {
+          const benchmark = normalizeProductBenchmark(pc);
+          return {
+            ...pc,
+            benchmarkGames: resolveBenchmarkGamesWithLibrary(benchmark.benchmarkGames, gamesList),
+          };
+        });
+        if (mounted) setItems(enrichedPcs);
       } catch (loadError) {
         console.error(loadError);
         if (mounted) {
