@@ -2606,6 +2606,46 @@ function formatMinutesLabel(minutes) {
   return `${hours}h ${rest}min`;
 }
 
+const arenaPaymentStatusLabels = {
+  created: "Pagamento criado",
+  pending: "Aguardando pagamento",
+  processing: "Pagamento em processamento",
+  paid: "Pago",
+  failed: "Pagamento recusado",
+  cancelled: "Cancelado",
+  expired: "Expirado",
+  partially_refunded: "Parcialmente reembolsado",
+  refunded: "Reembolsado",
+};
+
+const arenaPaymentMethodLabels = {
+  manual: "Manual",
+  pix: "Pix",
+  card: "Cartão",
+  cash: "Dinheiro",
+  store: "Loja",
+  plan: "Plano mensal",
+  unknown: "Não informado",
+};
+
+function arenaPaymentStatusLabel(status) {
+  return arenaPaymentStatusLabels[status] || "Sem pagamento vinculado";
+}
+
+function arenaPaymentMethodLabel(method) {
+  return arenaPaymentMethodLabels[method] || method || "Não informado";
+}
+
+function formatDateTimeLabel(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
+}
+
 function formatShortDate(value) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`));
@@ -3042,6 +3082,7 @@ function ArenaSettingsForm({ settings, onSave }) {
         <TextField label="Abertura" type="time" value={form.openingTime} onChange={(value) => setForm((current) => ({ ...current, openingTime: value }))} />
         <TextField label="Fechamento" type="time" value={form.closingTime} onChange={(value) => setForm((current) => ({ ...current, closingTime: value }))} />
         <SelectField label="Intervalo" value={form.slotMinutes} onChange={(value) => setForm((current) => ({ ...current, slotMinutes: Number(value) }))} options={[[15, "15 minutos"], [30, "30 minutos"], [60, "60 minutos"]]} />
+        <TextField label="Expiração da pré-reserva (min)" type="number" value={form.pendingPaymentExpirationMinutes || 15} onChange={(value) => setForm((current) => ({ ...current, pendingPaymentExpirationMinutes: Number(value || 15) }))} />
         <div>
           <p className="text-sm font-bold text-slate-200">Dias ativos</p>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -3092,6 +3133,8 @@ function ArenaPage({
   const customers = arenaData.customers || [];
   const subscriptions = arenaData.subscriptions || [];
   const monthlyPlans = arenaData.monthlyPlans || [];
+  const payments = arenaData.payments || [];
+  const paymentEvents = arenaData.paymentEvents || [];
   const today = todayIsoDate();
 
   useEffect(() => {
@@ -3130,6 +3173,8 @@ function ArenaPage({
   const monthRevenue = reservations
     .filter((reservation) => String(reservation.reservationDate || "").startsWith(monthPrefix) && ["pendente", "confirmado", "concluido"].includes(reservation.status))
     .reduce((total, reservation) => total + Number(reservation.totalPrice || 0), 0);
+  const pendingPayments = payments.filter((payment) => ["created", "pending", "processing"].includes(payment.status));
+  const paidPayments = payments.filter((payment) => payment.status === "paid");
   const occupiedStations = stations.filter((station) => station.availabilityStatus === "ocupado" || activeSessions.some((session) => session.stationId === station.id));
   const maintenanceStations = stations.filter((station) => station.availabilityStatus === "manutencao");
   const reservedMinutes = dayReservations
@@ -3194,6 +3239,8 @@ function ArenaPage({
         <SummaryCard compact label="Confirmadas" value={confirmed.length} icon={CheckCircle2} />
         <SummaryCard compact label="Horas reservadas" value={`${Math.round((reservedMinutes / 60) * 10) / 10}h`} icon={CalendarDays} />
         <SummaryCard compact label="Receita prevista" value={formatCurrency(expectedRevenue)} icon={Star} />
+        <SummaryCard compact label="Pagamentos pendentes" value={pendingPayments.length} icon={Clock} tone="amber" />
+        <SummaryCard compact label="Pagamentos pagos" value={paidPayments.length} icon={CheckCircle2} tone="green" />
         <SummaryCard compact label="Ocupados agora" value={occupiedStations.length} icon={Gamepad2} tone="green" />
         <SummaryCard compact label="Livres" value={Math.max(0, stations.filter((station) => station.active !== false).length - occupiedStations.length - maintenanceStations.length)} icon={CheckCircle2} tone="green" />
         <SummaryCard compact label="Em manutenção" value={maintenanceStations.length} icon={Wrench} tone="amber" />
@@ -3282,7 +3329,7 @@ function ArenaPage({
       <section className="glass min-w-0 rounded-lg p-4 shadow-card">
         <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <TextField label="Data" type="date" value={filters.date} onChange={(value) => setFilters((current) => ({ ...current, date: value }))} />
-          <SelectField label="Status" value={filters.status} onChange={(value) => setFilters((current) => ({ ...current, status: value }))} options={[["", "Todos"], ["pendente", "Pendente"], ["confirmado", "Confirmado"], ["cancelado", "Cancelado"], ["concluido", "Concluído"], ["bloqueado", "Bloqueado"]]} />
+          <SelectField label="Status" value={filters.status} onChange={(value) => setFilters((current) => ({ ...current, status: value }))} options={[["", "Todos"], ["pendente", "Pendente"], ["pendente_pagamento", "Aguardando pagamento"], ["confirmado", "Confirmado"], ["cancelado", "Cancelado"], ["concluido", "Concluído"], ["bloqueado", "Bloqueado"], ["expirado", "Expirado"]]} />
           <SelectField label="Equipamento" value={filters.stationId} onChange={(value) => setFilters((current) => ({ ...current, stationId: value }))} options={[["", "Todos"], ...stations.map((station) => [station.id, station.name])]} />
           <TextField label="Buscar cliente" value={filters.query} onChange={(value) => setFilters((current) => ({ ...current, query: value }))} placeholder="Nome ou WhatsApp" />
         </div>
@@ -3297,6 +3344,7 @@ function ArenaPage({
           <div className="flex min-w-0 flex-wrap gap-1.5 text-[11px] font-bold">
             <span className="rounded-full bg-lime-400/15 px-2.5 py-1 text-lime-200">Livre</span>
             <span className="rounded-full bg-yellow-400/15 px-2.5 py-1 text-yellow-200">Pendente</span>
+            <span className="rounded-full bg-orange-400/15 px-2.5 py-1 text-orange-200">Aguardando pagamento</span>
             <span className="rounded-full bg-sky-400/15 px-2.5 py-1 text-sky-200">Confirmado</span>
             <span className="rounded-full bg-slate-400/15 px-2.5 py-1 text-slate-200">Bloqueado</span>
             <span className="rounded-full bg-white/10 px-2.5 py-1 text-slate-300">Concluído</span>
@@ -3318,10 +3366,12 @@ function ArenaPage({
                   const statusClass = {
                     livre: "border-lime-400/30 bg-lime-400/10 text-lime-100",
                     pendente: "border-yellow-400/40 bg-yellow-400/15 text-yellow-100",
+                    pendente_pagamento: "border-orange-400/40 bg-orange-400/15 text-orange-100",
                     confirmado: "border-sky-400/40 bg-sky-400/15 text-sky-100",
                     bloqueado: "border-slate-400/30 bg-slate-400/15 text-slate-100",
                     concluido: "border-white/10 bg-white/8 text-slate-300",
                     cancelado: "border-red-400/30 bg-red-400/10 text-red-100",
+                    expirado: "border-red-400/20 bg-red-400/5 text-red-200",
                   }[status] || "border-white/10 bg-white/5 text-slate-300";
                   return (
                     <button
@@ -3359,6 +3409,47 @@ function ArenaPage({
                 <p><strong className="text-white">Equipamento:</strong> {selectedReservation.stationName}</p>
                 <p><strong className="text-white">Valor:</strong> {formatCurrency(selectedReservation.totalPrice)}</p>
                 <p><strong className="text-white">Status:</strong> {selectedReservation.status}</p>
+                <p><strong className="text-white">Pagamento:</strong> {arenaPaymentStatusLabel(selectedReservation.paymentStatus)}</p>
+                <p><strong className="text-white">Metodo:</strong> {arenaPaymentMethodLabel(selectedReservation.paymentMethod || selectedReservation.paymentType)}</p>
+              </div>
+              <div className="mt-4 rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-300">
+                <strong className="text-white">Resumo financeiro</strong>
+                {selectedReservation.payment ? (
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    <p>Status do pagamento: {arenaPaymentStatusLabel(selectedReservation.payment.status)}</p>
+                    <p>Metodo: {arenaPaymentMethodLabel(selectedReservation.payment.paymentMethod)}</p>
+                    <p>Valor da reserva: {formatCurrency(selectedReservation.totalPrice)}</p>
+                    <p>Valor do pagamento: {formatCurrency(selectedReservation.payment.amount)}</p>
+                    <p>Provedor: {selectedReservation.payment.provider || "-"}</p>
+                    <p>ID externo: {selectedReservation.payment.providerPaymentId || selectedReservation.payment.providerReference || "-"}</p>
+                    <p>Criado em: {formatDateTimeLabel(selectedReservation.payment.createdAt)}</p>
+                    <p>Expira em: {formatDateTimeLabel(selectedReservation.payment.expiresAt || selectedReservation.expiresAt)}</p>
+                    <p>Pago em: {formatDateTimeLabel(selectedReservation.payment.paidAt)}</p>
+                    <p>Cancelado em: {formatDateTimeLabel(selectedReservation.payment.cancelledAt)}</p>
+                    <p>Reembolsado em: {formatDateTimeLabel(selectedReservation.payment.refundedAt)}</p>
+                    {selectedReservation.payment.manualConfirmationReason ? <p>Confirmacao manual: {selectedReservation.payment.manualConfirmationReason}</p> : null}
+                  </div>
+                ) : (
+                  <p className="mt-2">Reserva antiga ou manual sem pagamento vinculado. O fluxo atual continua funcionando normalmente.</p>
+                )}
+                {selectedReservation.payment ? (
+                  <details className="mt-3 rounded-md border border-white/10 bg-black/20 p-3">
+                    <summary className="cursor-pointer text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Auditoria de eventos</summary>
+                    <div className="mt-3 grid gap-2">
+                      {paymentEvents.filter((event) => event.paymentId === selectedReservation.payment.id).length ? paymentEvents
+                        .filter((event) => event.paymentId === selectedReservation.payment.id)
+                        .map((event) => (
+                          <div key={event.id} className="rounded border border-white/10 bg-white/5 p-2">
+                            <strong className="text-white">{event.eventType}</strong>
+                            <p>Status: {event.eventStatus || "-"}</p>
+                            <p>Provedor: {event.provider}</p>
+                            <p>Criado em: {formatDateTimeLabel(event.createdAt)}</p>
+                            {event.processingError ? <p className="text-red-200">Erro: {event.processingError}</p> : null}
+                          </div>
+                        )) : <p>Nenhum evento registrado para este pagamento.</p>}
+                    </div>
+                  </details>
+                ) : null}
               </div>
               {selectedReservation.notes ? <p className="mt-3 text-sm text-slate-300">{selectedReservation.notes}</p> : null}
             </div>
@@ -3387,6 +3478,7 @@ function ArenaPage({
                   </div>
                   <p className="mt-2 break-words text-sm text-slate-300">{reservation.stationName} · {reservation.reservationDate} · {reservation.startTime} até {reservation.endTime}</p>
                   <p className="mt-1 break-words text-sm text-slate-400">{reservation.customerPhone || "Sem telefone"} · {reservation.durationMinutes} min · {formatCurrency(reservation.totalPrice)}</p>
+                  <p className="mt-1 break-words text-sm text-slate-400">Pagamento: {arenaPaymentStatusLabel(reservation.paymentStatus)} · {arenaPaymentMethodLabel(reservation.paymentMethod || reservation.paymentType)}{reservation.paymentExpiresAt ? ` · expira ${formatDateTimeLabel(reservation.paymentExpiresAt)}` : ""}</p>
                   {reservation.notes ? <p className="mt-2 text-sm text-slate-300">{reservation.notes}</p> : null}
                 </div>
                 <div className="flex min-w-0 flex-wrap gap-2 xl:max-w-md xl:justify-end">
@@ -3913,7 +4005,7 @@ export function AdminApp() {
   }
 
   async function removeArenaReservation(id) {
-    return runAction(async () => deleteArenaReservation(id), "Reserva excluída.");
+    return runAction(async () => deleteArenaReservation(id), "Reserva removida ou cancelada com histórico preservado.");
   }
 
   async function addArenaReservation(reservation) {

@@ -6,10 +6,6 @@ function env(name: string) {
   return value;
 }
 
-function optionalEnv(name: string) {
-  return Deno.env.get(name) || "";
-}
-
 function mercadoPagoHeaders(idempotencyKey = "") {
   const headers: Record<string, string> = {
     Authorization: `Bearer ${env("MERCADO_PAGO_ACCESS_TOKEN")}`,
@@ -99,7 +95,6 @@ export function mercadoPagoOrderId(order: Record<string, unknown>) {
 export function mercadoPagoExternalReference(order: Record<string, unknown>) {
   return firstString([
     order.external_reference,
-    (order.metadata as Record<string, unknown> | undefined)?.payment_id,
   ]);
 }
 
@@ -119,11 +114,10 @@ export async function createPixOrder(params: {
   payment: Record<string, unknown>;
   reservation: Record<string, unknown>;
   idempotencyKey: string;
+  expirationTime: string;
 }) {
-  const { payment, reservation, idempotencyKey } = params;
+  const { payment, reservation, idempotencyKey, expirationTime } = params;
   const amount = safeMoney(payment.amount);
-  const siteUrl = optionalEnv("SITE_URL").replace(/\/+$/, "");
-  const webhookUrl = optionalEnv("MERCADO_PAGO_WEBHOOK_URL");
   const description = `Reserva NT Arena Gamer ${reservation.reservation_date || ""} ${reservation.start_time || ""}`.trim();
 
   const body = {
@@ -141,15 +135,9 @@ export async function createPixOrder(params: {
         {
           amount: amount.toFixed(2),
           payment_method: { id: "pix", type: "bank_transfer" },
-          expiration_time: payment.expires_at || reservation.expires_at || undefined,
+          expiration_time: expirationTime,
         },
       ],
-    },
-    metadata: {
-      payment_id: payment.id,
-      reservation_id: reservation.id,
-      source: "nt_arena_public",
-      success_url: siteUrl ? `${siteUrl}/arena/pagamento/${payment.id}` : undefined,
     },
   };
 
@@ -185,7 +173,7 @@ export async function verifyMercadoPagoSignature(params: {
   requestId: string;
   dataId: string;
 }) {
-  const secret = optionalEnv("MERCADO_PAGO_WEBHOOK_SECRET");
+  const secret = Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET") || "";
   if (!secret) throw new Error("MERCADO_PAGO_WEBHOOK_SECRET nao configurado.");
 
   const parts = Object.fromEntries(

@@ -1,6 +1,6 @@
 import { handleCors } from "../_shared/cors.ts";
 import { fail, ok } from "../_shared/responses.ts";
-import { getSingle, insertEvent, supabaseRest } from "../_shared/supabaseAdmin.ts";
+import { getSingle, insertEvent, supabaseRest, supabaseRpc } from "../_shared/supabaseAdmin.ts";
 import { createPixOrder, extractPixPayload, mapMercadoPagoStatus, mercadoPagoOrderId } from "../_shared/mercadoPago.ts";
 import { readJson, requireUuid } from "../_shared/validation.ts";
 
@@ -10,6 +10,16 @@ function paymentStatusAllowsPix(status: string) {
 
 function reservationStatusAllowsPix(status: string) {
   return ["pendente_pagamento"].includes(status);
+}
+
+function pixExpirationDuration(expiresAt: unknown) {
+  if (!expiresAt) return "";
+  const expiresAtMs = new Date(String(expiresAt)).getTime();
+  if (!Number.isFinite(expiresAtMs)) return "";
+  const remainingMs = expiresAtMs - Date.now();
+  const remainingMinutes = Math.floor(remainingMs / 60000);
+  if (remainingMinutes <= 0) return "";
+  return `PT${remainingMinutes}M`;
 }
 
 function metadataWithPix(metadata: Record<string, unknown> = {}) {
@@ -61,7 +71,9 @@ Deno.serve(async (request) => {
       return fail(request, "Este pagamento nao pode gerar Pix.", 409, { status: payment.status });
     }
 
-    if (payment.expires_at && new Date(String(payment.expires_at)).getTime() <= Date.now()) {
+    const expirationTime = pixExpirationDuration(payment.expires_at || reservation.expires_at);
+    if (!expirationTime) {
+      await supabaseRpc("expire_arena_payment", { p_payment_id: payment.id });
       return fail(request, "Pre-reserva expirada. Escolha outro horario.", 409);
     }
 
@@ -75,7 +87,7 @@ Deno.serve(async (request) => {
     }
 
     const idempotencyKey = String(payment.idempotency_key || `arena-pix-${payment.id}`);
-    const order = await createPixOrder({ payment, reservation, idempotencyKey });
+    const order = await createPixOrder({ payment, reservation, idempotencyKey, expirationTime });
     const pix = extractPixPayload(order);
     const providerPaymentId = mercadoPagoOrderId(order);
     const nextStatus = mapMercadoPagoStatus(order.status || order.status_detail || "pending");

@@ -14,6 +14,8 @@ const emptyArenaData = {
   ],
   subscriptions: [],
   creditMovements: [],
+  payments: [],
+  paymentEvents: [],
   maintenance: [],
   notifications: [],
   packages: [
@@ -28,6 +30,7 @@ const emptyArenaData = {
     closingTime: "22:00",
     slotMinutes: 30,
     activeDays: [1, 2, 3, 4, 5, 6],
+    pendingPaymentExpirationMinutes: 15,
     reservationNotice: "Sua solicitação foi enviada. A reserva será confirmada pela NT Informática.",
   },
   localMode: true,
@@ -123,6 +126,7 @@ function fromSettings(row = {}) {
     closingTime: toTime(row.closing_time || "22:00"),
     slotMinutes: Number(row.slot_minutes || 30),
     activeDays: Array.isArray(row.active_days) ? row.active_days : [1, 2, 3, 4, 5, 6],
+    pendingPaymentExpirationMinutes: Number(row.pending_payment_expiration_minutes || 15),
     reservationNotice: row.reservation_notice || "Sua solicitação foi enviada. A reserva será confirmada pela NT Informática.",
   };
 }
@@ -242,8 +246,8 @@ function toPackage(pack = {}) {
   };
 }
 
-function toSettings(settings = {}) {
-  return {
+function toSettings(settings = {}, options = {}) {
+  const payload = {
     price_per_hour: moneyNumber(settings.pricePerHour, 20),
     opening_time: settings.openingTime || "09:00",
     closing_time: settings.closingTime || "22:00",
@@ -251,6 +255,10 @@ function toSettings(settings = {}) {
     active_days: Array.isArray(settings.activeDays) ? settings.activeDays.map(Number) : [1, 2, 3, 4, 5, 6],
     reservation_notice: settings.reservationNotice || "",
   };
+  if (options.includePaymentExpiration !== false) {
+    payload.pending_payment_expiration_minutes = Number(settings.pendingPaymentExpirationMinutes || 15);
+  }
+  return payload;
 }
 
 function fromReservation(row = {}, stations = []) {
@@ -274,6 +282,18 @@ function fromReservation(row = {}, stations = []) {
     paymentType: row.payment_type || "avulso",
     creditsConsumedMinutes: Number(row.credits_consumed_minutes || 0),
     creditsProcessed: row.credits_processed === true,
+    expiresAt: row.expires_at || "",
+    expiredAt: row.expired_at || "",
+    cancelledAt: row.cancelled_at || "",
+    cancellationReason: row.cancellation_reason || "",
+    activePaymentId: row.active_payment_id || "",
+    payment: null,
+    paymentStatus: "",
+    paymentMethod: "",
+    paymentProvider: "",
+    paymentAmount: 0,
+    paymentPaidAt: "",
+    paymentExpiresAt: "",
     sessionStartedAt: row.session_started_at || "",
     sessionPausedAt: row.session_paused_at || "",
     sessionResumedAt: row.session_resumed_at || "",
@@ -284,6 +304,49 @@ function fromReservation(row = {}, stations = []) {
     overtimeMinutes: Number(row.overtime_minutes || 0),
     createdAt: row.created_at || "",
     updatedAt: row.updated_at || "",
+  };
+}
+
+function fromPayment(row = {}) {
+  return {
+    id: row.id,
+    reservationId: row.reservation_id || "",
+    customerId: row.customer_id || "",
+    subscriptionId: row.subscription_id || "",
+    paymentType: row.payment_type || "reservation",
+    paymentMethod: row.payment_method || "manual",
+    provider: row.provider || "manual",
+    providerPaymentId: row.provider_payment_id || "",
+    providerReference: row.provider_reference || "",
+    amount: Number(row.amount || 0),
+    currency: row.currency || "BRL",
+    status: row.status || "created",
+    expiresAt: row.expires_at || "",
+    paidAt: row.paid_at || "",
+    cancelledAt: row.cancelled_at || "",
+    refundedAt: row.refunded_at || "",
+    idempotencyKey: row.idempotency_key || "",
+    metadata: row.metadata || {},
+    manualConfirmedBy: row.manual_confirmed_by || "",
+    manualConfirmationReason: row.manual_confirmation_reason || "",
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+function fromPaymentEvent(row = {}) {
+  return {
+    id: row.id,
+    paymentId: row.payment_id || "",
+    provider: row.provider || "internal",
+    providerEventId: row.provider_event_id || "",
+    eventType: row.event_type || "",
+    eventStatus: row.event_status || "",
+    payload: row.payload || {},
+    processed: row.processed === true,
+    processedAt: row.processed_at || "",
+    processingError: row.processing_error || "",
+    createdAt: row.created_at || "",
   };
 }
 
@@ -337,23 +400,45 @@ export async function listArenaData() {
   const stations = (stationRows || []).map(fromStation);
   const customers = (customerRows || []).map(fromCustomer);
   const monthlyPlans = (planRows || []).map(fromMonthlyPlan);
-  const [subscriptionRows, movementRows, reservationRows, maintenanceRows, notificationRows] = await Promise.all([
+  const [subscriptionRows, movementRows, reservationRows, maintenanceRows, notificationRows, paymentRows, paymentEventRows] = await Promise.all([
     supabaseRequest("/arena_customer_subscriptions?select=*&order=created_at.desc&limit=500"),
     supabaseRequest("/arena_credit_movements?select=*&order=created_at.desc&limit=500"),
     supabaseRequest("/arena_reservations?select=*&order=reservation_date.desc,start_time.asc&limit=500"),
     supabaseRequest("/arena_station_maintenance?select=*&order=created_at.desc&limit=500").catch(() => []),
     supabaseRequest("/admin_notifications?select=*&dismissed=eq.false&order=created_at.desc&limit=100").catch(() => []),
+    supabaseRequest("/arena_payments?select=*&order=created_at.desc&limit=500").catch(() => []),
+    supabaseRequest("/arena_payment_events?select=*&order=created_at.desc&limit=500").catch(() => []),
   ]);
   const subscriptions = (subscriptionRows || []).map((row) => fromSubscription(row, customers, monthlyPlans));
   const settings = fromSettings(settingsRows?.[0]);
+  const payments = (paymentRows || []).map(fromPayment);
+  const paymentEvents = (paymentEventRows || []).map(fromPaymentEvent);
+  const reservations = (reservationRows || []).map((row) => {
+    const reservation = fromReservation(row, stations);
+    const payment = payments.find((item) => item.id === reservation.activePaymentId)
+      || payments.find((item) => item.reservationId === reservation.id);
+    if (!payment) return reservation;
+    return {
+      ...reservation,
+      payment,
+      paymentStatus: payment.status,
+      paymentMethod: payment.paymentMethod,
+      paymentProvider: payment.provider,
+      paymentAmount: payment.amount,
+      paymentPaidAt: payment.paidAt,
+      paymentExpiresAt: payment.expiresAt,
+    };
+  });
 
   return {
     stations,
-    reservations: (reservationRows || []).map((row) => fromReservation(row, stations)),
+    reservations,
     customers,
     monthlyPlans,
     subscriptions,
     creditMovements: (movementRows || []).map((row) => fromCreditMovement(row, customers, subscriptions)),
+    payments,
+    paymentEvents,
     maintenance: (maintenanceRows || []).map((row) => fromMaintenance(row, stations)),
     notifications: (notificationRows || []).map(fromNotification),
     packages: (packageRows || []).map(fromPackage),
@@ -408,16 +493,32 @@ export async function updateArenaSettings(settings) {
   }
 
   if (settings.id) {
-    return supabaseRequest(`/arena_settings?id=eq.${encodeURIComponent(settings.id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(toSettings(settings)),
-    });
+    try {
+      return await supabaseRequest(`/arena_settings?id=eq.${encodeURIComponent(settings.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(toSettings(settings)),
+      });
+    } catch (error) {
+      if (!String(error?.message || "").includes("pending_payment_expiration_minutes")) throw error;
+      return supabaseRequest(`/arena_settings?id=eq.${encodeURIComponent(settings.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(toSettings(settings, { includePaymentExpiration: false })),
+      });
+    }
   }
 
-  return supabaseRequest("/arena_settings", {
-    method: "POST",
-    body: JSON.stringify(toSettings(settings)),
-  });
+  try {
+    return await supabaseRequest("/arena_settings", {
+      method: "POST",
+      body: JSON.stringify(toSettings(settings)),
+    });
+  } catch (error) {
+    if (!String(error?.message || "").includes("pending_payment_expiration_minutes")) throw error;
+    return supabaseRequest("/arena_settings", {
+      method: "POST",
+      body: JSON.stringify(toSettings(settings, { includePaymentExpiration: false })),
+    });
+  }
 }
 
 export async function saveArenaPackage(pack) {
@@ -737,6 +838,86 @@ export async function updateArenaReservationStatus(id, status) {
   });
 }
 
+export async function expireArenaPendingReservations() {
+  if (!isSupabaseConfigured) return localData();
+
+  return supabaseRequest("/rpc/expire_arena_pending_reservations", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function createArenaPayment(payment) {
+  if (!isSupabaseConfigured) {
+    throw new Error("Pagamentos reais exigem Supabase configurado.");
+  }
+
+  return supabaseRequest("/rpc/create_arena_payment", {
+    method: "POST",
+    body: JSON.stringify({
+      p_reservation_id: payment.reservationId || null,
+      p_customer_id: payment.customerId || null,
+      p_subscription_id: payment.subscriptionId || null,
+      p_payment_type: payment.paymentType || "reservation",
+      p_payment_method: payment.paymentMethod || "manual",
+      p_provider: payment.provider || "manual",
+      p_provider_payment_id: payment.providerPaymentId || null,
+      p_provider_reference: payment.providerReference || null,
+      p_amount: moneyNumber(payment.amount, 0),
+      p_currency: payment.currency || "BRL",
+      p_status: payment.status || "created",
+      p_expires_at: payment.expiresAt || null,
+      p_idempotency_key: payment.idempotencyKey || null,
+      p_metadata: payment.metadata || {},
+    }),
+  });
+}
+
+export async function confirmArenaPayment(id, payload = {}) {
+  if (!isSupabaseConfigured) {
+    throw new Error("Pagamentos reais exigem Supabase configurado.");
+  }
+
+  return supabaseRequest("/rpc/confirm_arena_payment", {
+    method: "POST",
+    body: JSON.stringify({
+      p_payment_id: id,
+      p_provider_event_id: payload.providerEventId || null,
+      p_metadata: payload.metadata || {},
+      p_manual_reason: payload.manualReason || "",
+    }),
+  });
+}
+
+export async function cancelArenaPayment(id, reason = "") {
+  if (!isSupabaseConfigured) {
+    throw new Error("Pagamentos reais exigem Supabase configurado.");
+  }
+
+  return supabaseRequest("/rpc/cancel_arena_payment", {
+    method: "POST",
+    body: JSON.stringify({
+      p_payment_id: id,
+      p_reason: reason || "",
+    }),
+  });
+}
+
+export async function refundArenaPayment(id, payload = {}) {
+  if (!isSupabaseConfigured) {
+    throw new Error("Pagamentos reais exigem Supabase configurado.");
+  }
+
+  return supabaseRequest("/rpc/refund_arena_payment", {
+    method: "POST",
+    body: JSON.stringify({
+      p_payment_id: id,
+      p_amount: payload.amount == null || payload.amount === "" ? null : moneyNumber(payload.amount, null),
+      p_reason: payload.reason || "",
+    }),
+  });
+}
+
 function updateLocalSession(id, updater) {
   const data = localData();
   const now = new Date().toISOString();
@@ -916,5 +1097,13 @@ export async function deleteArenaReservation(id) {
     return saveLocalData(data);
   }
 
-  return supabaseRequest(`/arena_reservations?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+  try {
+    return await supabaseRequest("/rpc/delete_arena_reservation_safe", {
+      method: "POST",
+      body: JSON.stringify({ p_reservation_id: id }),
+    });
+  } catch (error) {
+    if (!String(error?.message || "").includes("delete_arena_reservation_safe")) throw error;
+    return supabaseRequest(`/arena_reservations?id=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
 }
