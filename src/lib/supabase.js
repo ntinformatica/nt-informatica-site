@@ -260,10 +260,11 @@ export async function supabaseRequest(path, options = {}) {
     throw new Error("Supabase nao configurado.");
   }
 
-  const { returnMeta = false, ...requestOptions } = options;
+  const { returnMeta = false, forceAnon = false, ...requestOptions } = options;
+  const accessToken = forceAnon ? supabaseAnonKey : (readAuthSession()?.access_token || supabaseAnonKey);
   const headers = {
     apikey: supabaseAnonKey,
-    Authorization: `Bearer ${readAuthSession()?.access_token || supabaseAnonKey}`,
+    Authorization: `Bearer ${accessToken}`,
     Accept: "application/json",
     Prefer: "return=representation",
     ...requestOptions.headers,

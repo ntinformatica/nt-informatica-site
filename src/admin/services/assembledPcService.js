@@ -257,11 +257,13 @@ export async function listPublicAssembledPcs() {
   }
 
   try {
-    const rows = await supabaseRequest("/assembled_pcs?published=eq.true&status=neq.desativado&select=*&order=featured.desc,updated_at.desc");
+    const rows = await supabaseRequest("/assembled_pcs?published=eq.true&status=neq.desativado&select=*&order=featured.desc,updated_at.desc", {
+      forceAnon: true,
+    });
     return rows.map(fromSupabase);
   } catch (error) {
-    console.warn("Nao foi possivel carregar PCs publicos do Supabase:", error);
-    return readLocalPcs().filter((pc) => pc.published && pc.status !== "desativado");
+    console.error("Nao foi possivel carregar PCs publicos do Supabase:", error);
+    throw error;
   }
 }
 

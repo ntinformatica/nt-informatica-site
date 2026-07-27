@@ -637,7 +637,7 @@ function PcShowcase() {
           {error || "Supabase não configurado. Os PCs reais aparecerão aqui assim que forem cadastrados e publicados."}
         </div>
       ) : null}
-      {!loading && !visiblePcs.length ? (
+      {!loading && !error && !visiblePcs.length ? (
         <Card>
           <h3 className="text-2xl font-black text-white">Nenhum PC disponível no momento.</h3>
           <p className="mt-3 text-sm leading-6 text-slate-300">Estamos preparando novos computadores montados para pronta entrega. Consulte a loja pelo WhatsApp.</p>
@@ -1186,7 +1186,18 @@ function ComputersPage() {
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
       <Header />
       <main className="pt-20">
-        {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : selectedPc ? <PcDetail pc={selectedPc} /> : slug ? <PcNotFound slug={slug} /> : (
+        {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : error ? (
+          <Section eyebrow="PCs Montados" title="Falha ao carregar computadores." description="Não foi possível consultar os PCs publicados agora. Tente novamente em instantes ou chame a NT Informática pelo WhatsApp.">
+            <Card className="max-w-2xl">
+              <p className="text-sm leading-6 text-slate-300">{error}</p>
+              {slug ? <p className="mt-3 text-xs text-slate-500">Código pesquisado: {slug}</p> : null}
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <Button href="/computadores" variant="secondary">Tentar novamente</Button>
+                <WhatsAppButton message="Olá! Gostaria de consultar computadores montados disponíveis na NT Informática.">Consultar no WhatsApp</WhatsAppButton>
+              </div>
+            </Card>
+          </Section>
+        ) : selectedPc ? <PcDetail pc={selectedPc} /> : slug ? <PcNotFound slug={slug} /> : (
           <Section eyebrow="PCs Montados" title="Computadores prontos da NT Informática" description="Filtre por tipo, compare configurações e chame no WhatsApp para comprar.">
             {(error || localMode) ? <div className="mb-6 rounded-lg border border-amber-300/30 bg-amber-300/10 p-5 text-sm text-amber-100">{error || "Supabase não configurado. Nenhum PC real será exibido no modo local."}</div> : null}
             <div className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-4 lg:grid-cols-[1fr_0.5fr_0.5fr_0.45fr]">
@@ -1197,7 +1208,7 @@ function ComputersPage() {
             </div>
             <p className="mt-4 text-sm text-slate-400">{filteredPcs.length} computador(es) encontrado(s). Disponíveis aparecem primeiro.</p>
             <div className="mt-6 grid gap-5 lg:grid-cols-3">{filteredPcs.map((pc) => <PcCard key={pc.id} pc={pc} />)}</div>
-            {!filteredPcs.length ? <Card className="mt-6 text-center"><h2 className="text-2xl font-black text-white">Nenhum computador encontrado.</h2><p className="mt-3 text-sm text-slate-300">Ajuste os filtros ou consulte a loja para montar uma configuração sob medida.</p><WhatsAppButton message="Olá! Gostaria de consultar computadores montados disponíveis ou montar uma configuração." className="mt-5">Consultar no WhatsApp</WhatsAppButton></Card> : null}
+            {!error && !filteredPcs.length ? <Card className="mt-6 text-center"><h2 className="text-2xl font-black text-white">Nenhum computador encontrado.</h2><p className="mt-3 text-sm text-slate-300">Ajuste os filtros ou consulte a loja para montar uma configuração sob medida.</p><WhatsAppButton message="Olá! Gostaria de consultar computadores montados disponíveis ou montar uma configuração." className="mt-5">Consultar no WhatsApp</WhatsAppButton></Card> : null}
           </Section>
         )}
       </main>
