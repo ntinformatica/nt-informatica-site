@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabaseRequest } from "../../lib/supabase";
+import { benchmarkGameToSupabase, normalizeProductBenchmark } from "../../utils/pcBenchmark";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
 
 const pcStorageKey = "nt-admin-assembled-pcs-v1";
@@ -59,6 +60,14 @@ function moneyForInput(value) {
 function fromSupabase(row) {
   const images = Array.isArray(row.images) ? row.images : [];
   const mainImage = row.main_image || images[0] || "";
+  const recommendedGames = textFromArray(row.recommended_games);
+  const benchmark = normalizeProductBenchmark({
+    showBenchmarkSection: row.show_benchmark_section,
+    ntTestaEpisode: row.nt_testa_episode,
+    fullBenchmarkVideoUrl: row.full_benchmark_video_url,
+    benchmarkGames: row.benchmark_games,
+    recommendedGames,
+  });
 
   return {
     id: row.id,
@@ -94,7 +103,11 @@ function fromSupabase(row) {
     warranty: row.warranty || "",
     warrantyMonths: Number(row.warranty_months || 3),
     targetUses: textFromArray(row.target_uses),
-    recommendedGames: textFromArray(row.recommended_games),
+    recommendedGames,
+    showBenchmarkSection: benchmark.showBenchmarkSection,
+    ntTestaEpisode: benchmark.ntTestaEpisode,
+    fullBenchmarkVideoUrl: benchmark.fullBenchmarkVideoUrl,
+    benchmarkGames: benchmark.benchmarkGames,
     qualityChecks: textFromArray(row.quality_checks),
     mainImage,
     images: textFromArray(images),
@@ -110,6 +123,7 @@ function fromSupabase(row) {
 
 function normalizeLocalPc(pc = {}) {
   const images = [...new Set([pc.mainImage, ...arrayFromText(pc.images), ...arrayFromText(pc.gallery)].filter(Boolean))];
+  const benchmark = normalizeProductBenchmark(pc);
 
   return {
     ...pc,
@@ -126,6 +140,10 @@ function normalizeLocalPc(pc = {}) {
     mainImage: pc.mainImage || images[0] || "",
     images: textFromArray(images),
     gallery: textFromArray(images.slice(1)),
+    showBenchmarkSection: benchmark.showBenchmarkSection,
+    ntTestaEpisode: benchmark.ntTestaEpisode,
+    fullBenchmarkVideoUrl: benchmark.fullBenchmarkVideoUrl,
+    benchmarkGames: benchmark.benchmarkGames,
     featured: Boolean(pc.featured),
     published: Boolean(pc.published),
   };
@@ -136,6 +154,7 @@ function toSupabase(pc) {
   const stock = Number(pc.stock || 0);
   const published = Boolean(pc.published);
   const status = pc.status || (published ? (stock > 0 ? "publicado" : "esgotado") : "rascunho");
+  const benchmark = normalizeProductBenchmark(pc);
 
   return {
     name: pc.name || "",
@@ -171,6 +190,10 @@ function toSupabase(pc) {
     warranty_months: Number(pc.warrantyMonths || 3),
     target_uses: normalizeTextArray(pc.targetUses),
     recommended_games: normalizeTextArray(pc.recommendedGames),
+    show_benchmark_section: benchmark.showBenchmarkSection,
+    nt_testa_episode: benchmark.ntTestaEpisode,
+    full_benchmark_video_url: benchmark.fullBenchmarkVideoUrl,
+    benchmark_games: benchmark.benchmarkGames.map(benchmarkGameToSupabase),
     quality_checks: normalizeTextArray(pc.qualityChecks),
     main_image: pc.mainImage || images[0] || "",
     images,
@@ -229,14 +252,16 @@ export async function listAssembledPcs() {
 }
 
 export async function listPublicAssembledPcs() {
-  if (!isSupabaseConfigured) return [];
+  if (!isSupabaseConfigured) {
+    return readLocalPcs().filter((pc) => pc.published && pc.status !== "desativado");
+  }
 
   try {
     const rows = await supabaseRequest("/assembled_pcs?published=eq.true&status=neq.desativado&select=*&order=featured.desc,updated_at.desc");
     return rows.map(fromSupabase);
   } catch (error) {
     console.warn("Nao foi possivel carregar PCs publicos do Supabase:", error);
-    return [];
+    return readLocalPcs().filter((pc) => pc.published && pc.status !== "desativado");
   }
 }
 

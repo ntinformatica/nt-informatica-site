@@ -26,7 +26,7 @@
   Wrench,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import heroImage from "./assets/hero-nt-gaming.png";
 import arenaImage from "./assets/arena-gamer-banner.png";
 import { Button, WhatsAppButton, whatsappLink } from "./components/Button";
@@ -38,6 +38,7 @@ import { Section } from "./components/Section";
 import { AdminApp } from "./admin/AdminApp";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { listPublicAssembledPcs, pcCategories, pcTypeLabel, pcTypeOptions } from "./admin/services/assembledPcService";
+import { classifyFps, formatBenchmarkResolution, formatFps, isValidHttpUrl, normalizeProductBenchmark } from "./utils/pcBenchmark";
 import {
   arenaFeatures,
   arenaBookingUrl,
@@ -882,10 +883,197 @@ function PcShareButton({ pc }) {
   );
 }
 
+function NtTestedBadge({ children = "Testado pela NT" }) {
+  return (
+    <span className="inline-flex w-fit rounded-full border border-nt-cyan/30 bg-nt-cyan/10 px-3 py-1 text-[11px] font-black uppercase tracking-[0.14em] text-nt-cyan">
+      {children}
+    </span>
+  );
+}
+
+function GameCover({ game }) {
+  const [failed, setFailed] = useState(false);
+  const initials = String(game.name || "Jogo")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+
+  if (!game.coverUrl || failed) {
+    return (
+      <div className="grid aspect-[3/4] place-items-center rounded-lg border border-white/10 bg-gradient-to-br from-nt-blue/30 via-slate-900 to-nt-cyan/10 p-5 text-center">
+        <div>
+          <span className="mx-auto grid h-16 w-16 place-items-center rounded-full border border-nt-cyan/30 bg-nt-cyan/10 text-xl font-black text-nt-cyan">{initials || "NT"}</span>
+          <p className="mt-4 text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Capa em breve</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={game.coverUrl}
+      alt={"Capa do jogo " + game.name}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="aspect-[3/4] w-full rounded-lg border border-white/10 object-cover"
+    />
+  );
+}
+
+function GameBenchmarkCard({ game }) {
+  const resolution = formatBenchmarkResolution(game);
+  const videoUrl = isValidHttpUrl(game.videoUrl) ? game.videoUrl : "";
+
+  return (
+    <article className="flex h-full min-w-[82%] snap-start flex-col rounded-lg border border-white/10 bg-slate-950/80 p-4 shadow-card sm:min-w-[48%] lg:min-w-[31%] 2xl:min-w-[23%]">
+      <GameCover game={game} />
+      <div className="mt-4 flex flex-1 flex-col">
+        <NtTestedBadge />
+        <h3 className="mt-3 line-clamp-2 min-h-[3.5rem] text-xl font-black leading-tight text-white">{game.name || "Jogo não informado"}</h3>
+        <dl className="mt-4 grid gap-2 text-sm">
+          {game.graphicsPreset ? <div className="rounded-md border border-white/10 bg-white/5 p-3"><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Gráfico</dt><dd className="mt-1 font-bold text-white">{game.graphicsPreset}</dd></div> : null}
+          {resolution ? <div className="rounded-md border border-white/10 bg-white/5 p-3"><dt className="text-xs font-bold uppercase tracking-[0.14em] text-slate-400">Resolução</dt><dd className="mt-1 font-bold text-white">{resolution}</dd></div> : null}
+        </dl>
+        <div className="mt-4 rounded-lg border border-nt-cyan/20 bg-nt-cyan/10 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-300">FPS médio</p>
+          <p className="mt-1 text-3xl font-black text-nt-cyan">{formatFps(game.averageFps)}</p>
+          <p className="mt-1 text-sm font-bold text-white">{classifyFps(game.averageFps)}</p>
+        </div>
+        <div className="mt-auto pt-4">
+          {videoUrl ? (
+            <a href={videoUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-nt-blue px-4 py-3 text-center text-sm font-black text-white transition hover:bg-nt-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan">
+              <PlayCircle size={18} /> Assistir ao teste deste jogo
+            </a>
+          ) : (
+            <p className="rounded-md border border-white/10 bg-white/5 px-4 py-3 text-center text-sm font-bold text-slate-300">Vídeo em breve</p>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function BenchmarkRequestCard({ pc }) {
+  const message = `Olá! Vi o computador ${pc.name} no site da NT Informática e gostaria de solicitar o teste de um jogo nesta configuração.
+${typeof window !== "undefined" ? window.location.href : ""}`;
+
+  return (
+    <article className="flex min-w-[82%] snap-start flex-col justify-between rounded-lg border border-dashed border-nt-cyan/40 bg-nt-cyan/5 p-5 sm:min-w-[48%] lg:min-w-[31%] 2xl:min-w-[23%]">
+      <div>
+        <NtTestedBadge>Teste sob consulta</NtTestedBadge>
+        <h3 className="mt-4 text-2xl font-black text-white">Não encontrou o jogo que procura?</h3>
+        <p className="mt-3 text-sm leading-6 text-slate-300">Fale com a NT Informática e consulte a possibilidade de testarmos este computador no seu jogo.</p>
+      </div>
+      <WhatsAppButton message={message} className="mt-6 w-full">Solicitar teste pelo WhatsApp</WhatsAppButton>
+    </article>
+  );
+}
+
+function BenchmarkSection({ pc }) {
+  const benchmark = normalizeProductBenchmark(pc);
+  const games = benchmark.benchmarkGames;
+  const scrollRef = useRef(null);
+  const [canGoBack, setCanGoBack] = useState(false);
+  const [canGoForward, setCanGoForward] = useState(false);
+  const [paused, setPaused] = useState(false);
+
+  const shouldShow = benchmark.showBenchmarkSection && games.length > 0;
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !shouldShow) return;
+
+    function updateButtons() {
+      setCanGoBack(element.scrollLeft > 8);
+      setCanGoForward(element.scrollLeft + element.clientWidth < element.scrollWidth - 8);
+    }
+
+    updateButtons();
+    element.addEventListener("scroll", updateButtons, { passive: true });
+    window.addEventListener("resize", updateButtons);
+    return () => {
+      element.removeEventListener("scroll", updateButtons);
+      window.removeEventListener("resize", updateButtons);
+    };
+  }, [shouldShow, games.length]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !shouldShow || paused || games.length <= 1) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(max-width: 767px)").matches) return;
+
+    const timer = window.setInterval(() => {
+      const nextLeft = element.scrollLeft + Math.max(280, element.clientWidth * 0.75);
+      if (nextLeft + element.clientWidth >= element.scrollWidth - 8) {
+        element.scrollTo({ left: 0, behavior: "smooth" });
+      } else {
+        element.scrollBy({ left: Math.max(280, element.clientWidth * 0.75), behavior: "smooth" });
+      }
+    }, 7000);
+
+    return () => window.clearInterval(timer);
+  }, [shouldShow, paused, games.length]);
+
+  if (!shouldShow) return null;
+
+  function scrollCarousel(direction) {
+    const element = scrollRef.current;
+    if (!element) return;
+    setPaused(true);
+    element.scrollBy({ left: direction * Math.max(280, element.clientWidth * 0.85), behavior: "smooth" });
+    window.setTimeout(() => setPaused(false), 5000);
+  }
+
+  return (
+    <section className="mt-8 overflow-hidden rounded-lg border border-nt-cyan/20 bg-white/[0.04] p-5 shadow-card">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-black uppercase tracking-[0.18em] text-nt-cyan">Benchmark NT</p>
+            {benchmark.ntTestaEpisode ? <NtTestedBadge>{benchmark.ntTestaEpisode}</NtTestedBadge> : null}
+          </div>
+          <h2 className="mt-2 text-3xl font-black text-white">Jogos testados nesta configuração</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">Veja o desempenho real deste computador nos jogos testados pela NT Informática.</p>
+        </div>
+        {isValidHttpUrl(benchmark.fullBenchmarkVideoUrl) ? (
+          <div className="max-w-sm rounded-lg border border-white/10 bg-slate-950 p-4">
+            <p className="text-sm text-slate-300">Veja o teste completo desta configuração no canal da NT Informática.</p>
+            <a href={benchmark.fullBenchmarkVideoUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-nt-blue px-4 py-3 text-sm font-black text-white transition hover:bg-nt-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan">
+              <PlayCircle size={18} /> Assistir ao teste completo deste PC
+            </a>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="group relative mt-6" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
+        {games.length > 1 ? (
+          <>
+            <button type="button" aria-label="Ver jogos anteriores" disabled={!canGoBack} onClick={() => scrollCarousel(-1)} className="absolute left-2 top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-slate-950/90 text-white opacity-0 transition hover:border-nt-cyan focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan disabled:pointer-events-none disabled:opacity-20 group-hover:opacity-100 md:inline-flex">
+              <ChevronLeft size={22} />
+            </button>
+            <button type="button" aria-label="Ver próximos jogos" disabled={!canGoForward} onClick={() => scrollCarousel(1)} className="absolute right-2 top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-slate-950/90 text-white opacity-0 transition hover:border-nt-cyan focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan disabled:pointer-events-none disabled:opacity-20 group-hover:opacity-100 md:inline-flex">
+              <ChevronRight size={22} />
+            </button>
+          </>
+        ) : null}
+        <div ref={scrollRef} tabIndex={0} className="flex gap-4 overflow-x-auto scroll-smooth pb-3 outline-none [scrollbar-width:thin] [scrollbar-color:#38bdf8_#0f172a] snap-x snap-mandatory focus-visible:ring-2 focus-visible:ring-nt-cyan">
+          {games.map((game) => <GameBenchmarkCard key={game.id} game={game} />)}
+          <BenchmarkRequestCard pc={pc} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PcDetail({ pc }) {
   const available = Number(pc.stock || 0) >= 1;
   const targetUses = pcList(pc.targetUses);
-  const recommendedGames = pcList(pc.recommendedGames);
+  const benchmark = normalizeProductBenchmark(pc);
+  const recommendedGames = benchmark.benchmarkGames.length ? [] : pcList(pc.recommendedGames);
   const qualityChecks = pcList(pc.qualityChecks);
   const whatsappShareUrl = "https://wa.me/?text=" + encodeURIComponent(pcShareMessage(pc));
   const specs = [
@@ -935,6 +1123,7 @@ function PcDetail({ pc }) {
           {specs.map(([label, value]) => <div key={label} className="rounded-md border border-white/10 bg-white/5 p-4"><dt className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">{label}</dt><dd className="mt-2 font-semibold text-white">{value}</dd></div>)}
         </dl>
       </Card>
+      <BenchmarkSection pc={pc} />
       {(targetUses.length || recommendedGames.length || qualityChecks.length) ? (
         <div className="mt-8 grid gap-5 lg:grid-cols-3">
           {targetUses.length ? <Card><h2 className="text-xl font-black text-white">Indicado para</h2><ul className="mt-4 grid gap-2 text-sm text-slate-300">{targetUses.map((item) => <li key={item}>- {item}</li>)}</ul></Card> : null}

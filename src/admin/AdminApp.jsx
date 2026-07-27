@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { businessName } from "../data/siteData";
+import { createBenchmarkGameId, duplicateBenchmarkGames, normalizeProductBenchmark } from "../utils/pcBenchmark";
 import {
   deleteStorageFile,
   isSupabaseConfigured,
@@ -180,6 +181,10 @@ const emptyPc = {
   warrantyMonths: 3,
   targetUses: "",
   recommendedGames: "",
+  showBenchmarkSection: false,
+  ntTestaEpisode: "",
+  fullBenchmarkVideoUrl: "",
+  benchmarkGames: [],
   qualityChecks: "",
   mainImage: "",
   images: "",
@@ -355,10 +360,15 @@ function normalizeProductForm(product, categories) {
 }
 
 function normalizePcForm(pc) {
+  const benchmark = normalizeProductBenchmark(pc || {});
   return {
     ...emptyPc,
     ...pc,
     category: pc?.category || emptyPc.category,
+    showBenchmarkSection: benchmark.showBenchmarkSection,
+    ntTestaEpisode: benchmark.ntTestaEpisode,
+    fullBenchmarkVideoUrl: benchmark.fullBenchmarkVideoUrl,
+    benchmarkGames: benchmark.benchmarkGames,
   };
 }
 
@@ -1054,6 +1064,245 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
   );
 }
 
+function normalizeAdminBenchmarkGame(game = {}) {
+  return {
+    id: game.id || createBenchmarkGameId(),
+    externalGameId: game.externalGameId || "",
+    name: game.name || "",
+    coverUrl: game.coverUrl || "",
+    graphicsPreset: game.graphicsPreset || "",
+    resolution: game.resolution || "",
+    resolutionDetail: game.resolutionDetail || "",
+    averageFps: game.averageFps ?? "",
+    videoUrl: game.videoUrl || "",
+  };
+}
+
+function GameCoverSearch({ game, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [results, setResults] = useState([]);
+  const unavailableMessage = "A busca automática está indisponível no momento. Utilize a URL manual da capa.";
+
+  async function searchCover() {
+    const query = String(game.name || "").trim();
+    if (query.length < 2) {
+      setMessage("Informe o nome do jogo antes de buscar.");
+      setResults([]);
+      setOpen(true);
+      return;
+    }
+
+    setLoading(true);
+    setMessage("");
+    setResults([]);
+    setOpen(true);
+
+    try {
+      const response = await fetch(`/api/games/search?query=${encodeURIComponent(query)}`);
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) throw new Error(unavailableMessage);
+      if (payload.unavailable) {
+        setMessage(payload.message || unavailableMessage);
+        return;
+      }
+
+      const items = Array.isArray(payload.results) ? payload.results : [];
+      setResults(items);
+      setMessage(items.length ? "" : "Nenhum jogo encontrado. Use a URL manual da capa.");
+    } catch (searchError) {
+      setResults([]);
+      setMessage(searchError.message || unavailableMessage);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-slate-700 bg-slate-950 p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-bold text-slate-200">Busca automática de capa</p>
+          <p className="mt-1 text-xs text-slate-400">A busca usa a API segura do projeto. A URL manual continua disponível.</p>
+        </div>
+        <AdminButton type="button" variant="secondary" icon={Search} onClick={searchCover} disabled={loading}>
+          {loading ? "Buscando..." : "Buscar capa"}
+        </AdminButton>
+      </div>
+
+      {open ? (
+        <div className="mt-4">
+          {message ? <p className="rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm text-amber-100">{message}</p> : null}
+          {results.length ? (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {results.map((item) => (
+                <button
+                  key={item.externalId}
+                  type="button"
+                  onClick={() => {
+                    onSelect({ externalGameId: item.externalId, name: item.name, coverUrl: item.coverUrl });
+                    setOpen(false);
+                    setMessage("Capa selecionada.");
+                  }}
+                  className="grid grid-cols-[72px_1fr] gap-3 rounded-md border border-slate-700 bg-white/5 p-3 text-left transition hover:border-nt-cyan focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan"
+                >
+                  {item.coverUrl ? <img src={item.coverUrl} alt="" className="aspect-[3/4] w-full rounded object-cover" /> : <div className="grid aspect-[3/4] place-items-center rounded bg-slate-800 text-xs text-slate-500">Sem capa</div>}
+                  <span>
+                    <strong className="block text-sm text-white">{item.name}</strong>
+                    {item.releaseYear ? <span className="mt-1 block text-xs text-slate-400">{item.releaseYear}</span> : null}
+                    {item.platforms?.length ? <span className="mt-1 block text-xs text-slate-500">{item.platforms.slice(0, 3).join(", ")}</span> : null}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+function BenchmarkGameEditor({ game, index, total, onChange, onMove, onDuplicate, onRemove }) {
+  const [expanded, setExpanded] = useState(index === 0);
+  const title = `Jogo ${index + 1} — ${game.name?.trim() || "Novo jogo"}`;
+
+  function updateGame(field, value) {
+    onChange({ ...game, [field]: value });
+  }
+
+  return (
+    <article className="overflow-hidden rounded-lg border border-slate-700 bg-slate-950">
+      <div className="flex flex-col gap-3 border-b border-white/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <button type="button" onClick={() => setExpanded((current) => !current)} className="text-left font-black text-white outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan">
+          {title}
+          <span className="ml-2 text-xs font-bold text-slate-400">{expanded ? "Recolher" : "Expandir"}</span>
+        </button>
+        <div className="flex flex-wrap gap-2">
+          <AdminButton type="button" variant="secondary" disabled={index === 0} onClick={() => onMove(index, -1)}>Subir</AdminButton>
+          <AdminButton type="button" variant="secondary" disabled={index === total - 1} onClick={() => onMove(index, 1)}>Descer</AdminButton>
+          <AdminButton type="button" variant="secondary" onClick={() => onDuplicate(index)}>Duplicar</AdminButton>
+          <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => onRemove(index)}>Remover</AdminButton>
+        </div>
+      </div>
+
+      {expanded ? (
+        <div className="grid gap-4 p-4 lg:grid-cols-[180px_1fr]">
+          <div>
+            {game.coverUrl ? <img src={game.coverUrl} alt={"Capa selecionada de " + (game.name || "jogo")} className="aspect-[3/4] w-full rounded-lg border border-white/10 object-cover" /> : <div className="grid aspect-[3/4] place-items-center rounded-lg border border-dashed border-slate-700 bg-white/5 p-4 text-center text-sm text-slate-400">Capa selecionada</div>}
+          </div>
+          <div className="grid gap-4">
+            <div className="grid gap-4 md:grid-cols-2">
+              <TextField label="Nome do jogo" value={game.name} onChange={(value) => updateGame("name", value)} placeholder="Cyberpunk 2077" />
+              <TextField label="ID externo" value={game.externalGameId} onChange={(value) => updateGame("externalGameId", value)} placeholder="Opcional" />
+            </div>
+            <GameCoverSearch game={game} onSelect={(result) => onChange({ ...game, ...result })} />
+            <TextField label="URL manual da capa" value={game.coverUrl} onChange={(value) => updateGame("coverUrl", value)} placeholder="https://..." />
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <TextField label="Preset gráfico" value={game.graphicsPreset} onChange={(value) => updateGame("graphicsPreset", value)} placeholder="Alto, Médio, Baixo, Ultra..." />
+              <TextField label="Resolução" value={game.resolution} onChange={(value) => updateGame("resolution", value)} placeholder="Full HD, 1920x1080, Quad HD..." />
+              <TextField label="Detalhe da resolução" value={game.resolutionDetail} onChange={(value) => updateGame("resolutionDetail", value)} placeholder="1920x1080" />
+              <TextField label="FPS médio" type="number" value={game.averageFps} onChange={(value) => updateGame("averageFps", value)} placeholder="60" step="0.1" min="0" />
+            </div>
+            <TextField label="Vídeo individual no YouTube" value={game.videoUrl} onChange={(value) => updateGame("videoUrl", value.trim())} placeholder="https://youtube.com/watch?v=..." />
+          </div>
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function BenchmarkAdminSection({ form, pcs, updateField }) {
+  const games = Array.isArray(form.benchmarkGames) ? form.benchmarkGames.map(normalizeAdminBenchmarkGame) : [];
+  const otherPcs = pcs.filter((pc) => pc.id !== form.id && normalizeProductBenchmark(pc).benchmarkGames.length);
+  const [copyFromId, setCopyFromId] = useState("");
+
+  function updateGames(nextGames) {
+    updateField("benchmarkGames", nextGames.map(normalizeAdminBenchmarkGame));
+  }
+
+  function addGame() {
+    updateGames([...games, normalizeAdminBenchmarkGame({ id: createBenchmarkGameId() })]);
+    if (!form.showBenchmarkSection) updateField("showBenchmarkSection", true);
+  }
+
+  function moveGame(index, direction) {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= games.length) return;
+    const nextGames = [...games];
+    [nextGames[index], nextGames[targetIndex]] = [nextGames[targetIndex], nextGames[index]];
+    updateGames(nextGames);
+  }
+
+  function duplicateGame(index) {
+    const nextGames = [...games];
+    nextGames.splice(index + 1, 0, { ...games[index], id: createBenchmarkGameId() });
+    updateGames(nextGames);
+  }
+
+  function removeGame(index) {
+    if (!window.confirm("Remover este jogo do Benchmark NT?")) return;
+    updateGames(games.filter((_, currentIndex) => currentIndex !== index));
+  }
+
+  function copyFromPc() {
+    const source = otherPcs.find((pc) => pc.id === copyFromId);
+    if (!source) return;
+    const benchmark = normalizeProductBenchmark(source);
+    if (!window.confirm(`Copiar ${benchmark.benchmarkGames.length} jogo(s) de ${source.name}?`)) return;
+    updateGames(duplicateBenchmarkGames(benchmark.benchmarkGames));
+    updateField("showBenchmarkSection", true);
+  }
+
+  return (
+    <section className="grid gap-5 rounded-lg border border-nt-cyan/20 bg-nt-cyan/5 p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="text-xl font-black text-white">Benchmark NT / Jogos testados</h2>
+          <p className="mt-1 text-sm leading-6 text-slate-300">Cadastre os jogos testados neste computador. A ordem abaixo será a mesma exibida no site público.</p>
+        </div>
+        <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+          <input type="checkbox" checked={Boolean(form.showBenchmarkSection)} onChange={(event) => updateField("showBenchmarkSection", event.target.checked)} />
+          Exibir seção Benchmark NT
+        </label>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TextField label="Identificação do NT Testa" value={form.ntTestaEpisode} onChange={(value) => updateField("ntTestaEpisode", value)} placeholder="NT Testa #05" />
+        <TextField label="Link do teste completo do computador no YouTube" value={form.fullBenchmarkVideoUrl} onChange={(value) => updateField("fullBenchmarkVideoUrl", value.trim())} placeholder="https://youtube.com/watch?v=..." />
+      </div>
+      <p className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-400">Cole o link do vídeo completo com todos os jogos testados nesta máquina. Os vídeos individuais ficam dentro de cada jogo.</p>
+
+      {otherPcs.length ? (
+        <div className="grid gap-3 rounded-md border border-slate-700 bg-slate-950 p-4 lg:grid-cols-[1fr_auto] lg:items-end">
+          <SelectField label="Copiar jogos de outro computador" value={copyFromId} onChange={setCopyFromId} options={[["", "Selecionar computador"], ...otherPcs.map((pc) => [pc.id, `${pc.name} (${normalizeProductBenchmark(pc).benchmarkGames.length} jogo(s))`])]} />
+          <AdminButton type="button" variant="secondary" onClick={copyFromPc} disabled={!copyFromId}>Copiar jogos</AdminButton>
+        </div>
+      ) : null}
+
+      <div className="grid gap-4">
+        {games.map((game, index) => (
+          <BenchmarkGameEditor
+            key={game.id}
+            game={game}
+            index={index}
+            total={games.length}
+            onChange={(nextGame) => updateGames(games.map((item, currentIndex) => (currentIndex === index ? nextGame : item)))}
+            onMove={moveGame}
+            onDuplicate={duplicateGame}
+            onRemove={removeGame}
+          />
+        ))}
+        {!games.length ? <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">Nenhum jogo cadastrado ainda. Produtos sem jogos não mostram a seção no site.</p> : null}
+      </div>
+
+      <div>
+        <AdminButton type="button" icon={Plus} onClick={addGame}>+ Adicionar jogo</AdminButton>
+      </div>
+    </section>
+  );
+}
+
 function PcsPage({ pcs, onDelete, onDuplicate, onPublished, onFeatured }) {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
@@ -1255,6 +1504,7 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
       ...form,
       stock: Number(form.stock || 0),
       warrantyMonths: Number(form.warrantyMonths || 0),
+      benchmarkGames: Array.isArray(form.benchmarkGames) ? form.benchmarkGames.map(normalizeAdminBenchmarkGame) : [],
       status: form.published ? (Number(form.stock || 0) > 0 ? "publicado" : "esgotado") : form.status,
     };
     const saved = await onSave(isEdit ? existingPc.id : null, payload);
@@ -1373,6 +1623,8 @@ function PcFormPage({ mode, pcId, pcs, onSave, error }) {
           </div>
         </div>
       </section>
+
+      <BenchmarkAdminSection form={form} pcs={pcs} updateField={updateField} />
 
       <PcImageUploader form={form} updateField={updateField} />
 
@@ -3296,6 +3548,7 @@ export function AdminApp() {
         slug: `${pc.slug}-copia-${Date.now()}`,
         published: false,
         featured: false,
+        benchmarkGames: duplicateBenchmarkGames(normalizeProductBenchmark(pc).benchmarkGames),
       });
     }, "PC duplicado como despublicado.");
   }
