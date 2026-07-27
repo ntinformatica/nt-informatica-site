@@ -180,7 +180,10 @@ function pcGallery(pc) {
   const fromText = typeof pc.images === "string"
     ? pc.images.split("\n").map((image) => image.trim()).filter(Boolean)
     : Array.isArray(pc.images) ? pc.images : [];
-  return [...new Set([pc.mainImage, ...fromText].filter(Boolean))];
+  const fromGallery = typeof pc.gallery === "string"
+    ? pc.gallery.split("\n").map((image) => image.trim()).filter(Boolean)
+    : Array.isArray(pc.gallery) ? pc.gallery : [];
+  return [...new Set([pc.mainImage, pc.main_image, pc.image, pc.imageUrl, pc.image_url, ...fromText, ...fromGallery].filter(Boolean))];
 }
 
 function PcPriceBlock({ pc, detail = false }) {
@@ -625,6 +628,10 @@ function pcList(value) {
   return String(value).split("\n").map((item) => item.trim()).filter(Boolean);
 }
 
+function isInteractiveCarouselTarget(target) {
+  return Boolean(target?.closest?.("a, button, input, select, textarea, [role='button'], [data-no-drag]"));
+}
+
 function useHorizontalCarousel({ itemCount = 0, autoplay = true, autoplayMs = 7000 } = {}) {
   const scrollRef = useRef(null);
   const interactionTimeoutRef = useRef(null);
@@ -727,6 +734,17 @@ function useHorizontalCarousel({ itemCount = 0, autoplay = true, autoplayMs = 70
   function handlePointerDown(event) {
     const element = scrollRef.current;
     if (!element || event.pointerType !== "mouse") return;
+    if (isInteractiveCarouselTarget(event.target)) {
+      dragRef.current = {
+        active: false,
+        moved: false,
+        pointerId: null,
+        startX: 0,
+        startScrollLeft: element.scrollLeft,
+        suppressClick: false,
+      };
+      return;
+    }
 
     dragRef.current = {
       active: true,
@@ -746,7 +764,7 @@ function useHorizontalCarousel({ itemCount = 0, autoplay = true, autoplayMs = 70
     if (!element || !drag.active || event.pointerId !== drag.pointerId) return;
 
     const deltaX = event.clientX - drag.startX;
-    if (Math.abs(deltaX) > 4) {
+    if (Math.abs(deltaX) > 8) {
       drag.moved = true;
       drag.suppressClick = true;
       element.scrollLeft = drag.startScrollLeft - deltaX;
@@ -760,7 +778,13 @@ function useHorizontalCarousel({ itemCount = 0, autoplay = true, autoplayMs = 70
     if (!drag.active || event.pointerId !== drag.pointerId) return;
 
     element?.releasePointerCapture?.(event.pointerId);
+    drag.pointerId = null;
     drag.active = false;
+    if (drag.suppressClick) {
+      window.setTimeout(() => {
+        dragRef.current.suppressClick = false;
+      }, 350);
+    }
     pauseTemporarily();
   }
 
@@ -907,6 +931,46 @@ function Testimonials() {
   );
 }
 
+function PcCardImage({ pc, image }) {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setLoaded(false);
+    setFailed(false);
+  }, [image]);
+
+  if (!image || failed) {
+    return <TechPlaceholder label="Foto do PC" icon={Monitor} />;
+  }
+
+  return (
+    <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-white/10 bg-slate-950">
+      {!loaded ? (
+        <div className="absolute inset-0 grid place-items-center bg-white/5 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+          Carregando foto
+        </div>
+      ) : null}
+      <img
+        src={image}
+        alt={pc.name}
+        loading="lazy"
+        decoding="async"
+        onLoad={() => setLoaded(true)}
+        onError={() => {
+          console.warn("Imagem do PC nao carregou:", {
+            pcId: pc.id,
+            pcName: pc.name,
+            imageUrl: image,
+          });
+          setFailed(true);
+        }}
+        className={'h-full w-full object-cover transition-opacity duration-200 ' + (loaded ? "opacity-100" : "opacity-0")}
+      />
+    </div>
+  );
+}
+
 function PcCard({ pc }) {
   const images = pcGallery(pc);
   const available = Number(pc.stock || 0) >= 1;
@@ -914,11 +978,7 @@ function PcCard({ pc }) {
 
   return (
     <Card className="flex flex-col">
-      {images[0] ? (
-        <img src={images[0]} alt={pc.name} className="aspect-[4/3] w-full rounded-lg border border-white/10 object-cover" />
-      ) : (
-        <TechPlaceholder label="Foto do PC" icon={Monitor} />
-      )}
+      <PcCardImage pc={pc} image={images[0]} />
       <div className="mt-5 flex flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-nt-cyan/30 bg-nt-cyan/10 px-3 py-1 text-xs font-bold text-nt-cyan">{pcTypeLabel(pc.pcType)}</span>
