@@ -1,10 +1,12 @@
 const storePhone = "5547999309344";
-const blockingStatuses = ["pendente", "confirmado", "bloqueado"];
+const blockingStatuses = ["pendente", "pendente_pagamento", "confirmado", "bloqueado"];
 
 const supabaseConfig = window.NT_SUPABASE_CONFIG || {};
 const supabaseUrl = String(supabaseConfig.url || "").replace(/\/rest\/v1\/?$/i, "").replace(/\/+$/, "");
 const supabaseAnonKey = String(supabaseConfig.anonKey || "").trim();
+const arenaPixEnabled = supabaseConfig.arenaPixEnabled === true || String(supabaseConfig.arenaPixEnabled || "").toLowerCase() === "true";
 const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+const functionsUrl = supabaseUrl ? `${supabaseUrl}/functions/v1` : "";
 
 const fallbackSettings = {
   pricePerHour: 20,
@@ -12,6 +14,7 @@ const fallbackSettings = {
   closingTime: "22:00",
   slotMinutes: 30,
   activeDays: [1, 2, 3, 4, 5, 6],
+  pendingPaymentExpirationMinutes: 15,
   reservationNotice: "Sua solicitação foi enviada. A reserva será confirmada pela NT Informática.",
 };
 
@@ -38,6 +41,12 @@ const state = {
   settings: fallbackSettings,
   localMode: !isSupabaseConfigured,
   loading: true,
+  pixLoading: false,
+  paymentStatusLoading: false,
+  currentPayment: null,
+  currentPaymentReservation: null,
+  currentPix: null,
+  paymentPollTimer: null,
 };
 
 const dayStrip = document.querySelector("#dayStrip");
@@ -56,6 +65,8 @@ const planStatus = document.querySelector("#planStatus");
 const planPaymentOption = document.querySelector("#planPaymentOption");
 const paymentSummary = document.querySelector("#paymentSummary");
 const paymentOptions = document.querySelector("#paymentOptions");
+let pixButton = null;
+let pixPaymentView = null;
 
 function cleanTime(value) {
   return String(value || "").slice(0, 5);
@@ -163,6 +174,25 @@ async function supabaseRequest(path, options = {}) {
   return response.json();
 }
 
+async function arenaFunctionRequest(name, payload = {}) {
+  if (!isSupabaseConfigured || !functionsUrl) throw new Error("Supabase nao configurado.");
+  const response = await fetch(`${functionsUrl}/${name}`, {
+    method: "POST",
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${supabaseAnonKey}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data?.ok === false) {
+    throw new Error(data?.error || `Falha na funcao ${name}.`);
+  }
+  return data;
+}
+
 function fromStation(row) {
   return {
     id: row.id,
@@ -182,6 +212,7 @@ function fromSettings(row = {}) {
     closingTime: cleanTime(row.closing_time || "22:00"),
     slotMinutes: Number(row.slot_minutes || 30),
     activeDays: Array.isArray(row.active_days) ? row.active_days : [1, 2, 3, 4, 5, 6],
+    pendingPaymentExpirationMinutes: Number(row.pending_payment_expiration_minutes || 15),
     reservationNotice: row.reservation_notice || fallbackSettings.reservationNotice,
   };
 }
@@ -200,18 +231,34 @@ function fromPackage(row) {
 function fromReservation(row) {
   return {
     id: row.id,
-    stationId: row.station_id,
-    customerName: row.customer_name || "",
-    customerPhone: row.customer_phone || "",
-    reservationDate: row.reservation_date,
-    startTime: cleanTime(row.start_time),
-    endTime: cleanTime(row.end_time),
-    durationMinutes: Number(row.duration_minutes || 0),
-    totalPrice: Number(row.total_price || 0),
+    stationId: row.station_id || row.stationId || "",
+    customerName: row.customer_name || row.customerName || "",
+    customerPhone: row.customer_phone || row.customerPhone || "",
+    reservationDate: row.reservation_date || row.reservationDate || "",
+    startTime: cleanTime(row.start_time || row.startTime),
+    endTime: cleanTime(row.end_time || row.endTime),
+    durationMinutes: Number(row.duration_minutes || row.durationMinutes || 0),
+    totalPrice: Number(row.total_price || row.totalPrice || 0),
     status: row.status || "pendente",
     notes: row.notes || "",
-    paymentType: row.payment_type || "avulso",
-    subscriptionId: row.subscription_id || "",
+    paymentType: row.payment_type || row.paymentType || "avulso",
+    subscriptionId: row.subscription_id || row.subscriptionId || "",
+    expiresAt: row.expires_at || row.expiresAt || "",
+    paymentStatus: row.payment_status || row.paymentStatus || "",
+  };
+}
+
+function fromPayment(row = {}) {
+  return {
+    id: row.id || "",
+    status: row.status || "",
+    amount: Number(row.amount || 0),
+    currency: row.currency || "BRL",
+    paymentMethod: row.payment_method || row.paymentMethod || "",
+    provider: row.provider || "",
+    expiresAt: row.expires_at || row.expiresAt || "",
+    paidAt: row.paid_at || row.paidAt || "",
+    metadata: row.metadata || {},
   };
 }
 
@@ -673,12 +720,204 @@ function renderModeNotice() {
 function render() {
   applyStationTheme();
   renderModeNotice();
+  renderPixButton();
   renderDurationOptions();
   renderDays();
   renderStations();
   renderSlots();
   renderSummary();
   renderBookings();
+}
+
+function renderPixButton() {
+  if (!bookingForm || !arenaPixEnabled || state.localMode) {
+    pixButton?.remove();
+    pixButton = null;
+    return;
+  }
+
+  if (!pixButton) {
+    pixButton = document.createElement("button");
+    pixButton.type = "button";
+    pixButton.className = "pix-button";
+    pixButton.addEventListener("click", handlePixPaymentClick);
+    const reserveButton = bookingForm.querySelector(".reserve-button");
+    reserveButton?.insertAdjacentElement("afterend", pixButton);
+  }
+
+  pixButton.disabled = state.pixLoading;
+  pixButton.textContent = state.pixLoading ? "Gerando Pix..." : "Pagar agora com Pix";
+}
+
+function ensurePixPaymentView() {
+  if (pixPaymentView) return pixPaymentView;
+  pixPaymentView = document.createElement("section");
+  pixPaymentView.id = "pixPaymentView";
+  pixPaymentView.className = "pix-payment-view";
+  document.body.insertBefore(pixPaymentView, toast);
+  return pixPaymentView;
+}
+
+function paymentStatusLabel(status) {
+  const labels = {
+    created: "Criado",
+    pending: "Aguardando pagamento",
+    processing: "Processando",
+    paid: "Pago",
+    failed: "Falhou",
+    cancelled: "Cancelado",
+    expired: "Expirado",
+    refunded: "Reembolsado",
+  };
+  return labels[status] || status || "Aguardando pagamento";
+}
+
+function renderPaymentPage() {
+  const view = ensurePixPaymentView();
+  const payment = state.currentPayment;
+  const reservation = state.currentPaymentReservation;
+  const pix = state.currentPix || payment?.metadata?.pix || {};
+  const qrCodeBase64 = pix.qrCodeBase64 || pix.qr_code_base64 || "";
+  const pixCopyPaste = pix.pixCopyPaste || pix.qrCode || pix.qr_code || pix.copyPaste || "";
+
+  document.querySelector(".app-shell").classList.add("is-hidden");
+  view.classList.add("active");
+
+  if (state.paymentStatusLoading && !payment) {
+    view.innerHTML = `
+      <div class="pix-payment-card">
+        <p class="eyebrow">Pagamento Pix</p>
+        <h1>Carregando pagamento...</h1>
+        <p>Estamos buscando os dados da sua pre-reserva.</p>
+      </div>
+    `;
+    return;
+  }
+
+  if (!payment) {
+    view.innerHTML = `
+      <div class="pix-payment-card">
+        <p class="eyebrow">Pagamento Pix</p>
+        <h1>Pagamento nao encontrado</h1>
+        <p>Nao foi possivel carregar esta pre-reserva.</p>
+        <a class="ghost-button pix-back-link" href="/arena">Voltar para a Arena</a>
+      </div>
+    `;
+    return;
+  }
+
+  const expiresAt = payment.expiresAt ? new Date(payment.expiresAt).getTime() : 0;
+  const secondsLeft = expiresAt ? Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)) : 0;
+  const countdown = expiresAt ? `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(secondsLeft % 60).padStart(2, "0")}` : "--:--";
+  const paid = payment.status === "paid";
+  const finalStatus = ["paid", "failed", "cancelled", "expired", "refunded"].includes(payment.status);
+
+  view.innerHTML = `
+    <div class="pix-payment-card">
+      <a class="ghost-button pix-back-link" href="/arena">Voltar para a Arena</a>
+      <p class="eyebrow">Pagamento Pix</p>
+      <h1>${paid ? "Pagamento confirmado" : "Finalize sua reserva"}</h1>
+      <p>${paid ? "Sua reserva foi confirmada pela NT Informatica." : "Pague com Pix para confirmar sua solicitacao automaticamente."}</p>
+
+      <div class="pix-status ${payment.status || "pending"}">
+        <strong>${paymentStatusLabel(payment.status)}</strong>
+        <span>${finalStatus ? "Status final recebido." : `Expira em ${countdown}`}</span>
+      </div>
+
+      <div class="pix-summary">
+        <span>Data: ${formatDate(reservation?.reservationDate)}</span>
+        <span>Horario: ${cleanTime(reservation?.startTime)} ate ${cleanTime(reservation?.endTime)}</span>
+        <span>Valor: ${formatMoney(payment.amount || reservation?.totalPrice)}</span>
+      </div>
+
+      ${qrCodeBase64 ? `<img class="pix-qr" src="data:image/png;base64,${qrCodeBase64}" alt="QR Code Pix da reserva">` : `<div class="pix-qr pix-qr-empty">QR Code indisponivel. Use Pix Copia e Cola.</div>`}
+
+      <label class="pix-copy-label">
+        Pix Copia e Cola
+        <textarea id="pixCopyPaste" readonly>${pixCopyPaste || ""}</textarea>
+      </label>
+      <button class="primary-button reserve-button" type="button" id="copyPixButton" ${pixCopyPaste ? "" : "disabled"}>Copiar Pix</button>
+      ${pix.ticketUrl ? `<a class="ghost-button pix-back-link" href="${pix.ticketUrl}" target="_blank" rel="noreferrer">Abrir comprovante do Mercado Pago</a>` : ""}
+      <p class="fine-print">A reserva fica aguardando pagamento ate a confirmacao do Mercado Pago. Se o prazo expirar, escolha outro horario.</p>
+    </div>
+  `;
+
+  document.querySelector("#copyPixButton")?.addEventListener("click", async () => {
+    if (!pixCopyPaste) return;
+    await navigator.clipboard?.writeText(pixCopyPaste);
+    showToast("Codigo Pix copiado.");
+  });
+}
+
+function stopPaymentPolling() {
+  if (state.paymentPollTimer) window.clearInterval(state.paymentPollTimer);
+  state.paymentPollTimer = null;
+}
+
+async function loadPaymentStatus(paymentId) {
+  state.paymentStatusLoading = true;
+  renderPaymentPage();
+  try {
+    const data = await arenaFunctionRequest("get-arena-payment-status", { paymentId });
+    state.currentPayment = fromPayment(data.payment || {});
+    state.currentPaymentReservation = data.reservation ? fromReservation(data.reservation) : null;
+    state.currentPix = data.payment?.metadata?.pix || state.currentPix || {};
+    sessionStorage.setItem(`nt-arena-payment-${paymentId}`, JSON.stringify({
+      payment: state.currentPayment,
+      reservation: state.currentPaymentReservation,
+      pix: state.currentPix,
+    }));
+    renderPaymentPage();
+
+    if (["paid", "failed", "cancelled", "expired", "refunded"].includes(state.currentPayment.status)) {
+      stopPaymentPolling();
+      await loadReservationsForSelectedDate();
+    }
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Falha ao consultar pagamento.");
+  } finally {
+    state.paymentStatusLoading = false;
+  }
+}
+
+function startPaymentPolling(paymentId) {
+  stopPaymentPolling();
+  state.paymentPollTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") loadPaymentStatus(paymentId);
+  }, 5000);
+}
+
+async function openPaymentRoute(paymentId, initialData = null) {
+  if (initialData) {
+    state.currentPayment = initialData.payment;
+    state.currentPaymentReservation = initialData.reservation;
+    state.currentPix = initialData.pix || {};
+  }
+  window.history.pushState({}, "", `/arena/pagamento/${encodeURIComponent(paymentId)}`);
+  renderPaymentPage();
+  await loadPaymentStatus(paymentId);
+  startPaymentPolling(paymentId);
+}
+
+async function handleExistingPaymentRoute() {
+  const paymentId = paymentIdFromRoute();
+  if (!paymentId) return false;
+  const stored = sessionStorage.getItem(`nt-arena-payment-${paymentId}`);
+  if (stored) {
+    try {
+      const data = JSON.parse(stored);
+      state.currentPayment = data.payment || null;
+      state.currentPaymentReservation = data.reservation || null;
+      state.currentPix = data.pix || {};
+    } catch {
+      state.currentPayment = null;
+    }
+  }
+  renderPaymentPage();
+  await loadPaymentStatus(paymentId);
+  startPaymentPolling(paymentId);
+  return true;
 }
 
 async function createReservation(payload) {
@@ -728,6 +967,41 @@ async function createReservation(payload) {
   return created;
 }
 
+async function createPixPreReservation(payload) {
+  if (!arenaPixEnabled) throw new Error("Pagamento Pix online indisponivel.");
+  if (state.localMode || !isSupabaseConfigured) throw new Error("Pagamento Pix online exige Supabase configurado.");
+
+  const idempotencyKey = `arena-pix-${payload.stationId}-${payload.reservationDate}-${payload.startTime}-${normalizePhone(payload.customerPhone)}-${payload.durationMinutes}`;
+  const rows = await supabaseRequest("/rpc/create_arena_pre_reservation", {
+    method: "POST",
+    body: JSON.stringify({
+      p_station_id: payload.stationId,
+      p_customer_name: payload.customerName,
+      p_customer_phone: payload.customerPhone,
+      p_reservation_date: payload.reservationDate,
+      p_start_time: payload.startTime,
+      p_duration_minutes: payload.durationMinutes,
+      p_notes: payload.notes || null,
+      p_payment_method: "pix",
+      p_idempotency_key: idempotencyKey,
+      p_subscription_id: null,
+    }),
+  });
+  const created = fromReservation(rows?.[0] || {});
+  const pixResponse = await arenaFunctionRequest("create-mercado-pago-pix", { reservationId: created.id });
+  await loadReservationsForSelectedDate();
+  return {
+    reservation: fromReservation(pixResponse.reservation || created),
+    payment: fromPayment(pixResponse.payment || {}),
+    pix: pixResponse.pix || {},
+  };
+}
+
+function paymentIdFromRoute() {
+  const match = window.location.pathname.match(/^\/arena\/pagamento\/([^/]+)\/?$/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
 document.querySelectorAll("[data-view]").forEach((control) => {
   control.addEventListener("click", () => switchView(control.dataset.view));
 });
@@ -757,6 +1031,50 @@ paymentOptions?.addEventListener("change", () => {
   renderReservationPreview();
   updateWhatsapp();
 });
+
+async function handlePixPaymentClick() {
+  const problem = selectionProblem();
+  if (problem) {
+    showToast(problem);
+    return;
+  }
+
+  const form = new FormData(bookingForm);
+  const customerName = String(form.get("customerName") || "").trim();
+  const customerPhone = String(form.get("customerPhone") || "").trim();
+  const notes = String(form.get("customerNotes") || "").trim();
+
+  if (!customerName || !customerPhone) {
+    showToast("Informe nome e WhatsApp para gerar o Pix.");
+    return;
+  }
+
+  try {
+    state.pixLoading = true;
+    renderPixButton();
+    const range = selectedRange();
+    const result = await createPixPreReservation({
+      stationId: state.selectedStationId,
+      customerName,
+      customerPhone,
+      reservationDate: state.selectedDate,
+      startTime: range.startTime,
+      durationMinutes: range.duration,
+      notes,
+    });
+
+    state.selectedSlot = "";
+    await loadReservationsForSelectedDate();
+    render();
+    await openPaymentRoute(result.payment.id, result);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Falha ao gerar Pix.");
+  } finally {
+    state.pixLoading = false;
+    renderPixButton();
+  }
+}
 
 bookingForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -828,9 +1146,18 @@ async function start() {
   state.selectedDate = isoDate(0);
   await loadArenaData();
   render();
+  await handleExistingPaymentRoute();
 }
 
 start();
+
+window.addEventListener("popstate", async () => {
+  stopPaymentPolling();
+  if (await handleExistingPaymentRoute()) return;
+  pixPaymentView?.classList.remove("active");
+  document.querySelector(".app-shell").classList.remove("is-hidden");
+  render();
+});
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

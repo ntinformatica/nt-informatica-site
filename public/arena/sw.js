@@ -1,4 +1,4 @@
-const CACHE_NAME = "nt-informatica-arena-v20260713-1800";
+const CACHE_NAME = "nt-informatica-arena-v20260727-mercado-pago-pix";
 const ASSETS = [
   "/arena/",
   "/arena/index.html",

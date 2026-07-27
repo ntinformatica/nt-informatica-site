@@ -42,6 +42,7 @@ loadEnvFile(resolve(".env.local"));
 const config = {
   url: normalizeSupabaseUrl(process.env.VITE_SUPABASE_URL),
   anonKey: normalizeAnonKey(process.env.VITE_SUPABASE_ANON_KEY),
+  arenaPixEnabled: cleanEnvValue(process.env.VITE_ARENA_PIX_ENABLED).toLowerCase() === "true",
 };
 
 for (const configPath of configPaths) {

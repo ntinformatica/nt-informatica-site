@@ -775,6 +775,31 @@ textarea {
   transform: translateY(-1px);
 }
 
+.pix-button {
+  min-height: 54px;
+  border: 1px solid rgba(49, 214, 255, .44);
+  border-radius: 8px;
+  background: rgba(49, 214, 255, .12);
+  color: var(--cyan);
+  font-size: 16px;
+  font-weight: 950;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.pix-button:hover:not(:disabled) {
+  border-color: rgba(49, 214, 255, .68);
+  background: rgba(49, 214, 255, .2);
+  box-shadow: 0 0 30px rgba(49, 214, 255, .16);
+  transform: translateY(-1px);
+}
+
+.pix-button:disabled {
+  cursor: wait;
+  opacity: .68;
+}
+
 .ghost-button {
   border: 1px solid var(--line);
   background: transparent;
@@ -878,6 +903,112 @@ details p {
 .toast.show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+
+.is-hidden {
+  display: none !important;
+}
+
+.pix-payment-view {
+  display: none;
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding: 14px;
+}
+
+.pix-payment-view.active {
+  display: block;
+}
+
+.pix-payment-card {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(21, 25, 31, .92);
+  padding: 18px;
+}
+
+.pix-payment-card h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(28px, 7vw, 42px);
+  line-height: .96;
+}
+
+.pix-payment-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.pix-status,
+.pix-summary {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(49, 214, 255, .24);
+  border-radius: 8px;
+  background: rgba(49, 214, 255, .08);
+  padding: 12px;
+  color: var(--muted);
+}
+
+.pix-status strong {
+  color: var(--text);
+}
+
+.pix-status.paid {
+  border-color: rgba(125, 255, 173, .44);
+  background: rgba(37, 211, 102, .12);
+}
+
+.pix-status.expired,
+.pix-status.cancelled,
+.pix-status.failed {
+  border-color: rgba(255, 76, 97, .4);
+  background: rgba(255, 76, 97, .1);
+}
+
+.pix-qr {
+  width: min(100%, 280px);
+  aspect-ratio: 1;
+  justify-self: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  object-fit: contain;
+  padding: 10px;
+}
+
+.pix-qr-empty {
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, .04);
+  color: var(--muted);
+  text-align: center;
+}
+
+.pix-copy-label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.pix-copy-label textarea {
+  min-height: 108px;
+  resize: vertical;
+  word-break: break-all;
+}
+
+.pix-back-link {
+  display: inline-grid;
+  place-items: center;
+  width: fit-content;
+  min-width: 160px;
+  padding: 0 14px;
+  text-decoration: none;
 }
 
 @media (max-width: 390px) {
