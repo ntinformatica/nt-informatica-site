@@ -625,9 +625,177 @@ function pcList(value) {
   return String(value).split("\n").map((item) => item.trim()).filter(Boolean);
 }
 
+function useHorizontalCarousel({ itemCount = 0, autoplay = true, autoplayMs = 7000 } = {}) {
+  const scrollRef = useRef(null);
+  const interactionTimeoutRef = useRef(null);
+  const dragRef = useRef({
+    active: false,
+    moved: false,
+    pointerId: null,
+    startX: 0,
+    startScrollLeft: 0,
+    suppressClick: false,
+  });
+  const [canGoBack, setCanGoBack] = useState(false);
+  const [canGoForward, setCanGoForward] = useState(false);
+  const [hasOverflow, setHasOverflow] = useState(false);
+  const [hoverPaused, setHoverPaused] = useState(false);
+  const [interactionPaused, setInteractionPaused] = useState(false);
+  const [inView, setInView] = useState(true);
+  const paused = hoverPaused || interactionPaused;
+
+  function pauseTemporarily(duration = 5000) {
+    setInteractionPaused(true);
+    if (interactionTimeoutRef.current) window.clearTimeout(interactionTimeoutRef.current);
+    interactionTimeoutRef.current = window.setTimeout(() => setInteractionPaused(false), duration);
+  }
+
+  useEffect(() => () => {
+    if (interactionTimeoutRef.current) window.clearTimeout(interactionTimeoutRef.current);
+  }, []);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+
+    function updateState() {
+      const overflow = element.scrollWidth > element.clientWidth + 8;
+      setHasOverflow(overflow);
+      setCanGoBack(overflow && element.scrollLeft > 8);
+      setCanGoForward(overflow && element.scrollLeft + element.clientWidth < element.scrollWidth - 8);
+    }
+
+    updateState();
+    element.addEventListener("scroll", updateState, { passive: true });
+    window.addEventListener("resize", updateState);
+
+    let resizeObserver = null;
+    if ("ResizeObserver" in window) {
+      resizeObserver = new ResizeObserver(updateState);
+      resizeObserver.observe(element);
+    }
+
+    return () => {
+      element.removeEventListener("scroll", updateState);
+      window.removeEventListener("resize", updateState);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [itemCount]);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !("IntersectionObserver" in window)) return;
+
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.25 });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || !autoplay || !hasOverflow || paused || !inView || itemCount <= 1) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(max-width: 1023px)").matches) return;
+
+    const timer = window.setInterval(() => {
+      const amount = Math.max(280, element.clientWidth * 0.9);
+      const atEnd = element.scrollLeft + element.clientWidth >= element.scrollWidth - 8;
+
+      if (atEnd) {
+        element.scrollTo({ left: 0, behavior: "smooth" });
+      } else {
+        element.scrollBy({ left: amount, behavior: "smooth" });
+      }
+    }, autoplayMs);
+
+    return () => window.clearInterval(timer);
+  }, [autoplay, autoplayMs, hasOverflow, inView, itemCount, paused]);
+
+  function scrollByDirection(direction) {
+    const element = scrollRef.current;
+    if (!element) return;
+    pauseTemporarily();
+    element.scrollBy({ left: direction * Math.max(280, element.clientWidth * 0.9), behavior: "smooth" });
+  }
+
+  function handleKeyDown(event) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    scrollByDirection(event.key === "ArrowLeft" ? -1 : 1);
+  }
+
+  function handlePointerDown(event) {
+    const element = scrollRef.current;
+    if (!element || event.pointerType !== "mouse") return;
+
+    dragRef.current = {
+      active: true,
+      moved: false,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: element.scrollLeft,
+      suppressClick: false,
+    };
+    element.setPointerCapture?.(event.pointerId);
+    setInteractionPaused(true);
+  }
+
+  function handlePointerMove(event) {
+    const element = scrollRef.current;
+    const drag = dragRef.current;
+    if (!element || !drag.active || event.pointerId !== drag.pointerId) return;
+
+    const deltaX = event.clientX - drag.startX;
+    if (Math.abs(deltaX) > 4) {
+      drag.moved = true;
+      drag.suppressClick = true;
+      element.scrollLeft = drag.startScrollLeft - deltaX;
+      event.preventDefault();
+    }
+  }
+
+  function finishPointerInteraction(event) {
+    const element = scrollRef.current;
+    const drag = dragRef.current;
+    if (!drag.active || event.pointerId !== drag.pointerId) return;
+
+    element?.releasePointerCapture?.(event.pointerId);
+    drag.active = false;
+    pauseTemporarily();
+  }
+
+  function handleClickCapture(event) {
+    if (!dragRef.current.suppressClick) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    window.setTimeout(() => {
+      dragRef.current.suppressClick = false;
+    }, 0);
+  }
+
+  return {
+    scrollRef,
+    canGoBack,
+    canGoForward,
+    hasOverflow,
+    setPaused: setHoverPaused,
+    scrollByDirection,
+    carouselProps: {
+      onKeyDown: handleKeyDown,
+      onPointerDown: handlePointerDown,
+      onPointerMove: handlePointerMove,
+      onPointerUp: finishPointerInteraction,
+      onPointerCancel: finishPointerInteraction,
+      onClickCapture: handleClickCapture,
+    },
+  };
+}
+
 function PcShowcase() {
   const { pcs, loading, error, localMode } = usePublicPcs();
-  const visiblePcs = sortPcs(pcs.filter((pc) => Number(pc.stock || 0) >= 1)).slice(0, 3);
+  const visiblePcs = sortPcs(pcs.filter((pc) => Number(pc.stock || 0) >= 1));
+  const carousel = useHorizontalCarousel({ itemCount: visiblePcs.length });
 
   return (
     <Section id="pcs" eyebrow="PCs à venda" title="Computadores prontos para vender, estudar, trabalhar e jogar.">
@@ -644,9 +812,51 @@ function PcShowcase() {
           <WhatsAppButton message="Olá! Gostaria de consultar PCs montados disponíveis na NT Informática." className="mt-5">Consultar no WhatsApp</WhatsAppButton>
         </Card>
       ) : null}
-      <div className="grid gap-5 lg:grid-cols-3">
-        {visiblePcs.map((pc) => <PcCard key={pc.id} pc={pc} />)}
-      </div>
+      {visiblePcs.length ? (
+        <div
+          className="group relative mt-6"
+          onMouseEnter={() => carousel.setPaused(true)}
+          onMouseLeave={() => carousel.setPaused(false)}
+          onFocus={() => carousel.setPaused(true)}
+          onBlur={() => carousel.setPaused(false)}
+        >
+          {carousel.hasOverflow ? (
+            <>
+              <button
+                type="button"
+                aria-label="Ver computadores anteriores"
+                disabled={!carousel.canGoBack}
+                onClick={() => carousel.scrollByDirection(-1)}
+                className="absolute left-2 top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-slate-950/90 text-white opacity-0 transition hover:border-nt-cyan focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan disabled:pointer-events-none disabled:opacity-20 group-hover:opacity-100 md:inline-flex"
+              >
+                <ChevronLeft size={22} />
+              </button>
+              <button
+                type="button"
+                aria-label="Ver próximos computadores"
+                disabled={!carousel.canGoForward}
+                onClick={() => carousel.scrollByDirection(1)}
+                className="absolute right-2 top-1/2 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-slate-950/90 text-white opacity-0 transition hover:border-nt-cyan focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan disabled:pointer-events-none disabled:opacity-20 group-hover:opacity-100 md:inline-flex"
+              >
+                <ChevronRight size={22} />
+              </button>
+            </>
+          ) : null}
+          <div
+            ref={carousel.scrollRef}
+            tabIndex={0}
+            aria-label="Carrossel de computadores montados"
+            className="flex cursor-grab snap-x snap-mandatory gap-5 overflow-x-auto overscroll-x-contain scroll-smooth pb-3 outline-none active:cursor-grabbing [scrollbar-width:thin] [scrollbar-color:#38bdf8_#0f172a] focus-visible:ring-2 focus-visible:ring-nt-cyan"
+            {...carousel.carouselProps}
+          >
+            {visiblePcs.map((pc) => (
+              <div key={pc.id} className="flex min-w-[86%] snap-start [&>div]:w-full sm:min-w-[48%] lg:min-w-[31.8%]">
+                <PcCard pc={pc} />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="mt-6">
         <Button href="/computadores" variant="secondary" icon={Monitor}>Ver todos os computadores</Button>
       </div>
