@@ -16,6 +16,8 @@ const emptyArenaData = {
   creditMovements: [],
   payments: [],
   paymentEvents: [],
+  planPayments: [],
+  planPaymentEvents: [],
   maintenance: [],
   notifications: [],
   packages: [
@@ -350,6 +352,53 @@ function fromPaymentEvent(row = {}) {
   };
 }
 
+function fromPlanPayment(row = {}) {
+  return {
+    id: row.id,
+    customerId: row.customer_id || "",
+    subscriptionId: row.subscription_id || "",
+    customerName: row.customer_name || "",
+    customerPhone: row.customer_phone || "",
+    normalizedPhone: row.customer_phone_normalized || normalizePhone(row.customer_phone),
+    planId: row.plan_id || "",
+    planIdentifier: row.plan_identifier || "",
+    planName: row.plan_name || "",
+    amount: Number(row.amount || 0),
+    purchasedHours: Number(row.purchased_hours || 0),
+    purchasedMinutes: Number(row.purchased_minutes || 0),
+    validityDays: Number(row.validity_days || 30),
+    status: row.status || "pending",
+    provider: row.provider || "mercado_pago",
+    mercadoPagoOrderId: row.mercado_pago_order_id || "",
+    qrCode: row.qr_code || "",
+    qrCodeBase64: row.qr_code_base64 || "",
+    ticketUrl: row.ticket_url || "",
+    expiresAt: row.expires_at || "",
+    approvedAt: row.approved_at || "",
+    failureReason: row.failure_reason || "",
+    rawResponse: row.raw_response || {},
+    metadata: row.metadata || {},
+    createdAt: row.created_at || "",
+    updatedAt: row.updated_at || "",
+  };
+}
+
+function fromPlanPaymentEvent(row = {}) {
+  return {
+    id: row.id,
+    planPaymentId: row.plan_payment_id || "",
+    provider: row.provider || "internal",
+    providerEventId: row.provider_event_id || "",
+    eventType: row.event_type || "",
+    eventStatus: row.event_status || "",
+    payload: row.payload || {},
+    processed: row.processed === true,
+    processedAt: row.processed_at || "",
+    processingError: row.processing_error || "",
+    createdAt: row.created_at || "",
+  };
+}
+
 function fromMaintenance(row = {}, stations = []) {
   const station = stations.find((item) => item.id === row.station_id);
   return {
@@ -400,7 +449,7 @@ export async function listArenaData() {
   const stations = (stationRows || []).map(fromStation);
   const customers = (customerRows || []).map(fromCustomer);
   const monthlyPlans = (planRows || []).map(fromMonthlyPlan);
-  const [subscriptionRows, movementRows, reservationRows, maintenanceRows, notificationRows, paymentRows, paymentEventRows] = await Promise.all([
+  const [subscriptionRows, movementRows, reservationRows, maintenanceRows, notificationRows, paymentRows, paymentEventRows, planPaymentRows, planPaymentEventRows] = await Promise.all([
     supabaseRequest("/arena_customer_subscriptions?select=*&order=created_at.desc&limit=500"),
     supabaseRequest("/arena_credit_movements?select=*&order=created_at.desc&limit=500"),
     supabaseRequest("/arena_reservations?select=*&order=reservation_date.desc,start_time.asc&limit=500"),
@@ -408,6 +457,8 @@ export async function listArenaData() {
     supabaseRequest("/admin_notifications?select=*&dismissed=eq.false&order=created_at.desc&limit=100").catch(() => []),
     supabaseRequest("/arena_payments?select=*&order=created_at.desc&limit=500").catch(() => []),
     supabaseRequest("/arena_payment_events?select=*&order=created_at.desc&limit=500").catch(() => []),
+    supabaseRequest("/arena_plan_payments?select=*&order=created_at.desc&limit=500").catch(() => []),
+    supabaseRequest("/arena_plan_payment_events?select=*&order=created_at.desc&limit=500").catch(() => []),
   ]);
   const subscriptions = (subscriptionRows || []).map((row) => fromSubscription(row, customers, monthlyPlans));
   const settings = fromSettings(settingsRows?.[0]);
@@ -439,6 +490,8 @@ export async function listArenaData() {
     creditMovements: (movementRows || []).map((row) => fromCreditMovement(row, customers, subscriptions)),
     payments,
     paymentEvents,
+    planPayments: (planPaymentRows || []).map(fromPlanPayment),
+    planPaymentEvents: (planPaymentEventRows || []).map(fromPlanPaymentEvent),
     maintenance: (maintenanceRows || []).map((row) => fromMaintenance(row, stations)),
     notifications: (notificationRows || []).map(fromNotification),
     packages: (packageRows || []).map(fromPackage),

@@ -1038,6 +1038,65 @@ details p {
   text-decoration: none;
 }
 
+.plan-pix-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(5, 8, 13, .76);
+  backdrop-filter: blur(10px);
+}
+
+.plan-pix-modal.active {
+  display: flex;
+}
+
+.plan-pix-card {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  width: min(100%, 620px);
+  max-height: min(92vh, 820px);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(21, 25, 31, .98);
+  padding: 18px;
+  box-shadow: 0 22px 80px rgba(0, 0, 0, .42);
+}
+
+.plan-pix-card h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: clamp(28px, 7vw, 42px);
+  line-height: .96;
+}
+
+.plan-pix-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.plan-pix-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .05);
+  color: var(--text);
+  font-size: 24px;
+  cursor: pointer;
+}
+
 @media (max-width: 390px) {
   .topbar {
     align-items: flex-start;

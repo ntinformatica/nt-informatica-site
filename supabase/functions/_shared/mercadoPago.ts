@@ -154,6 +154,46 @@ export async function createPixOrder(params: {
   });
 }
 
+export async function createPlanPixOrder(params: {
+  planPayment: Record<string, unknown>;
+  idempotencyKey: string;
+  expirationTime: string;
+}) {
+  const { planPayment, idempotencyKey, expirationTime } = params;
+  const amount = safeMoney(planPayment.amount);
+  const hours = Number(planPayment.purchased_hours || 0);
+  const description = `${planPayment.plan_name || "Plano Arena Gamer"} - ${hours} horas por ${planPayment.validity_days || 30} dias`.trim();
+
+  const body = {
+    type: "online",
+    processing_mode: "automatic",
+    external_reference: planPayment.id,
+    description,
+    total_amount: amount.toFixed(2),
+    payer: {
+      email: "ntinformaticacomercial@gmail.com",
+      first_name: String(
+        planPayment.customer_name || "Cliente NT"
+      ).slice(0, 60),
+    },
+    transactions: {
+      payments: [
+        {
+          amount: amount.toFixed(2),
+          payment_method: { id: "pix", type: "bank_transfer" },
+          expiration_time: expirationTime,
+        },
+      ],
+    },
+  };
+
+  return mercadoPagoRequest("/v1/orders", {
+    method: "POST",
+    headers: mercadoPagoHeaders(idempotencyKey),
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getOrder(orderId: string) {
   return mercadoPagoRequest(`/v1/orders/${encodeURIComponent(orderId)}`, {
     method: "GET",

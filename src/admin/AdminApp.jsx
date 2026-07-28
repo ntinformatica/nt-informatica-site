@@ -2878,6 +2878,28 @@ function ArenaCustomerFormPage({ mode, customerId, arenaData, onSaveCustomer, on
 
 function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscription }) {
   const plans = arenaData.monthlyPlans || [];
+  const subscriptions = arenaData.subscriptions || [];
+  const planPayments = arenaData.planPayments || [];
+  const creditMovements = arenaData.creditMovements || [];
+  const today = todayIsoDate();
+  const inThreeDays = new Date();
+  inThreeDays.setDate(inThreeDays.getDate() + 3);
+  const inThreeDaysIso = inThreeDays.toISOString().slice(0, 10);
+  const activeSubscriptions = subscriptions.filter((item) => item.status === "ativo" && item.expirationDate >= today && Number(item.remainingMinutes || 0) > 0);
+  const lowBalance = activeSubscriptions.filter((item) => Number(item.remainingMinutes || 0) <= 180);
+  const expiringInThreeDays = activeSubscriptions.filter((item) => item.expirationDate === inThreeDaysIso);
+  const expiringToday = activeSubscriptions.filter((item) => item.expirationDate === today);
+  const expired = subscriptions.filter((item) => item.expirationDate && item.expirationDate < today);
+  const approvedPlanPayments = planPayments.filter((item) => item.status === "approved");
+  const monthKey = today.slice(0, 7);
+  const monthPlanPayments = approvedPlanPayments.filter((item) => String(item.approvedAt || item.createdAt || "").slice(0, 7) === monthKey);
+  const monthRevenue = monthPlanPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const monthSoldMinutes = monthPlanPayments.reduce((sum, item) => sum + Number(item.purchasedMinutes || 0), 0);
+  const consumedMinutes = creditMovements.filter((item) => item.type === "consumo").reduce((sum, item) => sum + Number(item.minutes || 0), 0);
+  const soldByPlan = plans.map((plan) => ({
+    plan,
+    count: monthPlanPayments.filter((payment) => payment.planId === plan.id || payment.planName === plan.name).length,
+  }));
   const [form, setForm] = useState({ id: "", name: "Plano Player", price: 150, includedMinutes: 600, validityDays: 30, description: "", active: true, sortOrder: plans.length + 1 });
   const [assign, setAssign] = useState({ customerId: "", planId: plans[0]?.id || "", startDate: todayIsoDate(), amountPaid: "", notes: "", keepPreviousBalance: false });
 
@@ -2896,8 +2918,31 @@ function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscri
     await onActivateSubscription(assign);
   }
 
+  function alertWhatsappHref(subscription, type) {
+    const phone = String(subscription.customerPhone || "").replace(/\D/g, "");
+    const date = formatShortDate(subscription.expirationDate);
+    const balance = formatMinutesLabel(subscription.remainingMinutes || 0);
+    const messages = {
+      low: `Olá, ${subscription.customerName || ""}! Tudo bem?\n\nPassando para avisar que seu ${subscription.planName || "plano"} na Arena Gamer está com apenas ${balance} restante(s).\n\nCaso queira continuar jogando sem interrupções, você já pode adquirir um novo plano. As novas horas serão somadas ao seu saldo atual.\n\nNT Informática, Celulares e Games.`,
+      three: `Olá, ${subscription.customerName || ""}! Tudo bem?\n\nSeu ${subscription.planName || "plano"} da Arena Gamer vence em 3 dias, no dia ${date}.\n\nCaso queira renovar antecipadamente, as novas horas e os novos 30 dias serão acrescentados sem você perder seu saldo ou validade atual.\n\nNT Informática, Celulares e Games.`,
+      today: `Olá, ${subscription.customerName || ""}! Tudo bem?\n\nSeu ${subscription.planName || "plano"} da Arena Gamer vence hoje.\n\nCaso queira continuar utilizando seu saldo e os benefícios do plano, você pode realizar uma nova compra pelo nosso site ou falar conosco por aqui.\n\nNT Informática, Celulares e Games.`,
+    };
+    return `https://wa.me/${phone}?text=${encodeURIComponent(messages[type] || messages.low)}`;
+  }
+
   return (
     <div className="space-y-6">
+      <div className="grid gap-4 md:grid-cols-4 xl:grid-cols-8">
+        <SummaryCard compact label="Planos ativos" value={activeSubscriptions.length} icon={CalendarDays} />
+        <SummaryCard compact label="Saldo baixo" value={lowBalance.length} icon={Clock} tone="amber" />
+        <SummaryCard compact label="Vencem em 3 dias" value={expiringInThreeDays.length} icon={CalendarDays} tone="amber" />
+        <SummaryCard compact label="Vencem hoje" value={expiringToday.length} icon={CalendarDays} tone="red" />
+        <SummaryCard compact label="Expirados" value={expired.length} icon={X} tone="red" />
+        <SummaryCard compact label="Faturamento mês" value={formatCurrency(monthRevenue)} icon={BarChart3} tone="green" />
+        <SummaryCard compact label="Horas vendidas" value={formatMinutesLabel(monthSoldMinutes)} icon={Star} />
+        <SummaryCard compact label="Horas consumidas" value={formatMinutesLabel(consumedMinutes)} icon={Gamepad2} />
+      </div>
+
       <div className="grid gap-4 md:grid-cols-3">
         {plans.map((plan) => (
           <article key={plan.id} className="rounded-lg border border-white/10 bg-white/5 p-5">
@@ -2918,6 +2963,60 @@ function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscri
           </article>
         ))}
       </div>
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+          <h3 className="text-lg font-black">Compras Pix recentes</h3>
+          <div className="mt-4 grid gap-3">
+            {planPayments.slice(0, 8).map((payment) => (
+              <div key={payment.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+                <strong className="text-white">{payment.customerName} · {payment.planName}</strong>
+                <p>{formatCurrency(payment.amount)} · {paymentStatusLabel(payment.status === "approved" ? "paid" : payment.status)}</p>
+                <p>{payment.approvedAt ? `Aprovado em ${formatDateTimeLabel(payment.approvedAt)}` : `Criado em ${formatDateTimeLabel(payment.createdAt)}`}</p>
+              </div>
+            ))}
+            {!planPayments.length ? <p className="text-sm text-slate-400">Nenhuma compra Pix de plano registrada ainda.</p> : null}
+          </div>
+        </section>
+        <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+          <h3 className="text-lg font-black">Alertas de saldo baixo</h3>
+          <div className="mt-4 grid gap-3">
+            {lowBalance.slice(0, 8).map((subscription) => (
+              <div key={subscription.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+                <strong className="text-white">{subscription.customerName}</strong>
+                <p>{subscription.planName} · {formatMinutesLabel(subscription.remainingMinutes)} restantes</p>
+                <a className="mt-3 inline-flex min-h-9 items-center justify-center rounded-md border border-slate-700 px-3 text-xs font-bold text-slate-100 hover:border-nt-cyan" href={alertWhatsappHref(subscription, "low")} target="_blank" rel="noreferrer">Avisar no WhatsApp</a>
+              </div>
+            ))}
+            {!lowBalance.length ? <p className="text-sm text-slate-400">Nenhum cliente com saldo baixo.</p> : null}
+          </div>
+        </section>
+        <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+          <h3 className="text-lg font-black">Vencimentos</h3>
+          <div className="mt-4 grid gap-3">
+            {[...expiringToday.map((item) => ({ item, type: "today" })), ...expiringInThreeDays.map((item) => ({ item, type: "three" }))].slice(0, 8).map(({ item, type }) => (
+              <div key={`${item.id}-${type}`} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+                <strong className="text-white">{item.customerName}</strong>
+                <p>{item.planName} · vence {formatShortDate(item.expirationDate)}</p>
+                <a className="mt-3 inline-flex min-h-9 items-center justify-center rounded-md border border-slate-700 px-3 text-xs font-bold text-slate-100 hover:border-nt-cyan" href={alertWhatsappHref(item, type)} target="_blank" rel="noreferrer">Avisar no WhatsApp</a>
+              </div>
+            ))}
+            {!expiringToday.length && !expiringInThreeDays.length ? <p className="text-sm text-slate-400">Nenhum vencimento crítico no momento.</p> : null}
+          </div>
+        </section>
+      </div>
+
+      <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+        <h3 className="text-lg font-black">Quantidade vendida por plano no mês</h3>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {soldByPlan.map(({ plan, count }) => (
+            <div key={plan.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
+              <strong className="text-white">{plan.name}</strong>
+              <p>{count} venda(s) aprovadas</p>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <form onSubmit={submit} className="rounded-lg border border-white/10 bg-white/5 p-5">

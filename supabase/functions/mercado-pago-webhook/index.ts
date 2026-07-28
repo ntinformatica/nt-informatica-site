@@ -44,6 +44,56 @@ Deno.serve(async (request) => {
     const order = await getOrder(dataId);
     const externalReference = mercadoPagoExternalReference(order);
     const providerPaymentId = String(order.id || dataId);
+    const mappedStatus = mapMercadoPagoStatus(order.status || order.status_detail);
+
+    let planPayment = externalReference
+      ? await getSingle(`/arena_plan_payments?id=eq.${encodeURIComponent(externalReference)}&limit=1`)
+      : null;
+
+    if (!planPayment) {
+      planPayment = await getSingle(`/arena_plan_payments?mercado_pago_order_id=eq.${encodeURIComponent(providerPaymentId)}&limit=1`);
+    }
+
+    if (planPayment) {
+      const planEventId = requestId || `mp-plan:${dataId}:${order.status || "status"}`;
+      const planMetadata = {
+        provider: "mercado_pago",
+        notification: body,
+        order,
+        processedAt: new Date().toISOString(),
+      };
+
+      let planRows = null;
+      if (mappedStatus === "paid") {
+        planRows = await supabaseRpc("confirm_arena_plan_payment", {
+          p_plan_payment_id: planPayment.id,
+          p_provider_event_id: `${planEventId}:confirm`,
+          p_metadata: planMetadata,
+        });
+      } else if (mappedStatus === "expired") {
+        planRows = await supabaseRpc("fail_arena_plan_payment", {
+          p_plan_payment_id: planPayment.id,
+          p_status: "expired",
+          p_provider_event_id: `${planEventId}:expired`,
+          p_metadata: planMetadata,
+        });
+      } else if (["failed", "cancelled", "refunded"].includes(mappedStatus)) {
+        planRows = await supabaseRpc("fail_arena_plan_payment", {
+          p_plan_payment_id: planPayment.id,
+          p_status: mappedStatus === "refunded" ? "refunded" : mappedStatus === "cancelled" ? "cancelled" : "rejected",
+          p_provider_event_id: `${planEventId}:${mappedStatus}`,
+          p_metadata: planMetadata,
+        });
+      }
+
+      return ok(request, {
+        processed: Boolean(planRows),
+        planPaymentId: planPayment.id,
+        providerPaymentId,
+        status: mappedStatus,
+        type: "arena_plan",
+      });
+    }
 
     let payment = externalReference
       ? await getSingle(`/arena_payments?id=eq.${encodeURIComponent(externalReference)}&limit=1`)
@@ -85,7 +135,6 @@ Deno.serve(async (request) => {
       processed: false,
     });
 
-    const mappedStatus = mapMercadoPagoStatus(order.status || order.status_detail);
     let rows = null;
     if (mappedStatus === "paid") {
       rows = await supabaseRpc("confirm_arena_payment", {

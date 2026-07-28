@@ -15,7 +15,7 @@ const fallbackSettings = {
   slotMinutes: 30,
   activeDays: [1, 2, 3, 4, 5, 6],
   pendingPaymentExpirationMinutes: 15,
-  reservationNotice: "Sua solicitação foi enviada. A reserva será confirmada pela NT Informática.",
+  reservationNotice: "Sua solicitaÃ§Ã£o foi enviada. A reserva serÃ¡ confirmada pela NT InformÃ¡tica.",
 };
 
 const fallbackPackages = [
@@ -23,6 +23,12 @@ const fallbackPackages = [
   { id: "local-package-120", name: "2 Horas", durationMinutes: 120, price: 40, active: true, sortOrder: 20 },
   { id: "local-package-180", name: "3 Horas", durationMinutes: 180, price: 50, active: true, sortOrder: 30 },
 ];
+
+const officialPlanCatalog = {
+  player: { id: "player", name: "Plano Player", description: "Pra jogar de vez em quando", price: 150, hours: 10, minutes: 600, hourly: 15, validityDays: 30 },
+  pro: { id: "pro", name: "Plano Pro", description: "Mais horas, melhor custo", price: 250, hours: 20, minutes: 1200, hourly: 12.5, validityDays: 30 },
+  squad: { id: "squad", name: "Plano Squad", description: "Mais economia e jogatina", price: 400, hours: 40, minutes: 2400, hourly: 10, validityDays: 30 },
+};
 
 const fallbackStations = [
   { id: "local-pc", name: "PC Gamer", type: "pc", description: "Modo local de teste", active: true, sortOrder: 10 },
@@ -43,6 +49,11 @@ const state = {
   loading: true,
   pixLoading: false,
   paymentStatusLoading: false,
+  planPixLoading: false,
+  selectedPlan: null,
+  currentPlanPayment: null,
+  currentPlanPix: null,
+  planPaymentPollTimer: null,
   currentPayment: null,
   currentPaymentReservation: null,
   currentPix: null,
@@ -112,11 +123,11 @@ function firstAvailableDayOffset() {
 function dayLabel(date) {
   return {
     1: "Segunda",
-    2: "Terça",
+    2: "TerÃ§a",
     3: "Quarta",
     4: "Quinta",
     5: "Sexta",
-    6: "Sábado",
+    6: "SÃ¡bado",
   }[date.getDay()] || "";
 }
 
@@ -182,7 +193,7 @@ function supabaseHeaders(extra = {}) {
 }
 
 async function supabaseRequest(path, options = {}) {
-  if (!isSupabaseConfigured) throw new Error("Supabase não configurado.");
+  if (!isSupabaseConfigured) throw new Error("Supabase nÃ£o configurado.");
   const response = await fetch(`${supabaseUrl}/rest/v1${path}`, {
     ...options,
     headers: supabaseHeaders(options.headers),
@@ -283,6 +294,27 @@ function fromPayment(row = {}) {
   };
 }
 
+function fromPlanPayment(row = {}) {
+  return {
+    id: row.id || "",
+    customerName: row.customer_name || row.customerName || "",
+    customerPhone: row.customer_phone || row.customerPhone || "",
+    planIdentifier: row.plan_identifier || row.planIdentifier || "",
+    planName: row.plan_name || row.planName || "",
+    amount: Number(row.amount || 0),
+    purchasedHours: Number(row.purchased_hours || row.purchasedHours || 0),
+    purchasedMinutes: Number(row.purchased_minutes || row.purchasedMinutes || 0),
+    validityDays: Number(row.validity_days || row.validityDays || 30),
+    status: row.status || "pending",
+    qrCode: row.qr_code || row.qrCode || "",
+    qrCodeBase64: row.qr_code_base64 || row.qrCodeBase64 || "",
+    ticketUrl: row.ticket_url || row.ticketUrl || "",
+    expiresAt: row.expires_at || row.expiresAt || "",
+    approvedAt: row.approved_at || row.approvedAt || "",
+    subscriptionId: row.subscription_id || row.subscriptionId || "",
+  };
+}
+
 function fromBusySlot(row) {
   return {
     id: `${row.station_id}-${row.reservation_date}-${cleanTime(row.start_time)}-${cleanTime(row.end_time)}`,
@@ -357,7 +389,7 @@ async function loadArenaData() {
     state.settings = fallbackSettings;
     state.packages = fallbackPackages;
     state.reservations = JSON.parse(localStorage.getItem("nt-arena-local-reservations") || "[]");
-    showToast("Supabase indisponível. Modo local de teste ativo.");
+    showToast("Supabase indisponÃ­vel. Modo local de teste ativo.");
   } finally {
     if (!state.selectedStationId) state.selectedStationId = state.stations[0]?.id || "";
     state.loading = false;
@@ -457,29 +489,29 @@ function reservationForSlot(slot) {
 
 function selectionProblem() {
   const range = selectedRange();
-  if (!range) return "Escolha um horário antes de reservar.";
-  if (!isActiveDay(state.selectedDay)) return "A Arena não atende neste dia.";
-  if (range.end > minutesFromTime(state.settings.closingTime)) return "Não há tempo suficiente antes do fechamento.";
-  if (isPastSlot(range.startTime)) return "Esse horário já passou.";
-  if (rangeIsBusy(range)) return "Horário indisponível. Escolha outro período.";
+  if (!range) return "Escolha um horÃ¡rio antes de reservar.";
+  if (!isActiveDay(state.selectedDay)) return "A Arena nÃ£o atende neste dia.";
+  if (range.end > minutesFromTime(state.settings.closingTime)) return "NÃ£o hÃ¡ tempo suficiente antes do fechamento.";
+  if (isPastSlot(range.startTime)) return "Esse horÃ¡rio jÃ¡ passou.";
+  if (rangeIsBusy(range)) return "HorÃ¡rio indisponÃ­vel. Escolha outro perÃ­odo.";
   return "";
 }
 
 function buildReservationMessage({ customerName = "", customerPhone = "" } = {}) {
   const range = selectedRange();
-  if (!range) return "Olá, NT Informática. Quero saber quais horários estão disponíveis para jogar na Arena Gamer.";
+  if (!range) return "OlÃ¡, NT InformÃ¡tica. Quero saber quais horÃ¡rios estÃ£o disponÃ­veis para jogar na Arena Gamer.";
 
   return [
-    "Olá, NT Informática. Enviei uma solicitação de reserva na Arena Gamer.",
+    "OlÃ¡, NT InformÃ¡tica. Enviei uma solicitaÃ§Ã£o de reserva na Arena Gamer.",
     customerName ? `Nome: ${customerName}.` : "",
     customerPhone ? `WhatsApp do cliente: ${customerPhone}.` : "",
     `Equipamento: ${stationName()}.`,
     `Dia: ${fullDateLabel(state.selectedDay)}.`,
-    `Horário: ${range.startTime} até ${range.endTime}.`,
-    `Duração: ${range.duration} minutos.`,
+    `HorÃ¡rio: ${range.startTime} atÃ© ${range.endTime}.`,
+    `DuraÃ§Ã£o: ${range.duration} minutos.`,
     `Valor: ${formatMoney(priceForDuration(range.duration))}.`,
     selectedPaymentType() === "plano" ? "Forma de pagamento: usar plano mensal." : "Forma de pagamento: avulso.",
-    "Status: aguardando confirmação da loja.",
+    "Status: aguardando confirmaÃ§Ã£o da loja.",
   ].filter(Boolean).join("\n");
 }
 
@@ -535,7 +567,7 @@ function renderSlots() {
   slotGrid.innerHTML = "";
 
   if (!isActiveDay(state.selectedDay)) {
-    slotGrid.innerHTML = '<div class="empty-state">A Arena não atende neste dia.</div>';
+    slotGrid.innerHTML = '<div class="empty-state">A Arena nÃ£o atende neste dia.</div>';
     return;
   }
 
@@ -549,7 +581,7 @@ function renderSlots() {
     button.type = "button";
     button.disabled = busy || past;
     button.className = `slot-button ${status}${busy ? " busy" : ""}${past ? " past" : ""}${selected ? " selected" : ""}`;
-    button.innerHTML = `<strong>${slot}</strong><span>${busy ? "Horário indisponível" : past ? "Encerrado" : "Livre"}</span>`;
+    button.innerHTML = `<strong>${slot}</strong><span>${busy ? "HorÃ¡rio indisponÃ­vel" : past ? "Encerrado" : "Livre"}</span>`;
     button.addEventListener("click", () => {
       state.selectedSlot = slot;
       renderSlots();
@@ -572,7 +604,7 @@ function renderDurationOptions() {
 function renderSummary() {
   const range = selectedRange();
   if (!range) {
-    selectedSummary.textContent = "Selecione um horário";
+    selectedSummary.textContent = "Selecione um horÃ¡rio";
     renderPaymentOptions();
     updateWhatsapp();
     return;
@@ -581,7 +613,7 @@ function renderSummary() {
   const problem = selectionProblem();
   selectedSummary.textContent = problem
     ? problem
-    : `${stationName()} em ${fullDateLabel(state.selectedDay)}, ${range.startTime} até ${range.endTime} - ${formatMoney(priceForDuration(range.duration))}`;
+    : `${stationName()} em ${fullDateLabel(state.selectedDay)}, ${range.startTime} atÃ© ${range.endTime} - ${formatMoney(priceForDuration(range.duration))}`;
   renderReservationPreview();
   renderPaymentOptions();
   updateWhatsapp();
@@ -636,10 +668,10 @@ function renderPaymentOptions() {
     if (activePlan) {
       planStatus.innerHTML = `
         <strong>${plan.planName || "Plano mensal"} ativo</strong>
-        <span>Saldo disponível: ${formatMinutes(plan.remainingMinutes)}</span>
-        <span>Válido até: ${formatDate(plan.expirationDate)}</span>
-        ${selectedDuration ? `<span>Reserva selecionada: ${formatMinutes(selectedDuration)}</span><span>Saldo previsto após confirmação: ${formatMinutes(Math.max(0, projectedBalance))}</span>` : ""}
-        ${selectedDuration && projectedBalance < 0 ? "<span>Saldo de horas insuficiente para esta duração.</span>" : ""}
+        <span>Saldo disponÃ­vel: ${formatMinutes(plan.remainingMinutes)}</span>
+        <span>VÃ¡lido atÃ©: ${formatDate(plan.expirationDate)}</span>
+        ${selectedDuration ? `<span>Reserva selecionada: ${formatMinutes(selectedDuration)}</span><span>Saldo previsto apÃ³s confirmaÃ§Ã£o: ${formatMinutes(Math.max(0, projectedBalance))}</span>` : ""}
+        ${selectedDuration && projectedBalance < 0 ? "<span>Saldo de horas insuficiente para esta duraÃ§Ã£o.</span>" : ""}
       `;
       return;
     }
@@ -650,11 +682,11 @@ function renderPaymentOptions() {
     }
 
     if (plan?.hasPlan && !plan.hasBalance) {
-      planStatus.textContent = "Plano mensal ativo, porém sem saldo disponível.";
+      planStatus.textContent = "Plano mensal ativo, porÃ©m sem saldo disponÃ­vel.";
       return;
     }
 
-    planStatus.textContent = "Pix disponível. Se você possui plano mensal, digite o WhatsApp cadastrado.";
+    planStatus.textContent = "Pix disponÃ­vel. Se vocÃª possui plano mensal, digite o WhatsApp cadastrado.";
   }
 }
 
@@ -669,16 +701,16 @@ function renderReservationPreview() {
 
   const range = selectedRange();
   if (!range || selectionProblem()) {
-    preview.innerHTML = "<strong>Resumo</strong><span>Escolha data, equipamento, duração e horário inicial.</span>";
+    preview.innerHTML = "<strong>Resumo</strong><span>Escolha data, equipamento, duraÃ§Ã£o e horÃ¡rio inicial.</span>";
     return;
   }
 
   preview.innerHTML = `
-    <strong>Resumo da solicitação</strong>
+    <strong>Resumo da solicitaÃ§Ã£o</strong>
     <span>Equipamento: ${stationName()}</span>
     <span>Data: ${fullDateLabel(state.selectedDay)}</span>
-    <span>Início: ${range.startTime} · Término: ${range.endTime}</span>
-    <span>Duração: ${range.duration / 60} ${range.duration === 60 ? "hora" : "horas"}</span>
+    <span>InÃ­cio: ${range.startTime} Â· TÃ©rmino: ${range.endTime}</span>
+    <span>DuraÃ§Ã£o: ${range.duration / 60} ${range.duration === 60 ? "hora" : "horas"}</span>
     <span>Valor total: ${formatMoney(priceForDuration(range.duration))}</span>
     <span>Pagamento: ${selectedPaymentType() === "plano" ? "Usar plano mensal" : "Pix"}</span>
     <span>Nome: ${customerNameInput?.value || "preencha seu nome"}</span>
@@ -693,7 +725,7 @@ function renderBookings() {
 
   bookingList.innerHTML = "";
   if (!ownBookings.length) {
-    bookingList.innerHTML = `<div class="empty-state">${state.localMode ? "Modo local de teste: nenhuma solicitação salva neste navegador." : "Nenhuma solicitação para este dia."}</div>`;
+    bookingList.innerHTML = `<div class="empty-state">${state.localMode ? "Modo local de teste: nenhuma solicitaÃ§Ã£o salva neste navegador." : "Nenhuma solicitaÃ§Ã£o para este dia."}</div>`;
     return;
   }
 
@@ -706,7 +738,7 @@ function renderBookings() {
       card.className = "booking-card";
       card.innerHTML = `
         <span>${booking.customerName || "Cliente"} - ${booking.customerPhone || "sem telefone"}</span>
-        <strong>${station?.name || "Arena"} - ${booking.reservationDate}, ${booking.startTime} até ${booking.endTime}</strong>
+        <strong>${station?.name || "Arena"} - ${booking.reservationDate}, ${booking.startTime} atÃ© ${booking.endTime}</strong>
         <span>${booking.durationMinutes} min - ${formatMoney(booking.totalPrice)}</span>
         <span class="status">${booking.status}</span>
       `;
@@ -739,8 +771,8 @@ function applyStationTheme() {
 function renderModeNotice() {
   if (!noticeText) return;
   noticeText.textContent = state.localMode
-    ? "Modo local de teste: as solicitações ficam salvas apenas neste navegador porque o Supabase não está configurado."
-    : "Sua solicitação será salva como pendente e confirmada pela NT Informática.";
+    ? "Modo local de teste: as solicitaÃ§Ãµes ficam salvas apenas neste navegador porque o Supabase nÃ£o estÃ¡ configurado."
+    : "Sua solicitaÃ§Ã£o serÃ¡ salva como pendente e confirmada pela NT InformÃ¡tica.";
 }
 
 function render() {
@@ -793,12 +825,118 @@ function paymentStatusLabel(status) {
     pending: "Aguardando pagamento",
     processing: "Processando",
     paid: "Pago",
+    approved: "Pago",
+    rejected: "Rejeitado",
     failed: "Falhou",
     cancelled: "Cancelado",
     expired: "Expirado",
     refunded: "Reembolsado",
   };
   return labels[status] || status || "Aguardando pagamento";
+}
+
+function planPaymentIsFinal(status) {
+  return ["approved", "rejected", "cancelled", "expired", "refunded"].includes(String(status || ""));
+}
+
+function planPaymentIsApproved(status) {
+  return String(status || "") === "approved";
+}
+
+function ensurePlanPixModal() {
+  let modal = document.querySelector("#planPixModal");
+  if (modal) return modal;
+  modal = document.createElement("section");
+  modal.id = "planPixModal";
+  modal.className = "plan-pix-modal";
+  modal.setAttribute("aria-label", "Contratar plano mensal da Arena por Pix");
+  document.body.insertBefore(modal, toast);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closePlanPixModal();
+  });
+  return modal;
+}
+
+function closePlanPixModal() {
+  stopPlanPaymentPolling();
+  const modal = document.querySelector("#planPixModal");
+  modal?.classList.remove("active");
+  state.selectedPlan = null;
+  state.currentPlanPayment = null;
+  state.currentPlanPix = null;
+}
+
+function renderPlanPixModal() {
+  const modal = ensurePlanPixModal();
+  const plan = state.selectedPlan;
+  const payment = state.currentPlanPayment;
+  const pix = state.currentPlanPix || {};
+  modal.classList.add("active");
+
+  if (!plan) {
+    modal.innerHTML = "";
+    return;
+  }
+
+  const qrCodeBase64 = pix.qrCodeBase64 || payment?.qrCodeBase64 || "";
+  const pixCopyPaste = pix.pixCopyPaste || payment?.qrCode || "";
+  const ticketUrl = pix.ticketUrl || payment?.ticketUrl || "";
+  const expiresAt = payment?.expiresAt ? new Date(payment.expiresAt).getTime() : 0;
+  const secondsLeft = expiresAt ? Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)) : 0;
+  const countdown = expiresAt ? `${String(Math.floor(secondsLeft / 60)).padStart(2, "0")}:${String(secondsLeft % 60).padStart(2, "0")}` : "--:--";
+  const approved = planPaymentIsApproved(payment?.status);
+  const finalStatus = planPaymentIsFinal(payment?.status);
+
+  modal.innerHTML = `
+    <div class="plan-pix-card" role="dialog" aria-modal="true" aria-labelledby="planPixTitle">
+      <button class="plan-pix-close" type="button" aria-label="Fechar">Ã—</button>
+      <p class="eyebrow">Plano mensal via Pix</p>
+      <h2 id="planPixTitle">${plan.name}</h2>
+      <p>${plan.description}</p>
+
+      <div class="pix-summary">
+        <span>${plan.hours} horas por ${plan.validityDays} dias</span>
+        <span>Valor total: ${formatMoney(plan.price)}</span>
+        <span>Equivale a ${formatMoney(plan.hourly)} por hora</span>
+        <span>Recompra: novas horas e validade sÃ£o somadas ao saldo atual quando o pagamento for aprovado.</span>
+      </div>
+
+      <label>
+        Nome do cliente
+        <input id="planCustomerName" type="text" autocomplete="name" value="${customerNameInput?.value || payment?.customerName || ""}" placeholder="Seu nome">
+      </label>
+      <label>
+        WhatsApp
+        <input id="planCustomerPhone" type="tel" autocomplete="tel" value="${customerPhoneInput?.value || payment?.customerPhone || ""}" placeholder="(47) 99930-9344">
+      </label>
+
+      ${payment ? `
+        <div class="pix-status ${payment.status || "pending"}">
+          <strong>${approved ? "Plano ativado" : paymentStatusLabel(payment.status)}</strong>
+          <span>${approved ? "Seu saldo foi liberado automaticamente." : finalStatus ? "Status final recebido." : `Expira em ${countdown}`}</span>
+        </div>
+        ${qrCodeBase64 ? `<img class="pix-qr" src="data:image/png;base64,${qrCodeBase64}" alt="QR Code Pix do ${plan.name}">` : `<div class="pix-qr pix-qr-empty">QR Code indisponÃ­vel. Use Pix Copia e Cola.</div>`}
+        <label class="pix-copy-label">
+          Pix Copia e Cola
+          <textarea id="planPixCopyPaste" readonly>${pixCopyPaste || ""}</textarea>
+        </label>
+        <button class="primary-button reserve-button" type="button" id="copyPlanPixButton" ${pixCopyPaste ? "" : "disabled"}>Copiar Pix</button>
+        ${ticketUrl ? `<a class="ghost-button pix-back-link" href="${ticketUrl}" target="_blank" rel="noreferrer">Abrir comprovante do Mercado Pago</a>` : ""}
+        <p class="fine-print">ApÃ³s o pagamento, aguarde a confirmaÃ§Ã£o automÃ¡tica do Mercado Pago. O saldo sÃ³ Ã© liberado quando o pagamento for aprovado.</p>
+      ` : `
+        <button class="primary-button reserve-button" type="button" id="generatePlanPixButton" ${state.planPixLoading ? "disabled" : ""}>${state.planPixLoading ? "Gerando Pix..." : "Gerar Pix"}</button>
+        <p class="fine-print">O Pix expira em alguns minutos. O valor, horas e validade sÃ£o definidos no servidor da NT InformÃ¡tica.</p>
+      `}
+    </div>
+  `;
+
+  modal.querySelector(".plan-pix-close")?.addEventListener("click", closePlanPixModal);
+  modal.querySelector("#generatePlanPixButton")?.addEventListener("click", handleGeneratePlanPix);
+  modal.querySelector("#copyPlanPixButton")?.addEventListener("click", async () => {
+    if (!pixCopyPaste) return;
+    await navigator.clipboard?.writeText(pixCopyPaste);
+    showToast("CÃ³digo Pix copiado.");
+  });
 }
 
 function renderPaymentPage() {
@@ -917,6 +1055,77 @@ function startPaymentPolling(paymentId) {
   }, 5000);
 }
 
+function stopPlanPaymentPolling() {
+  if (state.planPaymentPollTimer) window.clearInterval(state.planPaymentPollTimer);
+  state.planPaymentPollTimer = null;
+}
+
+async function loadPlanPaymentStatus(planPaymentId) {
+  try {
+    const data = await arenaFunctionRequest("get-arena-plan-payment-status", { planPaymentId });
+    state.currentPlanPayment = fromPlanPayment(data.planPayment || {});
+    state.currentPlanPix = data.pix || state.currentPlanPix || {};
+    renderPlanPixModal();
+
+    if (planPaymentIsFinal(state.currentPlanPayment.status)) {
+      stopPlanPaymentPolling();
+      if (state.currentPlanPayment.status === "approved") {
+        showToast("Plano ativado com sucesso.");
+        if (customerPhoneInput?.value) await lookupCustomerPlan();
+      }
+    }
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Falha ao consultar pagamento do plano.");
+  }
+}
+
+function startPlanPaymentPolling(planPaymentId) {
+  stopPlanPaymentPolling();
+  state.planPaymentPollTimer = window.setInterval(() => {
+    if (document.visibilityState === "visible") loadPlanPaymentStatus(planPaymentId);
+  }, 5000);
+}
+
+async function handleGeneratePlanPix() {
+  const plan = state.selectedPlan;
+  if (!plan) return;
+  const name = String(document.querySelector("#planCustomerName")?.value || "").trim();
+  const phone = String(document.querySelector("#planCustomerPhone")?.value || "").trim();
+
+  if (!arenaPixEnabled) {
+    showToast("Pagamento Pix online indisponÃ­vel no momento.");
+    return;
+  }
+
+  if (!name || !phone) {
+    showToast("Informe nome e WhatsApp para gerar o Pix do plano.");
+    return;
+  }
+
+  try {
+    state.planPixLoading = true;
+    renderPlanPixModal();
+    const data = await arenaFunctionRequest("create-arena-plan-pix", {
+      planId: plan.id,
+      customerName: name,
+      customerPhone: phone,
+    });
+    state.currentPlanPayment = fromPlanPayment(data.planPayment || {});
+    state.currentPlanPix = data.pix || {};
+    if (customerNameInput && !customerNameInput.value) customerNameInput.value = name;
+    if (customerPhoneInput && !customerPhoneInput.value) customerPhoneInput.value = phone;
+    renderPlanPixModal();
+    startPlanPaymentPolling(state.currentPlanPayment.id);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "Falha ao gerar Pix do plano.");
+  } finally {
+    state.planPixLoading = false;
+    renderPlanPixModal();
+  }
+}
+
 async function openPaymentRoute(paymentId, initialData = null) {
   if (initialData) {
     state.currentPayment = initialData.payment;
@@ -970,7 +1179,7 @@ async function createReservation(payload) {
         minutesFromTime(item.endTime),
       )
     ));
-    if (conflict) throw new Error("Horário indisponível.");
+    if (conflict) throw new Error("HorÃ¡rio indisponÃ­vel.");
     stored.unshift(reservation);
     localStorage.setItem("nt-arena-local-reservations", JSON.stringify(stored));
     state.reservations = stored;
@@ -1052,7 +1261,17 @@ planPaymentOption?.addEventListener("click", () => {
 
 document.querySelectorAll(".plan-pix-button").forEach((button) => {
   button.addEventListener("click", () => {
-    showToast("Contratação de planos por Pix será ativada na próxima etapa. Use o WhatsApp para contratar este plano agora.");
+    const planId = String(button.dataset.planId || "").trim();
+    const plan = officialPlanCatalog[planId];
+    if (!plan) {
+      showToast("Plano indisponível.");
+      return;
+    }
+    state.selectedPlan = plan;
+    state.currentPlanPayment = null;
+    state.currentPlanPix = null;
+    state.planPixLoading = false;
+    renderPlanPixModal();
   });
 });
 
@@ -1139,7 +1358,7 @@ bookingForm.addEventListener("submit", async (event) => {
   }
 
   if (paymentType === "plano" && !state.customerPlan?.hasActivePlan) {
-    showToast("Plano mensal indisponível para este telefone.");
+    showToast("Plano mensal indisponÃ­vel para este telefone.");
     return;
   }
 
@@ -1167,7 +1386,7 @@ bookingForm.addEventListener("submit", async (event) => {
     await loadReservationsForSelectedDate();
     render();
     switchView("bookings");
-    showToast(paymentType === "plano" ? "Sua solicitação foi enviada. A utilização do plano será processada após a confirmação da reserva pela NT Informática." : state.settings.reservationNotice || fallbackSettings.reservationNotice);
+    showToast(paymentType === "plano" ? "Sua solicitaÃ§Ã£o foi enviada. A utilizaÃ§Ã£o do plano serÃ¡ processada apÃ³s a confirmaÃ§Ã£o da reserva pela NT InformÃ¡tica." : state.settings.reservationNotice || fallbackSettings.reservationNotice);
   } catch (error) {
     console.error(error);
     showToast(error.message || "Falha ao salvar reserva.");
@@ -1205,7 +1424,7 @@ window.addEventListener("popstate", async () => {
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/arena/sw.js?v=20260706-1010", { scope: "/arena/" }).catch(() => {
-      showToast("Modo instalável indisponível neste navegador.");
+      showToast("Modo instalÃ¡vel indisponÃ­vel neste navegador.");
     });
   });
 }
