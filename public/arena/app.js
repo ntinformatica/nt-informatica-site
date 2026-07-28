@@ -29,6 +29,8 @@ const fallbackStations = [
   { id: "local-ps5", name: "PlayStation 5", type: "ps5", description: "Modo local de teste", active: true, sortOrder: 20 },
 ];
 
+const businessWeekDays = [1, 2, 3, 4, 5, 6];
+
 const state = {
   selectedDay: 0,
   selectedDate: "",
@@ -95,8 +97,23 @@ function isoDate(offset = state.selectedDay) {
   return todayDate(offset).toISOString().slice(0, 10);
 }
 
+function businessDayOffsets() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = today.getDay();
+  const mondayOffset = day === 0 ? 1 : 1 - day;
+  return businessWeekDays.map((_, index) => mondayOffset + index);
+}
+
 function dayLabel(date) {
-  return new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(date).replace(".", "");
+  return {
+    1: "Segunda",
+    2: "Terça",
+    3: "Quarta",
+    4: "Quinta",
+    5: "Sexta",
+    6: "Sábado",
+  }[date.getDay()] || "";
 }
 
 function dateLabel(date) {
@@ -369,6 +386,10 @@ function isActiveDay(offset) {
   return state.settings.activeDays.includes(dow);
 }
 
+function isPastDay(offset) {
+  return todayDate(offset) < todayDate(0);
+}
+
 function isPastSlot(slot) {
   if (state.selectedDay !== 0) return false;
   const [hour, minute] = slot.split(":").map(Number);
@@ -464,23 +485,23 @@ function whatsappHref(message) {
 
 function renderDays() {
   dayStrip.innerHTML = "";
-  for (let index = 0; index < 7; index += 1) {
-    const date = todayDate(index);
-    const active = isActiveDay(index);
+  businessDayOffsets().forEach((offset) => {
+    const date = todayDate(offset);
+    const active = isActiveDay(offset) && !isPastDay(offset);
     const button = document.createElement("button");
     button.type = "button";
     button.disabled = !active;
-    button.className = `day-card${state.selectedDay === index ? " active" : ""}${!active ? " past" : ""}`;
+    button.className = `day-card${state.selectedDay === offset ? " active" : ""}${!active ? " past" : ""}`;
     button.innerHTML = `<strong>${dayLabel(date)}</strong><span>${dateLabel(date)}</span>`;
     button.addEventListener("click", async () => {
-      state.selectedDay = index;
+      state.selectedDay = offset;
       state.selectedSlot = "";
-      state.selectedDate = isoDate(index);
+      state.selectedDate = isoDate(offset);
       await loadReservationsForSelectedDate();
       render();
     });
     dayStrip.appendChild(button);
-  }
+  });
 }
 
 function renderStations() {
@@ -594,6 +615,7 @@ function renderPaymentOptions() {
   const selectedDuration = Number(range?.duration || durationInput?.value || 0);
   const projectedBalance = Number(plan?.remainingMinutes || 0) - selectedDuration;
   if (planPaymentOption) planPaymentOption.classList.toggle("is-hidden", !activePlan);
+  paymentOptions?.classList.toggle("has-plan", Boolean(activePlan));
   if (!activePlan && selectedPaymentType() === "plano") {
     const avulsoInput = document.querySelector("input[name='paymentType'][value='avulso']");
     if (avulsoInput) avulsoInput.checked = true;
@@ -628,7 +650,7 @@ function renderPaymentOptions() {
       return;
     }
 
-    planStatus.textContent = "Pagamento avulso disponível. Se você possui plano mensal, digite o WhatsApp cadastrado.";
+    planStatus.textContent = "Pix disponível. Se você possui plano mensal, digite o WhatsApp cadastrado.";
   }
 }
 
@@ -654,7 +676,7 @@ function renderReservationPreview() {
     <span>Início: ${range.startTime} · Término: ${range.endTime}</span>
     <span>Duração: ${range.duration / 60} ${range.duration === 60 ? "hora" : "horas"}</span>
     <span>Valor total: ${formatMoney(priceForDuration(range.duration))}</span>
-    <span>Pagamento: ${selectedPaymentType() === "plano" ? "Usar plano mensal" : "Pagamento avulso"}</span>
+    <span>Pagamento: ${selectedPaymentType() === "plano" ? "Usar plano mensal" : "Pix"}</span>
     <span>Nome: ${customerNameInput?.value || "preencha seu nome"}</span>
     <span>Telefone: ${customerPhoneInput?.value || "preencha seu WhatsApp"}</span>
   `;
@@ -740,13 +762,16 @@ function renderPixButton() {
     pixButton = document.createElement("button");
     pixButton.type = "button";
     pixButton.className = "pix-button";
-    pixButton.addEventListener("click", handlePixPaymentClick);
-    const reserveButton = bookingForm.querySelector(".reserve-button");
-    reserveButton?.insertAdjacentElement("afterend", pixButton);
+    pixButton.addEventListener("click", () => {
+      const avulsoInput = bookingForm.querySelector("input[name='paymentType'][value='avulso']");
+      if (avulsoInput) avulsoInput.checked = true;
+      handlePixPaymentClick();
+    });
+    paymentOptions?.insertBefore(pixButton, planPaymentOption || null);
   }
 
   pixButton.disabled = state.pixLoading;
-  pixButton.textContent = state.pixLoading ? "Gerando Pix..." : "Pagar agora com Pix";
+  pixButton.textContent = state.pixLoading ? "Gerando Pix..." : "Pagar com Pix";
 }
 
 function ensurePixPaymentView() {
@@ -1007,11 +1032,24 @@ document.querySelectorAll("[data-view]").forEach((control) => {
 });
 
 document.querySelector("#todayButton").addEventListener("click", async () => {
-  state.selectedDay = 0;
+  state.selectedDay = todayDate(0).getDay() === 0 ? 1 : 0;
   state.selectedSlot = "";
-  state.selectedDate = isoDate(0);
+  state.selectedDate = isoDate(state.selectedDay);
   await loadReservationsForSelectedDate();
   render();
+});
+
+planPaymentOption?.addEventListener("click", () => {
+  if (planPaymentOption.classList.contains("is-hidden")) return;
+  const planInput = planPaymentOption.querySelector("input[name='paymentType']");
+  if (planInput) planInput.checked = true;
+  bookingForm?.requestSubmit();
+});
+
+document.querySelectorAll(".plan-pix-button").forEach((button) => {
+  button.addEventListener("click", () => {
+    showToast("Contratação de planos por Pix será ativada na próxima etapa. Use o WhatsApp para contratar este plano agora.");
+  });
 });
 
 durationInput.addEventListener("change", () => {
@@ -1143,7 +1181,8 @@ document.querySelector("#copyMessage").addEventListener("click", async () => {
 });
 
 async function start() {
-  state.selectedDate = isoDate(0);
+  state.selectedDay = todayDate(0).getDay() === 0 ? 1 : 0;
+  state.selectedDate = isoDate(state.selectedDay);
   await loadArenaData();
   render();
   await handleExistingPaymentRoute();

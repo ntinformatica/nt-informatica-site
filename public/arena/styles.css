@@ -339,21 +339,28 @@ h2 {
 
 .payment-options {
   display: grid;
-  gap: 10px;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.payment-options.has-plan {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .payment-option {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  min-height: 46px;
-  padding: 12px 14px;
+  min-height: 42px;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, .05);
   color: rgba(255, 255, 255, .84);
-  font-size: .9rem;
-  font-weight: 800;
+  font-size: .82rem;
+  font-weight: 900;
+  text-align: center;
   cursor: pointer;
 }
 
@@ -444,32 +451,32 @@ h2 {
 
 .day-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
   padding: 0;
 }
 
 .day-card {
   display: grid;
   place-items: center;
-  min-height: 64px;
+  min-height: 58px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
   color: var(--text);
   text-align: center;
-  padding: 8px 6px;
+  padding: 7px 4px;
 }
 
 .day-card strong {
-  font-size: 13px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
 .day-card span {
   display: block;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .day-card.active {
@@ -624,17 +631,20 @@ h2 {
 
 .info-card {
   display: grid;
-  align-content: start;
-  min-height: 104px;
+  align-content: stretch;
+  min-height: 190px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(21, 25, 31, .78);
   padding: 14px;
+  text-align: center;
 }
 
 .info-card span {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  justify-self: center;
   min-height: 24px;
   border-radius: 999px;
   background: rgba(49, 214, 255, .13);
@@ -680,18 +690,31 @@ h2 {
 .plan-button {
   display: grid;
   place-items: center;
+  width: 100%;
   min-height: 36px;
-  margin-top: 12px;
+  margin-top: 10px;
   border-radius: 8px;
+  border: 0;
   background: rgba(37, 211, 102, .16);
   color: #7dffad;
   font-size: 12px;
   font-weight: 950;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .plan-button:hover {
   background: rgba(37, 211, 102, .24);
+}
+
+.plan-pix-button {
+  margin-top: auto;
+  background: rgba(49, 214, 255, .14);
+  color: var(--cyan);
+}
+
+.plan-pix-button:hover {
+  background: rgba(49, 214, 255, .22);
 }
 
 label {
@@ -776,16 +799,20 @@ textarea {
 }
 
 .pix-button {
-  min-height: 54px;
+  min-height: 42px;
   border: 1px solid rgba(49, 214, 255, .44);
   border-radius: 8px;
   background: rgba(49, 214, 255, .12);
   color: var(--cyan);
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 950;
   letter-spacing: 0;
   text-transform: uppercase;
   transition: transform .18s ease, background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.client-reserve-button {
+  display: none;
 }
 
 .pix-button:hover:not(:disabled) {
@@ -1021,7 +1048,8 @@ details p {
   }
 
   .day-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px;
   }
 
   .slot-grid {
@@ -1048,7 +1076,7 @@ details p {
   }
 
   .day-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
   .view.active#schedule-view {
