@@ -898,7 +898,6 @@ function renderPlanPixModal() {
         <span>${plan.hours} horas por ${plan.validityDays} dias</span>
         <span>Valor total: ${formatMoney(plan.price)}</span>
         <span>Equivale a ${formatMoney(plan.hourly)} por hora</span>
-        <span>Recompra: novas horas e validade sÃ£o somadas ao saldo atual quando o pagamento for aprovado.</span>
       </div>
 
       <label>
