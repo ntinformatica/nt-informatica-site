@@ -29,8 +29,6 @@ const fallbackStations = [
   { id: "local-ps5", name: "PlayStation 5", type: "ps5", description: "Modo local de teste", active: true, sortOrder: 20 },
 ];
 
-const businessWeekDays = [1, 2, 3, 4, 5, 6];
-
 const state = {
   selectedDay: 0,
   selectedDate: "",
@@ -98,11 +96,17 @@ function isoDate(offset = state.selectedDay) {
 }
 
 function businessDayOffsets() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const day = today.getDay();
-  const mondayOffset = day === 0 ? 1 : 1 - day;
-  return businessWeekDays.map((_, index) => mondayOffset + index);
+  const offsets = [];
+  for (let offset = 0; offsets.length < 6 && offset < 14; offset += 1) {
+    const date = todayDate(offset);
+    const day = date.getDay();
+    if (day !== 0 && isActiveDay(offset)) offsets.push(offset);
+  }
+  return offsets;
+}
+
+function firstAvailableDayOffset() {
+  return businessDayOffsets()[0] || 0;
 }
 
 function dayLabel(date) {
@@ -1032,7 +1036,7 @@ document.querySelectorAll("[data-view]").forEach((control) => {
 });
 
 document.querySelector("#todayButton").addEventListener("click", async () => {
-  state.selectedDay = todayDate(0).getDay() === 0 ? 1 : 0;
+  state.selectedDay = firstAvailableDayOffset();
   state.selectedSlot = "";
   state.selectedDate = isoDate(state.selectedDay);
   await loadReservationsForSelectedDate();
@@ -1181,9 +1185,9 @@ document.querySelector("#copyMessage").addEventListener("click", async () => {
 });
 
 async function start() {
-  state.selectedDay = todayDate(0).getDay() === 0 ? 1 : 0;
-  state.selectedDate = isoDate(state.selectedDay);
   await loadArenaData();
+  state.selectedDay = firstAvailableDayOffset();
+  state.selectedDate = isoDate(state.selectedDay);
   render();
   await handleExistingPaymentRoute();
 }
