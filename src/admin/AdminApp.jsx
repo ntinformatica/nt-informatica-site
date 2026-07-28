@@ -2614,7 +2614,9 @@ const arenaPaymentStatusLabels = {
   created: "Pagamento criado",
   pending: "Aguardando pagamento",
   processing: "Pagamento em processamento",
+  approved: "Aprovado",
   paid: "Pago",
+  rejected: "Recusado",
   failed: "Pagamento recusado",
   cancelled: "Cancelado",
   expired: "Expirado",
@@ -2971,7 +2973,7 @@ function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscri
             {planPayments.slice(0, 8).map((payment) => (
               <div key={payment.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
                 <strong className="text-white">{payment.customerName} · {payment.planName}</strong>
-                <p>{formatCurrency(payment.amount)} · {paymentStatusLabel(payment.status === "approved" ? "paid" : payment.status)}</p>
+                <p>{formatCurrency(payment.amount)} · {arenaPaymentStatusLabel(payment.status)}</p>
                 <p>{payment.approvedAt ? `Aprovado em ${formatDateTimeLabel(payment.approvedAt)}` : `Criado em ${formatDateTimeLabel(payment.createdAt)}`}</p>
               </div>
             ))}
