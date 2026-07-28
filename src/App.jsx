@@ -520,24 +520,30 @@ function Arena() {
       description="A Arena Gamer da NT foi pensada para partidas casuais, treinos, eventos e campeonatos com estrutura moderna."
     >
       <div className="grid gap-8 lg:grid-cols-[1fr_1.2fr]">
-        <Card>
-          <div className="relative overflow-hidden rounded-lg border border-nt-cyan/25">
-            <img src={arenaImage} alt="Arena Gamer da NT Informática" className="aspect-[4/3] w-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-t from-nt-ink via-nt-ink/20 to-transparent" />
-            <div className="absolute bottom-0 left-0 right-0 p-5">
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-nt-cyan">NT Gaming</p>
-              <h3 className="mt-2 text-2xl font-black text-white">Arena Gamer pronta para sua próxima partida.</h3>
-            </div>
-          </div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            {arenaFeatures.map((item) => (
-              <div key={item} className="flex items-center gap-3 rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
-                <CheckCircle2 className="shrink-0 text-nt-cyan" size={18} />
-                {item}
+        <a
+          href={arenaBookingUrl}
+          aria-label="Ver horários da NT Arena Gamer"
+          className="group block rounded-lg text-inherit outline-none transition focus-visible:ring-2 focus-visible:ring-nt-cyan focus-visible:ring-offset-2 focus-visible:ring-offset-nt-ink"
+        >
+          <Card className="h-full cursor-pointer transition duration-200 group-hover:-translate-y-0.5 group-hover:shadow-glow">
+            <div className="relative overflow-hidden rounded-lg border border-nt-cyan/25">
+              <img src={arenaImage} alt="Arena Gamer da NT Informática" className="aspect-[4/3] w-full object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-t from-nt-ink via-nt-ink/20 to-transparent" />
+              <div className="absolute bottom-0 left-0 right-0 p-5">
+                <p className="text-xs font-bold uppercase tracking-[0.22em] text-nt-cyan">NT Gaming</p>
+                <h3 className="mt-2 text-2xl font-black text-white">Arena Gamer pronta para sua próxima partida.</h3>
               </div>
-            ))}
-          </div>
-        </Card>
+            </div>
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              {arenaFeatures.map((item) => (
+                <div key={item} className="flex items-center gap-3 rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                  <CheckCircle2 className="shrink-0 text-nt-cyan" size={18} />
+                  {item}
+                </div>
+              ))}
+            </div>
+          </Card>
+        </a>
 
         <div className="grid gap-5">
           <div className="grid gap-4 md:grid-cols-3">
