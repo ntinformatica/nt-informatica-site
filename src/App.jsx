@@ -39,7 +39,7 @@ import { AdminApp } from "./admin/AdminApp";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { listPublicGames } from "./admin/services/gameLibraryService";
 import { listPublicAssembledPcs, pcCategories, pcTypeLabel, pcTypeOptions } from "./admin/services/assembledPcService";
-import { classifyFps, formatBenchmarkResolution, formatFps, isValidHttpUrl, normalizeProductBenchmark, resolveBenchmarkGamesWithLibrary } from "./utils/pcBenchmark";
+import { classifyFps, formatBenchmarkResolution, formatFps, getGameImage, isValidHttpUrl, normalizeProductBenchmark, resolveBenchmarkGamesWithLibrary } from "./utils/pcBenchmark";
 import {
   arenaFeatures,
   arenaBookingUrl,
@@ -1177,6 +1177,10 @@ function NtTestedBadge({ children = "Testado pela NT" }) {
 
 function GameCover({ game }) {
   const [failed, setFailed] = useState(false);
+  const coverUrl = getGameImage(game);
+  useEffect(() => {
+    setFailed(false);
+  }, [coverUrl]);
   const initials = String(game.name || "Jogo")
     .split(/\s+/)
     .filter(Boolean)
@@ -1185,7 +1189,7 @@ function GameCover({ game }) {
     .join("")
     .toUpperCase();
 
-  if (!game.coverUrl || failed) {
+  if (!coverUrl || failed) {
     return (
       <div className="grid aspect-[3/4] place-items-center rounded-lg border border-white/10 bg-gradient-to-br from-nt-blue/30 via-slate-900 to-nt-cyan/10 p-5 text-center">
         <div>
@@ -1198,10 +1202,13 @@ function GameCover({ game }) {
 
   return (
     <img
-      src={game.coverUrl}
+      src={coverUrl}
       alt={"Capa do jogo " + game.name}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => {
+        if (!failed) console.warn("Falha ao carregar capa de jogo no site publico:", { game: game.name, url: coverUrl });
+        setFailed(true);
+      }}
       className="aspect-[3/4] w-full rounded-lg border border-white/10 object-cover"
     />
   );

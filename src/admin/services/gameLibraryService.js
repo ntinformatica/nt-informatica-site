@@ -1,5 +1,5 @@
 import { isSupabaseConfigured, supabaseRequest } from "../../lib/supabase";
-import { normalizeGameLibraryName } from "../../utils/pcBenchmark";
+import { getGameImage, normalizeGameLibraryName } from "../../utils/pcBenchmark";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
 
 const gameLibraryStorageKey = "nt-admin-game-library-v1";
@@ -27,7 +27,7 @@ export function normalizeGame(data = {}) {
     id: String(data.id || uniqueId()),
     name,
     slug: data.slug || slugify(name),
-    coverUrl: data.coverUrl || data.cover_url || "",
+    coverUrl: getGameImage(data),
     createdAt: data.createdAt || data.created_at || "",
     updatedAt: data.updatedAt || data.updated_at || "",
   };
@@ -69,7 +69,12 @@ export async function listGames() {
 }
 
 export async function listPublicGames() {
-  return listGames();
+  if (!isSupabaseConfigured) return [];
+
+  const rows = await supabaseRequest("/game_library?select=*&order=name.asc", {
+    forceAnon: true,
+  });
+  return rows.map(fromSupabase).sort(sortByName);
 }
 
 export async function createGame(data) {

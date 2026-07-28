@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { businessName } from "../data/siteData";
-import { createBenchmarkGameId, duplicateBenchmarkGames, normalizeGameLibraryName, normalizeProductBenchmark } from "../utils/pcBenchmark";
+import { createBenchmarkGameId, duplicateBenchmarkGames, getGameImage, normalizeGameLibraryName, normalizeProductBenchmark } from "../utils/pcBenchmark";
 import {
   deleteStorageFile,
   isSupabaseConfigured,
@@ -1178,7 +1178,7 @@ function GameCoverSearch({ game, onSelect }) {
 function BenchmarkGameEditor({ game, index, total, libraryGame, onChange, onMove, onDuplicate, onRemove, onSaveToLibrary }) {
   const [expanded, setExpanded] = useState(index === 0);
   const displayName = libraryGame?.name || game.name;
-  const displayCover = libraryGame?.coverUrl || game.coverUrl;
+  const displayCover = getGameImage(libraryGame) || getGameImage(game);
   const title = `Jogo ${index + 1} — ${displayName?.trim() || "Novo jogo"}`;
 
   function updateGame(field, value) {
@@ -1212,7 +1212,7 @@ function BenchmarkGameEditor({ game, index, total, libraryGame, onChange, onMove
               <TextField label="ID externo" value={game.externalGameId} onChange={(value) => updateGame("externalGameId", value)} placeholder="Opcional" />
             </div>
             {!libraryGame ? <GameCoverSearch game={game} onSelect={(result) => onChange({ ...game, ...result })} /> : null}
-            <TextField label="URL manual da capa" value={libraryGame?.coverUrl || game.coverUrl} onChange={(value) => updateGame("coverUrl", value)} placeholder="https://..." readOnly={Boolean(libraryGame)} />
+            <TextField label="URL manual da capa" value={getGameImage(libraryGame) || getGameImage(game)} onChange={(value) => updateGame("coverUrl", value)} placeholder="https://..." readOnly={Boolean(libraryGame)} />
             {!libraryGame && game.name ? <AdminButton type="button" variant="secondary" onClick={() => onSaveToLibrary(index)}>Salvar este jogo na biblioteca</AdminButton> : null}
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               <TextField label="Preset gráfico" value={game.graphicsPreset} onChange={(value) => updateGame("graphicsPreset", value)} placeholder="Alto, Médio, Baixo, Ultra..." />
@@ -1373,10 +1373,14 @@ function BenchmarkAdminSection({ form, pcs, gameLibrary, updateField, onSaveGame
 
 function GameLibraryImage({ game, className = "h-16 w-12" }) {
   const [failed, setFailed] = useState(false);
-  if (!game.coverUrl || failed) {
+  const coverUrl = getGameImage(game);
+  useEffect(() => {
+    setFailed(false);
+  }, [coverUrl]);
+  if (!coverUrl || failed) {
     return <div className={`grid place-items-center rounded-md border border-white/10 bg-white/5 text-xs font-black text-slate-500 ${className}`}>Jogo</div>;
   }
-  return <img src={game.coverUrl} alt="" onError={() => setFailed(true)} className={`rounded-md border border-white/10 object-cover ${className}`} />;
+  return <img src={coverUrl} alt="" onError={() => setFailed(true)} className={`rounded-md border border-white/10 object-cover ${className}`} />;
 }
 
 function GameLibraryPage({ games, pcs, onCreate, onUpdate, onDelete, onMigrate }) {

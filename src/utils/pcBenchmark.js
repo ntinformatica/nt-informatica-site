@@ -18,6 +18,31 @@ export function cleanUrl(value) {
   return isValidHttpUrl(trimmed) ? trimmed : "";
 }
 
+const gameImageFields = [
+  "coverUrl",
+  "cover_url",
+  "imageUrl",
+  "image_url",
+  "image",
+  "logoUrl",
+  "logo_url",
+  "logo",
+  "cover",
+  "thumbnailUrl",
+  "thumbnail_url",
+  "thumbnail",
+  "gameImage",
+  "game_image",
+];
+
+export function getGameImage(game = {}) {
+  for (const field of gameImageFields) {
+    const url = cleanUrl(game?.[field]);
+    if (url) return url;
+  }
+  return "";
+}
+
 export function normalizeFps(value) {
   if (value === "" || value === null || value === undefined) return "";
   const normalized = String(value).trim().replace(",", ".");
@@ -92,7 +117,7 @@ export function normalizeBenchmarkGame(game = {}) {
     gameId: String(game.gameId || game.game_id || ""),
     externalGameId: String(game.externalGameId || game.external_game_id || ""),
     name: String(game.name || "").trim(),
-    coverUrl: cleanUrl(game.coverUrl || game.cover_url),
+    coverUrl: getGameImage(game),
     graphicsPreset: String(game.graphicsPreset || game.graphics_preset || "").trim(),
     resolution: String(game.resolution || "").trim(),
     resolutionDetail: String(game.resolutionDetail || game.resolution_detail || "").trim(),
@@ -171,13 +196,14 @@ export function normalizeGameLibraryName(value) {
 
 export function resolveBenchmarkGamesWithLibrary(games = [], library = []) {
   const byId = new Map((library || []).map((game) => [String(game.id), game]));
+  const byName = new Map((library || []).map((game) => [normalizeGameLibraryName(game.name), game]));
   return normalizeBenchmarkGames(games).map((benchmark) => {
-    const libraryGame = benchmark.gameId ? byId.get(String(benchmark.gameId)) : null;
+    const libraryGame = (benchmark.gameId ? byId.get(String(benchmark.gameId)) : null) || byName.get(normalizeGameLibraryName(benchmark.name));
     if (!libraryGame) return benchmark;
     return {
       ...benchmark,
       name: libraryGame.name || benchmark.name,
-      coverUrl: libraryGame.coverUrl || benchmark.coverUrl,
+      coverUrl: getGameImage(libraryGame) || getGameImage(benchmark),
     };
   });
 }
