@@ -1436,13 +1436,13 @@ function PcNotFound({ slug }) {
   );
 }
 
-function ComputersPage() {
+function ComputersPage({ path, onNavigate, getNavHref }) {
   const { pcs, loading, error, localMode } = usePublicPcs();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("Todas");
   const [pcType, setPcType] = useState("Todos");
   const [sort, setSort] = useState("relevance");
-  const slug = getComputerSlugFromPath(window.location.pathname);
+  const slug = getComputerSlugFromPath(path || window.location.pathname);
   const selectedPc = slug ? pcs.find((pc) => pc.slug === slug || pc.id === slug) : null;
 
   const filteredPcs = useMemo(() => sortPcs(pcs.filter((pc) => {
@@ -1454,7 +1454,7 @@ function ComputersPage() {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
-      <Header />
+      <Header onNavigate={onNavigate} getNavHref={getNavHref} />
       <main className="pt-20">
         {loading ? <Section eyebrow="PCs Montados" title="Carregando computadores..."><p className="rounded-lg border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Buscando PCs publicados no Supabase.</p></Section> : error ? (
           <Section eyebrow="PCs Montados" title="Falha ao carregar computadores." description="Não foi possível consultar os PCs publicados agora. Tente novamente em instantes ou chame a NT Informática pelo WhatsApp.">
@@ -1534,17 +1534,57 @@ function Contact() {
 }
 
 export default function App() {
-  if (window.location.pathname.startsWith("/admin")) {
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const [pendingSection, setPendingSection] = useState(null);
+
+  useEffect(() => {
+    const handlePopState = () => setCurrentPath(window.location.pathname);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (currentPath !== "/" || !pendingSection) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (pendingSection === "inicio") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        document.getElementById(pendingSection)?.scrollIntoView({ behavior: "smooth" });
+      }
+      setPendingSection(null);
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [currentPath, pendingSection]);
+
+  const getNavHref = (id) => {
+    if (currentPath.startsWith("/computadores") && id === "arena") return arenaBookingUrl;
+    if (currentPath.startsWith("/computadores") && id === "produtos") return "/produtos";
+    return id === "inicio" ? "/" : `/#${id}`;
+  };
+
+  const handleNavigation = (id, event) => {
+    if (id === "arena" || id === "produtos") return;
+
+    event?.preventDefault();
+    const nextUrl = id === "inicio" ? "/" : `/#${id}`;
+    window.history.pushState({}, "", nextUrl);
+    setCurrentPath("/");
+    setPendingSection(id);
+  };
+
+  if (currentPath.startsWith("/admin")) {
     return <AdminApp />;
   }
 
-  if (window.location.pathname.startsWith("/computadores")) {
-    return <ComputersPage />;
+  if (currentPath.startsWith("/computadores")) {
+    return <ComputersPage path={currentPath} onNavigate={handleNavigation} getNavHref={getNavHref} />;
   }
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
-      <Header />
+      <Header onNavigate={handleNavigation} getNavHref={getNavHref} />
       <Hero />
       <Highlights />
       <WhyChoose />

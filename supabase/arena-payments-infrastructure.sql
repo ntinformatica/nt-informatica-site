@@ -670,6 +670,7 @@ declare
   v_expires_at timestamptz;
 begin
   perform public.expire_arena_pending_reservations();
+  perform public.lock_arena_station_day(p_station_id, p_reservation_date);
 
   if nullif(trim(coalesce(p_idempotency_key, '')), '') is not null then
     select reservation.*
@@ -677,15 +678,40 @@ begin
       from public.arena_payments payment
       join public.arena_reservations reservation on reservation.id = payment.reservation_id
       where payment.idempotency_key = trim(p_idempotency_key)
+        and payment.status in ('created', 'pending', 'processing')
+        and reservation.status = 'pendente_pagamento'
+        and reservation.active_payment_id = payment.id
+        and (payment.expires_at is null or payment.expires_at > now())
+        and (reservation.expires_at is null or reservation.expires_at > now())
       limit 1;
 
     if found then
       return next v_row;
       return;
     end if;
-  end if;
 
-  perform public.lock_arena_station_day(p_station_id, p_reservation_date);
+    update public.arena_payments payment
+      set idempotency_key = null,
+          metadata = coalesce(payment.metadata, '{}'::jsonb) || jsonb_build_object(
+            'previous_idempotency_key', payment.idempotency_key,
+            'released_idempotency_key_at', now(),
+            'released_idempotency_key_reason', 'non_reusable_pair'
+          ),
+          updated_at = now()
+      where payment.idempotency_key = trim(p_idempotency_key)
+        and not exists (
+          select 1
+            from public.arena_payments reusable_payment
+            join public.arena_reservations reusable_reservation
+              on reusable_reservation.id = reusable_payment.reservation_id
+            where reusable_payment.id = payment.id
+              and reusable_payment.status in ('created', 'pending', 'processing')
+              and reusable_reservation.status = 'pendente_pagamento'
+              and reusable_reservation.active_payment_id = reusable_payment.id
+              and (reusable_payment.expires_at is null or reusable_payment.expires_at > now())
+              and (reusable_reservation.expires_at is null or reusable_reservation.expires_at > now())
+        );
+  end if;
 
   select * into v_settings
     from public.arena_settings

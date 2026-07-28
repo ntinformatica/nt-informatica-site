@@ -1,4 +1,5 @@
 window.NT_SUPABASE_CONFIG = {
   "url": "",
-  "anonKey": ""
+  "anonKey": "",
+  "arenaPixEnabled": false
 };

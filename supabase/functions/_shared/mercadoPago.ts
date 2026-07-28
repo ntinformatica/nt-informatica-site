@@ -126,9 +126,15 @@ export async function createPixOrder(params: {
     external_reference: payment.id,
     description,
     total_amount: amount.toFixed(2),
-    notification_url: webhookUrl || undefined,
     payer: {
-      first_name: String(reservation.customer_name || "Cliente NT").slice(0, 60),
+      email: String(
+        reservation.customer_email ||
+        payment.customer_email ||
+        "ntinformaticacomercial@gmail.com"
+      ).trim(),
+      first_name: String(
+        reservation.customer_name || "Cliente NT"
+      ).slice(0, 60),
     },
     transactions: {
       payments: [

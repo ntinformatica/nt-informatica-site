@@ -2,6 +2,7 @@ import { handleCors } from "../_shared/cors.ts";
 import { fail, ok } from "../_shared/responses.ts";
 import { getSingle, supabaseRpc } from "../_shared/supabaseAdmin.ts";
 import { readJson, requireUuid } from "../_shared/validation.ts";
+import { arenaFinalPaymentStatuses, arenaInitialPaymentStatuses, canGenerateArenaPix } from "../_shared/arenaPaymentStatus.ts";
 
 Deno.serve(async (request) => {
   const cors = handleCors(request);
@@ -39,6 +40,8 @@ Deno.serve(async (request) => {
       reservation = await getSingle(`/arena_reservations?id=eq.${encodeURIComponent(String(payment.reservation_id))}&limit=1`);
     }
 
+    const pixEligibility = payment && reservation ? canGenerateArenaPix(payment, reservation) : { ok: false, message: "Pagamento ou reserva nao encontrados.", details: {} };
+
     return ok(request, {
       payment: {
         id: payment.id,
@@ -55,6 +58,9 @@ Deno.serve(async (request) => {
         metadata: {
           pix: payment.metadata?.pix || null,
         },
+        canGeneratePix: pixEligibility.ok,
+        initialStatuses: arenaInitialPaymentStatuses,
+        finalStatuses: arenaFinalPaymentStatuses,
       },
       reservation: reservation ? {
         id: reservation.id,
@@ -66,6 +72,7 @@ Deno.serve(async (request) => {
         totalPrice: reservation.total_price,
         status: reservation.status,
       } : null,
+      pixEligibility,
     });
   } catch (error) {
     console.error("get-arena-payment-status", error);
