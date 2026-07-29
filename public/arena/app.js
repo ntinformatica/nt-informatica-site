@@ -7,6 +7,12 @@ const supabaseAnonKey = String(supabaseConfig.anonKey || "").trim();
 const arenaPixEnabled = supabaseConfig.arenaPixEnabled === true || String(supabaseConfig.arenaPixEnabled || "").toLowerCase() === "true";
 const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 const functionsUrl = supabaseUrl ? `${supabaseUrl}/functions/v1` : "";
+const mercadoPagoConfig = window.NT_ARENA_MERCADO_PAGO_CONFIG || {};
+const mercadoPagoPublicKey = String(mercadoPagoConfig.publicKey || "").trim();
+
+let arenaMercadoPagoClient = null;
+let arenaMercadoPagoBricksBuilder = null;
+let arenaCardPaymentBrickController = null;
 
 const fallbackSettings = {
   pricePerHour: 20,
@@ -844,6 +850,82 @@ function planPaymentIsApproved(status) {
   return String(status || "") === "approved";
 }
 
+function setArenaCardPaymentBrickStatus(message = "", tone = "muted") {
+  const status = document.querySelector("#cardPaymentBrickStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.classList.toggle("is-hidden", !message);
+  status.dataset.tone = tone;
+}
+
+function ensureArenaMercadoPagoBricksBuilder() {
+  if (arenaMercadoPagoBricksBuilder) return arenaMercadoPagoBricksBuilder;
+  if (!window.MercadoPago) {
+    throw new Error("Mercado Pago SDK indisponível.");
+  }
+  if (!mercadoPagoPublicKey) {
+    throw new Error("Public Key do Mercado Pago não configurada.");
+  }
+
+  arenaMercadoPagoClient = new window.MercadoPago(mercadoPagoPublicKey);
+  arenaMercadoPagoBricksBuilder = arenaMercadoPagoClient.bricks();
+  return arenaMercadoPagoBricksBuilder;
+}
+
+async function unmountArenaCardPaymentBrick() {
+  if (!arenaCardPaymentBrickController) return;
+  try {
+    await arenaCardPaymentBrickController.unmount();
+  } catch (error) {
+    console.warn("Falha ao desmontar Brick de cartão da Arena.", error);
+  } finally {
+    arenaCardPaymentBrickController = null;
+  }
+}
+
+async function renderArenaCardPaymentBrick() {
+  const container = document.querySelector("#cardPaymentBrick_container");
+  if (!container) return;
+
+  await unmountArenaCardPaymentBrick();
+  setArenaCardPaymentBrickStatus("Carregando formulário seguro...", "loading");
+
+  try {
+    const amount = Number(state.selectedPlan?.price || 0);
+    if (!amount || amount <= 0) {
+      throw new Error("Valor do plano inválido para o cartão.");
+    }
+
+    const bricksBuilder = ensureArenaMercadoPagoBricksBuilder();
+    arenaCardPaymentBrickController = await bricksBuilder.create(
+      "cardPayment",
+      "cardPaymentBrick_container",
+      {
+        initialization: {
+          amount,
+        },
+        callbacks: {
+          onReady: () => {
+            setArenaCardPaymentBrickStatus("", "ready");
+          },
+          onSubmit: () => {
+            const message = "Pagamento por cartão ainda está em configuração.";
+            setArenaCardPaymentBrickStatus(message, "warning");
+            return Promise.reject(new Error(message));
+          },
+          onError: (error) => {
+            console.error("Erro no Brick de cartão da Arena.", error);
+            setArenaCardPaymentBrickStatus("Não foi possível carregar o formulário do cartão. Tente novamente.", "error");
+          },
+        },
+      }
+    );
+  } catch (error) {
+    console.error("Falha ao inicializar Brick de cartão da Arena.", error);
+    setArenaCardPaymentBrickStatus("Não foi possível carregar o formulário do cartão. Tente novamente.", "error");
+  }
+}
+
 function ensurePlanPixModal() {
   let modal = document.querySelector("#planPixModal");
   if (modal) return modal;
@@ -860,6 +942,7 @@ function ensurePlanPixModal() {
 
 function closePlanPixModal() {
   stopPlanPaymentPolling();
+  void unmountArenaCardPaymentBrick();
   const modal = document.querySelector("#planPixModal");
   modal?.classList.remove("active");
   state.planPaymentStep = "choice";
@@ -882,12 +965,13 @@ function renderPlanPixModal() {
 
   const renderShell = (content) => `
     <div class="plan-pix-card" role="dialog" aria-modal="true" aria-labelledby="planPixTitle">
-      <button class="plan-pix-close" type="button" aria-label="Fechar">Ãƒâ€”</button>
+      <button class="plan-pix-close" type="button" aria-label="Fechar">&times;</button>
       ${content}
     </div>
   `;
 
   if (!payment && state.planPaymentStep === "choice") {
+    void unmountArenaCardPaymentBrick();
     modal.innerHTML = renderShell(`
       <p class="eyebrow">Plano mensal da Arena</p>
       <h2 id="planPixTitle">${plan.name}</h2>
@@ -913,6 +997,7 @@ function renderPlanPixModal() {
 
     modal.querySelector(".plan-pix-close")?.addEventListener("click", closePlanPixModal);
     modal.querySelector("#choosePlanPixButton")?.addEventListener("click", () => {
+      void unmountArenaCardPaymentBrick();
       state.planPaymentStep = "pix";
       renderPlanPixModal();
     });
@@ -935,18 +1020,10 @@ function renderPlanPixModal() {
         <span>Valor do plano: ${formatMoney(plan.price)}</span>
       </div>
 
-      <div class="card-payment-form" aria-label="Prévia do pagamento por cartão">
+      <div class="card-payment-form" aria-label="Identificação do cliente para pagamento por cartão">
         <label>
           Nome completo
           <input type="text" autocomplete="name" value="${customerNameInput?.value || ""}" placeholder="Seu nome completo">
-        </label>
-        <label>
-          CPF
-          <input type="text" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00">
-        </label>
-        <label>
-          E-mail
-          <input type="email" autocomplete="email" placeholder="seuemail@exemplo.com">
         </label>
         <label>
           Telefone
@@ -955,20 +1032,22 @@ function renderPlanPixModal() {
       </div>
 
       <div class="card-provider-placeholder">
-        O formulário seguro do cartão será carregado aqui.
+        <div class="card-brick-status" id="cardPaymentBrickStatus" data-tone="loading">Carregando formulário seguro...</div>
+        <div id="cardPaymentBrick_container"></div>
       </div>
 
       <div class="card-payment-actions">
         <button class="ghost-button" type="button" id="backToPlanPaymentChoice">Voltar</button>
-        <button class="primary-button reserve-button" type="button" disabled>Continuar indisponível</button>
       </div>
     `);
 
     modal.querySelector(".plan-pix-close")?.addEventListener("click", closePlanPixModal);
     modal.querySelector("#backToPlanPaymentChoice")?.addEventListener("click", () => {
+      void unmountArenaCardPaymentBrick();
       state.planPaymentStep = "choice";
       renderPlanPixModal();
     });
+    void renderArenaCardPaymentBrick();
     return;
   }
 

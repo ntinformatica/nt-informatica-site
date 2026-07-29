@@ -1133,14 +1133,53 @@ details p {
 
 .card-provider-placeholder {
   display: grid;
+  gap: 12px;
   min-height: 108px;
-  place-items: center;
+  align-items: start;
   border: 1px dashed rgba(49, 214, 255, .35);
   border-radius: 8px;
   background: rgba(49, 214, 255, .07);
   color: var(--muted);
-  padding: 18px;
+  padding: 14px;
+  text-align: left;
+}
+
+.card-brick-status {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .05);
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
   text-align: center;
+}
+
+.card-brick-status[data-tone="error"] {
+  border-color: rgba(255, 76, 97, .4);
+  background: rgba(255, 76, 97, .1);
+  color: #ffd9df;
+}
+
+.card-brick-status[data-tone="warning"] {
+  border-color: rgba(255, 203, 92, .4);
+  background: rgba(255, 203, 92, .1);
+  color: #ffe5a9;
+}
+
+.card-brick-status.is-hidden {
+  display: none;
+}
+
+#cardPaymentBrick_container {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.card-payment-actions {
+  grid-template-columns: 1fr;
 }
 
 .card-payment-actions button:disabled {
