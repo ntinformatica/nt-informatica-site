@@ -984,13 +984,10 @@ function renderPlanPixModal() {
       </div>
 
       <div class="plan-payment-choice">
-        <p>Como deseja pagar?</p>
+        <p>Forma de pagamento</p>
         <div class="plan-payment-actions">
           <button class="primary-button reserve-button plan-payment-method pix" type="button" id="choosePlanPixButton">Pix</button>
-          <button class="ghost-button plan-payment-method card" type="button" id="choosePlanCardButton">
-            Cartão de crédito
-            <span>Em breve</span>
-          </button>
+          <button class="ghost-button plan-payment-method card" type="button" id="choosePlanCardButton">Cart&atilde;o de cr&eacute;dito</button>
         </div>
       </div>
     `);
