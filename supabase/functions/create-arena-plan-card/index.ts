@@ -65,6 +65,16 @@ function maskedDocument(value: unknown) {
   return digits.length <= 4 ? digits : `***${digits.slice(-4)}`;
 }
 
+function maskEmail(value: string) {
+  if (!value || !value.includes("@")) return "";
+  const [name, domain] = value.split("@");
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
+function debugBrickPayloadEnabled() {
+  return String(Deno.env.get("DEBUG_ARENA_CARD_PAYMENT") || "").toLowerCase() === "true";
+}
+
 function failureStatus(status: string) {
   if (status === "cancelled") return "cancelled";
   if (status === "refunded") return "refunded";
@@ -149,12 +159,25 @@ Deno.serve(async (request) => {
     const installments = safeInstallments(cardPayload.installments || nested(cardPayload, ["payment_method", "installments"]));
     const attemptId = firstText([payload.attemptId, payload.idempotencyAttemptId]);
 
+    if (debugBrickPayloadEnabled()) {
+      console.log("create-arena-plan-card brick fields", {
+        hasToken: Boolean(token),
+        issuerId: firstText([cardPayload.issuer_id, cardPayload.issuerId]),
+        paymentMethodId,
+        paymentTypeId: paymentTypeId || "(ausente)",
+        installments,
+        hasPayer: Boolean(cardPayload.payer),
+        payerEmail: maskEmail(payerEmail),
+        payerDocument: payerDocument ? "***" : "",
+      });
+    }
+
     if (!planIdentifier) return fail(request, "Plano obrigatorio.");
     if (!normalizedPhone) return fail(request, "WhatsApp obrigatorio.");
     if (!payerEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(payerEmail)) return fail(request, "E-mail obrigatorio para pagamento com cartao.");
     if (!token) return fail(request, "Token do cartao nao informado.");
     if (!paymentMethodId) return fail(request, "Bandeira do cartao nao informada.");
-    if (paymentTypeId !== "credit_card") return fail(request, "Somente cartao de credito e aceito.", 400, { paymentTypeId });
+    if (paymentTypeId && paymentTypeId !== "credit_card") return fail(request, "Somente cartao de credito e aceito.", 400, { paymentTypeId });
 
     const idempotencyKey = `arena-plan-card-${planIdentifier}-${normalizedPhone}-${attemptId || crypto.randomUUID()}`;
     const rows = await supabaseRpc("create_arena_plan_card_payment", {
