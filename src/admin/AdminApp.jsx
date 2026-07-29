@@ -2613,15 +2613,36 @@ function formatMinutesLabel(minutes) {
 const arenaPaymentStatusLabels = {
   created: "Pagamento criado",
   pending: "Aguardando pagamento",
+  action_required: "Aguardando pagamento",
+  in_process: "Em processamento",
   processing: "Pagamento em processamento",
-  approved: "Aprovado",
-  paid: "Pago",
-  rejected: "Recusado",
+  approved: "Pagamento aprovado",
+  processed: "Pagamento aprovado",
+  paid: "Pagamento aprovado",
+  accredited: "Pagamento aprovado",
+  rejected: "Pagamento recusado",
   failed: "Pagamento recusado",
   cancelled: "Cancelado",
+  canceled: "Cancelado",
   expired: "Expirado",
   partially_refunded: "Parcialmente reembolsado",
   refunded: "Reembolsado",
+  charged_back: "Contestação / chargeback",
+};
+
+const arenaPaymentStatusDetailLabels = {
+  insufficient_amount: "Limite ou saldo insuficiente",
+  invalid_card_token: "Token do cartão inválido",
+  cc_rejected_insufficient_amount: "Limite insuficiente",
+  cc_rejected_bad_filled_card_number: "Número do cartão inválido",
+  cc_rejected_bad_filled_date: "Validade do cartão inválida",
+  cc_rejected_bad_filled_security_code: "Código de segurança inválido",
+  cc_rejected_call_for_authorize: "Pagamento precisa ser autorizado com o banco",
+  cc_rejected_card_disabled: "Cartão desabilitado",
+  cc_rejected_duplicated_payment: "Pagamento duplicado",
+  cc_rejected_high_risk: "Pagamento recusado por análise de segurança",
+  cc_rejected_max_attempts: "Limite de tentativas excedido",
+  cc_rejected_other_reason: "Pagamento recusado pelo emissor",
 };
 
 const arenaPaymentMethodLabels = {
@@ -2635,7 +2656,33 @@ const arenaPaymentMethodLabels = {
 };
 
 function arenaPaymentStatusLabel(status) {
-  return arenaPaymentStatusLabels[status] || "Sem pagamento vinculado";
+  if (!status) return "Sem pagamento vinculado";
+  return arenaPaymentStatusLabels[String(status).toLowerCase()] || "Status desconhecido";
+}
+
+function readableTechnicalCode(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function arenaPaymentStatusDetailLabel(detail) {
+  const normalized = String(detail || "").trim().toLowerCase();
+  if (!normalized) return "";
+  return arenaPaymentStatusDetailLabels[normalized] || readableTechnicalCode(normalized);
+}
+
+function arenaPaymentTone(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (["approved", "paid", "processed", "accredited"].includes(normalized)) return "border-lime-300/30 text-lime-200";
+  if (["pending", "created", "action_required"].includes(normalized)) return "border-amber-300/30 text-amber-200";
+  if (["processing", "in_process"].includes(normalized)) return "border-sky-300/30 text-sky-200";
+  if (["failed", "rejected"].includes(normalized)) return "border-red-300/30 text-red-100";
+  if (["cancelled", "canceled", "expired"].includes(normalized)) return "border-slate-500/40 text-slate-300";
+  if (["refunded", "partially_refunded", "charged_back"].includes(normalized)) return "border-fuchsia-300/30 text-fuchsia-200";
+  return "border-slate-500/40 text-slate-300";
 }
 
 function arenaPaymentMethodLabel(method) {
@@ -2906,9 +2953,13 @@ function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscri
   const [assign, setAssign] = useState({ customerId: "", planId: plans[0]?.id || "", startDate: todayIsoDate(), amountPaid: "", notes: "", keepPreviousBalance: false });
 
   function planPaymentMethodLabel(payment) {
-    if (payment.paymentMethod === "card") return `Cartão de crédito${payment.installments ? ` · ${payment.installments}x` : ""}${payment.cardBrand ? ` · ${payment.cardBrand}` : ""}${payment.cardLastFour ? ` final ${payment.cardLastFour}` : ""}`;
+    if (payment.paymentMethod === "card") return `Cartão de crédito${payment.installments ? ` — ${payment.installments}x` : ""}${payment.cardBrand ? ` · ${payment.cardBrand}` : ""}${payment.cardLastFour ? ` final ${payment.cardLastFour}` : ""}`;
     if (payment.paymentMethod === "pix") return "Pix";
     return "Método não informado";
+  }
+
+  function planPaymentDetail(payment) {
+    return arenaPaymentStatusDetailLabel(payment.statusDetail || payment.failureReason);
   }
 
   function edit(plan) {
@@ -2979,11 +3030,12 @@ function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscri
             {planPayments.slice(0, 8).map((payment) => (
               <div key={payment.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
                 <strong className="text-white">{payment.customerName} · {payment.planName}</strong>
-                <p>{formatCurrency(payment.amount)} · {arenaPaymentStatusLabel(payment.status)}</p>
+                <p>{formatCurrency(payment.amount)} · <span className={`rounded-full border px-2 py-0.5 text-xs font-bold ${arenaPaymentTone(payment.status)}`}>{arenaPaymentStatusLabel(payment.status)}</span></p>
                 <p>{planPaymentMethodLabel(payment)}</p>
                 {payment.mercadoPagoOrderId ? <p>Order: {payment.mercadoPagoOrderId}</p> : null}
-                {payment.mercadoPagoTransactionId ? <p>Transação: {payment.mercadoPagoTransactionId}</p> : null}
-                {payment.failureReason ? <p>Falha: {payment.failureReason}</p> : null}
+                {payment.mercadoPagoPaymentId || payment.mercadoPagoTransactionId ? <p>Payment: {payment.mercadoPagoPaymentId || payment.mercadoPagoTransactionId}</p> : null}
+                {planPaymentDetail(payment) ? <p>Motivo: {planPaymentDetail(payment)}</p> : null}
+                {payment.statusDetail && !arenaPaymentStatusDetailLabels[String(payment.statusDetail).toLowerCase()] ? <p className="text-xs text-slate-500">Código: {payment.statusDetail}</p> : null}
                 <p>{payment.approvedAt ? `Aprovado em ${formatDateTimeLabel(payment.approvedAt)}` : `Criado em ${formatDateTimeLabel(payment.createdAt)}`}</p>
               </div>
             ))}

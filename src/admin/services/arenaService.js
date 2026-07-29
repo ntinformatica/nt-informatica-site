@@ -353,6 +353,18 @@ function fromPaymentEvent(row = {}) {
 }
 
 function fromPlanPayment(row = {}) {
+  const rawResponse = row.raw_response || {};
+  const mercadoPagoOrder = rawResponse.mercadoPagoOrder || rawResponse.mercadoPagoWebhookOrder || rawResponse.order || {};
+  const transaction = Array.isArray(mercadoPagoOrder?.transactions?.payments)
+    ? mercadoPagoOrder.transactions.payments[0] || {}
+    : {};
+  const statusDetail = row.status_detail
+    || row.failure_reason
+    || transaction.status_detail
+    || mercadoPagoOrder.status_detail
+    || row.metadata?.status_detail
+    || "";
+
   return {
     id: row.id,
     customerId: row.customer_id || "",
@@ -385,7 +397,8 @@ function fromPlanPayment(row = {}) {
     approvedAt: row.approved_at || "",
     paidAt: row.paid_at || "",
     failureReason: row.failure_reason || "",
-    rawResponse: row.raw_response || {},
+    statusDetail,
+    rawResponse,
     metadata: row.metadata || {},
     createdAt: row.created_at || "",
     updatedAt: row.updated_at || "",
