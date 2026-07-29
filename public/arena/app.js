@@ -1014,30 +1014,29 @@ function renderPlanPixModal() {
       <h2 id="planPixTitle">Pagamento por cartão de crédito</h2>
       <p>Compra única, sem assinatura. Parcelamento com juros conforme condições do cartão.</p>
 
-      <div class="pix-summary">
-        <span>${plan.name}</span>
-        <span>${plan.hours} horas por ${plan.validityDays} dias</span>
-        <span>Valor do plano: ${formatMoney(plan.price)}</span>
+      <div class="card-plan-summary">
+        <strong>${plan.name}</strong>
+        <span>${plan.hours} horas de Arena</span>
+        <span>Validade de ${plan.validityDays} dias</span>
+        <span>Ativa&ccedil;&atilde;o autom&aacute;tica ap&oacute;s aprova&ccedil;&atilde;o do pagamento</span>
+        <em>Total: ${formatMoney(plan.price)}</em>
       </div>
 
-      <div class="card-payment-form" aria-label="Identificação do cliente para pagamento por cartão">
-        <label>
-          Nome completo
-          <input type="text" autocomplete="name" value="${customerNameInput?.value || ""}" placeholder="Seu nome completo">
-        </label>
-        <label>
-          Telefone
-          <input type="tel" autocomplete="tel" value="${customerPhoneInput?.value || ""}" placeholder="(47) 99930-9344">
-        </label>
-      </div>
-
+      <p class="card-installment-note">As op&ccedil;&otilde;es de parcelamento ser&atilde;o exibidas conforme o seu cart&atilde;o.</p>
       <div class="card-provider-placeholder">
-        <div class="card-brick-status" id="cardPaymentBrickStatus" data-tone="loading">Carregando formulário seguro...</div>
+        <div class="card-brick-status" id="cardPaymentBrickStatus" data-tone="loading">Carregando formul&aacute;rio seguro...</div>
         <div id="cardPaymentBrick_container"></div>
       </div>
 
+      <div class="card-payment-form" aria-label="Identifica&ccedil;&atilde;o do cliente para pagamento por cart&atilde;o">
+        <label>
+          WhatsApp
+          <input type="tel" autocomplete="tel" value="${customerPhoneInput?.value || ""}" placeholder="(47) 99999-9999">
+        </label>
+      </div>
+
       <div class="card-payment-actions">
-        <button class="ghost-button" type="button" id="backToPlanPaymentChoice">Voltar</button>
+        <button class="ghost-button" type="button" id="backToPlanPaymentChoice">Cancelar compra</button>
       </div>
     `);
 

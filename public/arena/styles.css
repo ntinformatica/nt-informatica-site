@@ -1117,9 +1117,37 @@ details p {
   text-transform: uppercase;
 }
 
+.card-plan-summary {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(49, 214, 255, .24);
+  border-radius: 8px;
+  background: rgba(49, 214, 255, .08);
+  padding: 14px;
+  color: var(--muted);
+}
+
+.card-plan-summary strong,
+.card-plan-summary em {
+  color: var(--text);
+  font-style: normal;
+  font-weight: 950;
+}
+
+.card-plan-summary em {
+  margin-top: 4px;
+  color: var(--nt-cyan);
+}
+
+.card-installment-note {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .card-payment-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
