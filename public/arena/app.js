@@ -50,6 +50,7 @@ const state = {
   pixLoading: false,
   paymentStatusLoading: false,
   planPixLoading: false,
+  planPaymentStep: "choice",
   selectedPlan: null,
   currentPlanPayment: null,
   currentPlanPix: null,
@@ -861,6 +862,7 @@ function closePlanPixModal() {
   stopPlanPaymentPolling();
   const modal = document.querySelector("#planPixModal");
   modal?.classList.remove("active");
+  state.planPaymentStep = "choice";
   state.selectedPlan = null;
   state.currentPlanPayment = null;
   state.currentPlanPix = null;
@@ -875,6 +877,98 @@ function renderPlanPixModal() {
 
   if (!plan) {
     modal.innerHTML = "";
+    return;
+  }
+
+  const renderShell = (content) => `
+    <div class="plan-pix-card" role="dialog" aria-modal="true" aria-labelledby="planPixTitle">
+      <button class="plan-pix-close" type="button" aria-label="Fechar">Ãƒâ€”</button>
+      ${content}
+    </div>
+  `;
+
+  if (!payment && state.planPaymentStep === "choice") {
+    modal.innerHTML = renderShell(`
+      <p class="eyebrow">Plano mensal da Arena</p>
+      <h2 id="planPixTitle">${plan.name}</h2>
+      <p>${plan.description}</p>
+
+      <div class="pix-summary">
+        <span>${plan.hours} horas por ${plan.validityDays} dias</span>
+        <span>Valor total: ${formatMoney(plan.price)}</span>
+        <span>Equivale a ${formatMoney(plan.hourly)} por hora</span>
+      </div>
+
+      <div class="plan-payment-choice">
+        <p>Como deseja pagar?</p>
+        <div class="plan-payment-actions">
+          <button class="primary-button reserve-button plan-payment-method pix" type="button" id="choosePlanPixButton">Pix</button>
+          <button class="ghost-button plan-payment-method card" type="button" id="choosePlanCardButton">
+            Cartão de crédito
+            <span>Em breve</span>
+          </button>
+        </div>
+      </div>
+    `);
+
+    modal.querySelector(".plan-pix-close")?.addEventListener("click", closePlanPixModal);
+    modal.querySelector("#choosePlanPixButton")?.addEventListener("click", () => {
+      state.planPaymentStep = "pix";
+      renderPlanPixModal();
+    });
+    modal.querySelector("#choosePlanCardButton")?.addEventListener("click", () => {
+      state.planPaymentStep = "card";
+      renderPlanPixModal();
+    });
+    return;
+  }
+
+  if (!payment && state.planPaymentStep === "card") {
+    modal.innerHTML = renderShell(`
+      <p class="eyebrow">Pagamento por cartão em configuração</p>
+      <h2 id="planPixTitle">Pagamento por cartão de crédito</h2>
+      <p>Compra única, sem assinatura. Parcelamento com juros conforme condições do cartão.</p>
+
+      <div class="pix-summary">
+        <span>${plan.name}</span>
+        <span>${plan.hours} horas por ${plan.validityDays} dias</span>
+        <span>Valor do plano: ${formatMoney(plan.price)}</span>
+      </div>
+
+      <div class="card-payment-form" aria-label="Prévia do pagamento por cartão">
+        <label>
+          Nome completo
+          <input type="text" autocomplete="name" value="${customerNameInput?.value || ""}" placeholder="Seu nome completo">
+        </label>
+        <label>
+          CPF
+          <input type="text" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00">
+        </label>
+        <label>
+          E-mail
+          <input type="email" autocomplete="email" placeholder="seuemail@exemplo.com">
+        </label>
+        <label>
+          Telefone
+          <input type="tel" autocomplete="tel" value="${customerPhoneInput?.value || ""}" placeholder="(47) 99930-9344">
+        </label>
+      </div>
+
+      <div class="card-provider-placeholder">
+        O formulário seguro do cartão será carregado aqui.
+      </div>
+
+      <div class="card-payment-actions">
+        <button class="ghost-button" type="button" id="backToPlanPaymentChoice">Voltar</button>
+        <button class="primary-button reserve-button" type="button" disabled>Continuar indisponível</button>
+      </div>
+    `);
+
+    modal.querySelector(".plan-pix-close")?.addEventListener("click", closePlanPixModal);
+    modal.querySelector("#backToPlanPaymentChoice")?.addEventListener("click", () => {
+      state.planPaymentStep = "choice";
+      renderPlanPixModal();
+    });
     return;
   }
 
@@ -1267,6 +1361,7 @@ document.querySelectorAll(".plan-pix-button").forEach((button) => {
       return;
     }
     state.selectedPlan = plan;
+    state.planPaymentStep = "choice";
     state.currentPlanPayment = null;
     state.currentPlanPix = null;
     state.planPixLoading = false;

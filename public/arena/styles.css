@@ -1081,6 +1081,73 @@ details p {
   line-height: 1.45;
 }
 
+.plan-payment-choice {
+  display: grid;
+  gap: 12px;
+}
+
+.plan-payment-choice p {
+  color: var(--text);
+  font-weight: 900;
+}
+
+.plan-payment-actions,
+.card-payment-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.plan-payment-method {
+  min-height: 52px;
+}
+
+.plan-payment-method.card {
+  display: grid;
+  gap: 3px;
+  place-items: center;
+  text-align: center;
+}
+
+.plan-payment-method.card span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.card-payment-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.card-payment-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.card-provider-placeholder {
+  display: grid;
+  min-height: 108px;
+  place-items: center;
+  border: 1px dashed rgba(49, 214, 255, .35);
+  border-radius: 8px;
+  background: rgba(49, 214, 255, .07);
+  color: var(--muted);
+  padding: 18px;
+  text-align: center;
+}
+
+.card-payment-actions button:disabled {
+  cursor: not-allowed;
+  opacity: .58;
+}
+
 .plan-pix-close {
   position: absolute;
   top: 12px;
@@ -1095,6 +1162,14 @@ details p {
   color: var(--text);
   font-size: 24px;
   cursor: pointer;
+}
+
+@media (max-width: 520px) {
+  .plan-payment-actions,
+  .card-payment-actions,
+  .card-payment-form {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 390px) {
