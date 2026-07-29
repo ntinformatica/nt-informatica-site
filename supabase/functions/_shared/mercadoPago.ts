@@ -98,6 +98,44 @@ export function mercadoPagoExternalReference(order: Record<string, unknown>) {
   ]);
 }
 
+export function mercadoPagoPaymentTransaction(order: Record<string, unknown>) {
+  const transactions = order.transactions as Record<string, unknown> | undefined;
+  const payments = transactions?.payments;
+  return Array.isArray(payments) ? payments[0] as Record<string, unknown> | undefined : undefined;
+}
+
+export function mercadoPagoPaymentTransactionId(order: Record<string, unknown>) {
+  const payment = mercadoPagoPaymentTransaction(order);
+  return firstString([
+    payment?.id,
+    payment?.payment_id,
+    payment?.reference_id,
+  ]);
+}
+
+export function mercadoPagoPaymentMethod(order: Record<string, unknown>) {
+  const payment = mercadoPagoPaymentTransaction(order);
+  const method = payment?.payment_method;
+  return method && typeof method === "object" ? method as Record<string, unknown> : {};
+}
+
+export function sanitizeMercadoPagoPayload(input: unknown): unknown {
+  if (Array.isArray(input)) return input.map((item) => sanitizeMercadoPagoPayload(item));
+  if (!input || typeof input !== "object") return input;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    const normalizedKey = key.toLowerCase();
+    if (["token", "security_code", "cvv"].includes(normalizedKey)) continue;
+    if (normalizedKey.includes("card_number")) continue;
+    if (normalizedKey.includes("expiration_month")) continue;
+    if (normalizedKey.includes("expiration_year")) continue;
+    if (normalizedKey.includes("card_expiration")) continue;
+    result[key] = sanitizeMercadoPagoPayload(value);
+  }
+  return result;
+}
+
 export function mapMercadoPagoStatus(status: unknown) {
   const normalized = String(status || "").toLowerCase();
   if (["paid", "approved", "processed", "accredited"].includes(normalized)) return "paid";
@@ -182,6 +220,53 @@ export async function createPlanPixOrder(params: {
           amount: amount.toFixed(2),
           payment_method: { id: "pix", type: "bank_transfer" },
           expiration_time: expirationTime,
+        },
+      ],
+    },
+  };
+
+  return mercadoPagoRequest("/v1/orders", {
+    method: "POST",
+    headers: mercadoPagoHeaders(idempotencyKey),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function createPlanCardOrder(params: {
+  planPayment: Record<string, unknown>;
+  idempotencyKey: string;
+  cardToken: string;
+  paymentMethodId: string;
+  installments: number;
+  payerEmail: string;
+}) {
+  const { planPayment, idempotencyKey, cardToken, paymentMethodId, installments, payerEmail } = params;
+  const amount = safeMoney(planPayment.amount);
+  const hours = Number(planPayment.purchased_hours || 0);
+  const description = `${planPayment.plan_name || "Plano Arena Gamer"} - ${hours} horas por ${planPayment.validity_days || 30} dias`.trim();
+
+  const body = {
+    type: "online",
+    processing_mode: "automatic",
+    external_reference: planPayment.id,
+    description,
+    total_amount: amount.toFixed(2),
+    payer: {
+      email: payerEmail,
+      first_name: String(
+        planPayment.customer_name || "Cliente NT"
+      ).slice(0, 60),
+    },
+    transactions: {
+      payments: [
+        {
+          amount: amount.toFixed(2),
+          payment_method: {
+            id: paymentMethodId,
+            type: "credit_card",
+            token: cardToken,
+            installments,
+          },
         },
       ],
     },

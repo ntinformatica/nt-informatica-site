@@ -2905,6 +2905,12 @@ function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscri
   const [form, setForm] = useState({ id: "", name: "Plano Player", price: 150, includedMinutes: 600, validityDays: 30, description: "", active: true, sortOrder: plans.length + 1 });
   const [assign, setAssign] = useState({ customerId: "", planId: plans[0]?.id || "", startDate: todayIsoDate(), amountPaid: "", notes: "", keepPreviousBalance: false });
 
+  function planPaymentMethodLabel(payment) {
+    if (payment.paymentMethod === "card") return `Cartão de crédito${payment.installments ? ` · ${payment.installments}x` : ""}${payment.cardBrand ? ` · ${payment.cardBrand}` : ""}${payment.cardLastFour ? ` final ${payment.cardLastFour}` : ""}`;
+    if (payment.paymentMethod === "pix") return "Pix";
+    return "Método não informado";
+  }
+
   function edit(plan) {
     setForm(plan);
   }
@@ -2968,16 +2974,20 @@ function ArenaPlansPage({ arenaData, onSavePlan, onDeletePlan, onActivateSubscri
 
       <div className="grid gap-6 xl:grid-cols-3">
         <section className="rounded-lg border border-white/10 bg-white/5 p-5">
-          <h3 className="text-lg font-black">Compras Pix recentes</h3>
+          <h3 className="text-lg font-black">Compras de planos recentes</h3>
           <div className="mt-4 grid gap-3">
             {planPayments.slice(0, 8).map((payment) => (
               <div key={payment.id} className="rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-300">
                 <strong className="text-white">{payment.customerName} · {payment.planName}</strong>
                 <p>{formatCurrency(payment.amount)} · {arenaPaymentStatusLabel(payment.status)}</p>
+                <p>{planPaymentMethodLabel(payment)}</p>
+                {payment.mercadoPagoOrderId ? <p>Order: {payment.mercadoPagoOrderId}</p> : null}
+                {payment.mercadoPagoTransactionId ? <p>Transação: {payment.mercadoPagoTransactionId}</p> : null}
+                {payment.failureReason ? <p>Falha: {payment.failureReason}</p> : null}
                 <p>{payment.approvedAt ? `Aprovado em ${formatDateTimeLabel(payment.approvedAt)}` : `Criado em ${formatDateTimeLabel(payment.createdAt)}`}</p>
               </div>
             ))}
-            {!planPayments.length ? <p className="text-sm text-slate-400">Nenhuma compra Pix de plano registrada ainda.</p> : null}
+            {!planPayments.length ? <p className="text-sm text-slate-400">Nenhuma compra de plano registrada ainda.</p> : null}
           </div>
         </section>
         <section className="rounded-lg border border-white/10 bg-white/5 p-5">

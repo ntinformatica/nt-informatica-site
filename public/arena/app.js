@@ -56,6 +56,8 @@ const state = {
   pixLoading: false,
   paymentStatusLoading: false,
   planPixLoading: false,
+  planCardLoading: false,
+  planCardAttemptId: "",
   planPaymentStep: "choice",
   selectedPlan: null,
   currentPlanPayment: null,
@@ -313,11 +315,22 @@ function fromPlanPayment(row = {}) {
     purchasedMinutes: Number(row.purchased_minutes || row.purchasedMinutes || 0),
     validityDays: Number(row.validity_days || row.validityDays || 30),
     status: row.status || "pending",
+    paymentMethod: row.payment_method || row.paymentMethod || "",
+    paymentType: row.payment_type || row.paymentType || "",
+    installments: Number(row.installments || 0),
+    payerEmail: row.payer_email || row.payerEmail || "",
+    cardBrand: row.card_brand || row.cardBrand || "",
+    cardLastFour: row.card_last_four || row.cardLastFour || "",
+    mercadoPagoOrderId: row.mercado_pago_order_id || row.mercadoPagoOrderId || "",
+    mercadoPagoPaymentId: row.mercado_pago_payment_id || row.mercadoPagoPaymentId || "",
+    mercadoPagoTransactionId: row.mercado_pago_transaction_id || row.mercadoPagoTransactionId || "",
     qrCode: row.qr_code || row.qrCode || "",
     qrCodeBase64: row.qr_code_base64 || row.qrCodeBase64 || "",
     ticketUrl: row.ticket_url || row.ticketUrl || "",
     expiresAt: row.expires_at || row.expiresAt || "",
     approvedAt: row.approved_at || row.approvedAt || "",
+    paidAt: row.paid_at || row.paidAt || "",
+    failureReason: row.failure_reason || row.failureReason || "",
     subscriptionId: row.subscription_id || row.subscriptionId || "",
   };
 }
@@ -831,6 +844,7 @@ function paymentStatusLabel(status) {
     created: "Criado",
     pending: "Aguardando pagamento",
     processing: "Processando",
+    in_process: "Em análise",
     paid: "Pago",
     approved: "Pago",
     rejected: "Rejeitado",
@@ -848,6 +862,14 @@ function planPaymentIsFinal(status) {
 
 function planPaymentIsApproved(status) {
   return String(status || "") === "approved";
+}
+
+function isCardPlanPayment(payment = {}) {
+  return ["card", "credit_card"].includes(String(payment.paymentMethod || payment.paymentType || "").toLowerCase());
+}
+
+function resetPlanCardAttempt() {
+  state.planCardAttemptId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function setArenaCardPaymentBrickStatus(message = "", tone = "muted") {
@@ -904,14 +926,19 @@ async function renderArenaCardPaymentBrick() {
         initialization: {
           amount,
         },
+        customization: {
+          paymentMethods: {
+            types: {
+              excluded: ["debit_card", "prepaid_card"],
+            },
+          },
+        },
         callbacks: {
           onReady: () => {
             setArenaCardPaymentBrickStatus("", "ready");
           },
-          onSubmit: () => {
-            const message = "Pagamento por cartão ainda está em configuração.";
-            setArenaCardPaymentBrickStatus(message, "warning");
-            return Promise.reject(new Error(message));
+          onSubmit: (cardFormData) => {
+            return handleGeneratePlanCard(cardFormData);
           },
           onError: (error) => {
             console.error("Erro no Brick de cartão da Arena.", error);
@@ -949,6 +976,8 @@ function closePlanPixModal() {
   state.selectedPlan = null;
   state.currentPlanPayment = null;
   state.currentPlanPix = null;
+  state.planCardLoading = false;
+  state.planCardAttemptId = "";
 }
 
 function renderPlanPixModal() {
@@ -1000,6 +1029,7 @@ function renderPlanPixModal() {
     });
     modal.querySelector("#choosePlanCardButton")?.addEventListener("click", () => {
       state.planPaymentStep = "card";
+      resetPlanCardAttempt();
       renderPlanPixModal();
     });
     return;
@@ -1028,7 +1058,7 @@ function renderPlanPixModal() {
       <div class="card-payment-form" aria-label="Identifica&ccedil;&atilde;o do cliente para pagamento por cart&atilde;o">
         <label>
           WhatsApp
-          <input type="tel" autocomplete="tel" value="${customerPhoneInput?.value || ""}" placeholder="(47) 99999-9999">
+          <input id="planCardCustomerPhone" type="tel" autocomplete="tel" value="${customerPhoneInput?.value || ""}" placeholder="(47) 99999-9999">
         </label>
       </div>
 
@@ -1044,6 +1074,56 @@ function renderPlanPixModal() {
       renderPlanPixModal();
     });
     void renderArenaCardPaymentBrick();
+    return;
+  }
+
+  if (payment && isCardPlanPayment(payment)) {
+    void unmountArenaCardPaymentBrick();
+    const approved = planPaymentIsApproved(payment?.status);
+    const finalStatus = planPaymentIsFinal(payment?.status);
+    const canRetry = finalStatus && !approved;
+    modal.innerHTML = renderShell(`
+      <p class="eyebrow">Plano mensal via cartão</p>
+      <h2 id="planPixTitle">${plan.name}</h2>
+      <p>${approved ? "Pagamento aprovado. Seu plano foi ativado." : finalStatus ? "Pagamento finalizado." : "Pagamento em processamento. A confirmação será atualizada automaticamente."}</p>
+
+      <div class="pix-summary">
+        <span>${plan.hours} horas por ${plan.validityDays} dias</span>
+        <span>Valor total: ${formatMoney(payment.amount || plan.price)}</span>
+        ${payment.installments ? `<span>Parcelas: ${payment.installments}x</span>` : ""}
+        ${payment.cardBrand ? `<span>Cartão: ${payment.cardBrand}${payment.cardLastFour ? ` final ${payment.cardLastFour}` : ""}</span>` : ""}
+      </div>
+
+      <div class="pix-status ${payment.status || "pending"}">
+        <strong>${approved ? "Plano ativado" : paymentStatusLabel(payment.status)}</strong>
+        <span>${approved ? "Seu saldo foi liberado automaticamente." : finalStatus ? (payment.failureReason || "Status final recebido.") : "Aguardando retorno do Mercado Pago."}</span>
+      </div>
+
+      <p class="fine-print">As horas só são liberadas quando o Mercado Pago confirma a aprovação. Nenhum dado sensível do cartão é salvo pela NT Informática.</p>
+      <div class="card-payment-actions">
+        ${canRetry ? `<button class="primary-button reserve-button" type="button" id="retryPlanCardButton">Tentar outro cartão</button>` : ""}
+        <button class="ghost-button" type="button" id="closePlanCardStatusButton">${approved ? "Fechar" : "Voltar"}</button>
+      </div>
+    `);
+
+    modal.querySelector(".plan-pix-close")?.addEventListener("click", closePlanPixModal);
+    modal.querySelector("#closePlanCardStatusButton")?.addEventListener("click", () => {
+      if (approved) {
+        closePlanPixModal();
+        return;
+      }
+      state.currentPlanPayment = null;
+      state.currentPlanPix = null;
+      state.planPaymentStep = "choice";
+      renderPlanPixModal();
+    });
+    modal.querySelector("#retryPlanCardButton")?.addEventListener("click", () => {
+      state.currentPlanPayment = null;
+      state.currentPlanPix = null;
+      state.planPaymentStep = "card";
+      resetPlanCardAttempt();
+      renderPlanPixModal();
+    });
     return;
   }
 
@@ -1255,6 +1335,66 @@ function startPlanPaymentPolling(planPaymentId) {
   }, 5000);
 }
 
+async function handleGeneratePlanCard(cardFormData = {}) {
+  const plan = state.selectedPlan;
+  if (!plan) return Promise.reject(new Error("Plano não selecionado."));
+  if (state.planCardLoading) return Promise.reject(new Error("Pagamento já em processamento."));
+
+  const phone = String(document.querySelector("#planCardCustomerPhone")?.value || customerPhoneInput?.value || "").trim();
+  const payer = cardFormData?.payer || {};
+  const email = String(payer.email || cardFormData.email || "").trim();
+  const customerName = String(customerNameInput?.value || payer.first_name || payer.name || cardFormData.cardholderName || "Cliente NT").trim();
+
+  if (!phone) {
+    const message = "Informe o WhatsApp para pagar com cartão.";
+    setArenaCardPaymentBrickStatus(message, "warning");
+    return Promise.reject(new Error(message));
+  }
+
+  if (!state.planCardAttemptId) resetPlanCardAttempt();
+
+  try {
+    state.planCardLoading = true;
+    setArenaCardPaymentBrickStatus("Processando pagamento com segurança...", "loading");
+    const data = await arenaFunctionRequest("create-arena-plan-card", {
+      planId: plan.id,
+      customerName,
+      customerPhone: phone,
+      payerEmail: email,
+      attemptId: state.planCardAttemptId,
+      card: cardFormData,
+    });
+
+    state.currentPlanPayment = fromPlanPayment(data.planPayment || {});
+    state.currentPlanPix = null;
+    if (customerNameInput && !customerNameInput.value) customerNameInput.value = customerName;
+    if (customerPhoneInput && !customerPhoneInput.value) customerPhoneInput.value = phone;
+    renderPlanPixModal();
+
+    if (state.currentPlanPayment.id) {
+      startPlanPaymentPolling(state.currentPlanPayment.id);
+    }
+
+    if (state.currentPlanPayment.status === "approved") {
+      showToast("Pagamento aprovado. Seu plano foi ativado.");
+      if (customerPhoneInput?.value) await lookupCustomerPlan();
+    } else if (["rejected", "cancelled", "expired", "refunded"].includes(state.currentPlanPayment.status)) {
+      showToast("Pagamento não aprovado. Confira os dados ou tente outro cartão.");
+    } else {
+      showToast("Pagamento em análise. A confirmação será atualizada automaticamente.");
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Falha no pagamento por cartão do plano.", error);
+    const message = error.message || "Não foi possível confirmar o pagamento. Consulte o status antes de tentar novamente.";
+    setArenaCardPaymentBrickStatus(message, "error");
+    throw error;
+  } finally {
+    state.planCardLoading = false;
+  }
+}
+
 async function handleGeneratePlanPix() {
   const plan = state.selectedPlan;
   if (!plan) return;
@@ -1440,6 +1580,8 @@ document.querySelectorAll(".plan-pix-button").forEach((button) => {
     state.currentPlanPayment = null;
     state.currentPlanPix = null;
     state.planPixLoading = false;
+    state.planCardLoading = false;
+    state.planCardAttemptId = "";
     renderPlanPixModal();
   });
 });

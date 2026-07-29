@@ -1,7 +1,16 @@
 import { handleCors } from "../_shared/cors.ts";
 import { fail, ok } from "../_shared/responses.ts";
-import { getSingle, insertEvent, supabaseRpc } from "../_shared/supabaseAdmin.ts";
-import { getOrder, mapMercadoPagoStatus, mercadoPagoExternalReference, verifyMercadoPagoSignature } from "../_shared/mercadoPago.ts";
+import { getSingle, insertEvent, supabaseRest, supabaseRpc } from "../_shared/supabaseAdmin.ts";
+import {
+  getOrder,
+  mapMercadoPagoStatus,
+  mercadoPagoExternalReference,
+  mercadoPagoPaymentMethod,
+  mercadoPagoPaymentTransaction,
+  mercadoPagoPaymentTransactionId,
+  sanitizeMercadoPagoPayload,
+  verifyMercadoPagoSignature,
+} from "../_shared/mercadoPago.ts";
 
 function extractDataId(url: URL, body: Record<string, unknown>) {
   const data = (body.data || {}) as Record<string, unknown>;
@@ -42,9 +51,13 @@ Deno.serve(async (request) => {
     if (!signatureOk) return fail(request, "Assinatura invalida.", 401);
 
     const order = await getOrder(dataId);
+    const sanitizedOrder = sanitizeMercadoPagoPayload(order) as Record<string, unknown>;
     const externalReference = mercadoPagoExternalReference(order);
     const providerPaymentId = String(order.id || dataId);
-    const mappedStatus = mapMercadoPagoStatus(order.status || order.status_detail);
+    const transaction = mercadoPagoPaymentTransaction(order) || {};
+    const transactionId = mercadoPagoPaymentTransactionId(order);
+    const paymentMethod = mercadoPagoPaymentMethod(order);
+    const mappedStatus = mapMercadoPagoStatus(transaction.status || transaction.status_detail || order.status || order.status_detail);
 
     let planPayment = externalReference
       ? await getSingle(`/arena_plan_payments?id=eq.${encodeURIComponent(externalReference)}&limit=1`)
@@ -56,12 +69,36 @@ Deno.serve(async (request) => {
 
     if (planPayment) {
       const planEventId = requestId || `mp-plan:${dataId}:${order.status || "status"}`;
+      const planPaymentIsCard = String(planPayment.payment_method || "").toLowerCase() === "card"
+        || String(paymentMethod.type || "").toLowerCase() === "credit_card";
       const planMetadata = {
         provider: "mercado_pago",
         notification: body,
-        order,
+        order: sanitizedOrder,
         processedAt: new Date().toISOString(),
       };
+
+      await supabaseRest(`/arena_plan_payments?id=eq.${encodeURIComponent(String(planPayment.id))}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          mercado_pago_order_id: providerPaymentId || planPayment.mercado_pago_order_id || null,
+          mercado_pago_payment_id: transactionId || planPayment.mercado_pago_payment_id || providerPaymentId || null,
+          mercado_pago_transaction_id: transactionId || planPayment.mercado_pago_transaction_id || null,
+          provider_reference: externalReference || planPayment.provider_reference || String(planPayment.id),
+          card_brand: planPaymentIsCard ? paymentMethod.id || planPayment.card_brand || null : planPayment.card_brand || null,
+          installments: planPaymentIsCard ? paymentMethod.installments || planPayment.installments || null : planPayment.installments || null,
+          paid_at: mappedStatus === "paid" ? new Date().toISOString() : planPayment.paid_at || null,
+          failure_reason: mappedStatus === "refunded"
+            ? String(transaction.status_detail || order.status_detail || transaction.status || order.status || "refunded_manual_review")
+            : planPayment.failure_reason || "",
+          raw_response: {
+            ...(typeof planPayment.raw_response === "object" && planPayment.raw_response ? (planPayment.raw_response as Record<string, unknown>) : {}),
+            mercadoPagoWebhookOrder: sanitizedOrder,
+          },
+        }),
+      }).catch((error) => {
+        console.warn("Falha ao atualizar snapshot do pagamento de plano pelo webhook.", error);
+      });
 
       let planRows = null;
       if (mappedStatus === "paid") {
@@ -77,6 +114,24 @@ Deno.serve(async (request) => {
           p_provider_event_id: `${planEventId}:expired`,
           p_metadata: planMetadata,
         });
+      } else if (mappedStatus === "refunded" && String(planPayment.status || "") === "approved") {
+        await supabaseRest("/arena_plan_payment_events", {
+          method: "POST",
+          body: JSON.stringify({
+            plan_payment_id: planPayment.id,
+            provider: "mercado_pago",
+            provider_event_id: `${planEventId}:refunded-approved`,
+            event_type: "plan_payment.refunded_review",
+            event_status: "refunded",
+            payload: planMetadata,
+            processed: true,
+            processed_at: new Date().toISOString(),
+          }),
+        }).catch((error) => {
+          const message = String(error?.message || "");
+          if (!message.includes("duplicate key") && !message.includes("arena_plan_payment_events_provider_event_uidx")) throw error;
+        });
+        planRows = [planPayment];
       } else if (["failed", "cancelled", "refunded"].includes(mappedStatus)) {
         planRows = await supabaseRpc("fail_arena_plan_payment", {
           p_plan_payment_id: planPayment.id,
@@ -121,7 +176,7 @@ Deno.serve(async (request) => {
     const metadata = {
       provider: "mercado_pago",
       notification: body,
-      order,
+      order: sanitizedOrder,
       processedAt: new Date().toISOString(),
     };
 
