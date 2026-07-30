@@ -22,12 +22,15 @@ export function customerPayload(user, profile) {
 export function missingCheckoutProfileFields(user, profile) {
   const missing = [];
   const cpf = onlyDigits(profile?.cpf || "");
+  const metadata = user?.user_metadata || {};
+  const termsAccepted = Boolean(profile?.terms_accepted_at || metadata.terms_accepted || metadata.acceptTerms || metadata.termsAccepted);
+  const privacyAccepted = Boolean(profile?.privacy_accepted_at || metadata.privacy_accepted || metadata.acceptPrivacy || metadata.privacyAccepted);
   if (!profile?.full_name) missing.push("nome completo");
   if (!isValidCpf(cpf)) missing.push("CPF");
   if (!profile?.phone_normalized && !profile?.phone) missing.push("telefone");
   if (!user?.email) missing.push("e-mail");
-  if (!profile?.terms_accepted_at) missing.push("aceite dos termos");
-  if (!profile?.privacy_accepted_at) missing.push("aceite da política de privacidade");
+  if (!termsAccepted) missing.push("aceite dos termos");
+  if (!privacyAccepted) missing.push("aceite da politica de privacidade");
   return missing;
 }
 

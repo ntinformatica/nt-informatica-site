@@ -238,6 +238,7 @@ function useMercadoPagoBrick({ enabled, amount, onSubmit }) {
 export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
   const cart = useCart();
   const auth = useCustomerAuth();
+  const refreshedProfileRef = useRef(false);
   const [paymentMethod, setPaymentMethod] = useState("pix");
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
@@ -262,18 +263,50 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
   }, [auth.loading, auth.authenticated]);
 
   useEffect(() => {
+    if (!auth.authenticated || refreshedProfileRef.current) return;
+    refreshedProfileRef.current = true;
+    auth.refreshProfile().then((profile) => {
+      console.info("Perfil atualizado ao abrir checkout.", {
+        profileLoaded: Boolean(profile),
+        cpfDigits: onlyDigits(profile?.cpf || "").length,
+        missingFields: missingCheckoutProfileFields(auth.user, profile),
+      });
+    }).catch((refreshError) => {
+      console.warn("Nao foi possivel atualizar o perfil antes do checkout:", refreshError);
+    });
+  }, [auth.authenticated, auth.user]);
+
+  useEffect(() => {
     if (!cart.items.length) navigateTo("/carrinho");
   }, [cart.items.length]);
 
   const finishCheckout = useCallback(async (cardData = null) => {
     if (processing) return;
-    if (missing.length) {
-      setError(`Complete seu perfil antes de finalizar: ${missing.join(", ")}.`);
-      navigateTo("/minha-conta/perfil");
-      return;
-    }
+    const isPix = paymentMethod === "pix";
+    if (isPix) console.info("Clique em Gerar Pix recebido.");
     setProcessing(true);
     setError("");
+    console.info("Inicio da validacao do checkout.", {
+      paymentMethod,
+      currentMissingFields: missing,
+    });
+    let currentProfile = auth.profile;
+    try {
+      currentProfile = await auth.refreshProfile();
+    } catch (refreshError) {
+      console.warn("Nao foi possivel recarregar o perfil no checkout:", refreshError);
+    }
+    const currentMissing = missingCheckoutProfileFields(auth.user, currentProfile);
+    console.info("Resultado da validacao do perfil no checkout.", {
+      paymentMethod,
+      cpfDigits: onlyDigits(currentProfile?.cpf || "").length,
+      missingFields: currentMissing,
+    });
+    if (currentMissing.length) {
+      setError(`Complete seu perfil antes de finalizar: ${currentMissing.join(", ")}.`);
+      setProcessing(false);
+      return;
+    }
     const key = attemptKey || createCheckoutAttemptKey(cart.items, paymentMethod);
     setAttemptKey(key);
     try {
@@ -284,7 +317,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
       });
       const result = await createStoreCheckout({
         user: auth.user,
-        profile: auth.profile,
+        profile: currentProfile,
         items: cart.items,
         paymentMethod,
         installments: cardInstallments(cardData),
@@ -305,7 +338,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
     } finally {
       setProcessing(false);
     }
-  }, [processing, missing, cart, paymentMethod, attemptKey, auth.user, auth.profile, navigateTo]);
+  }, [processing, missing, cart, paymentMethod, attemptKey, auth.user, auth.profile, auth.refreshProfile, navigateTo]);
 
   const brickStatus = useMercadoPagoBrick({
     enabled: paymentMethod === "card" && auth.authenticated && Boolean(cart.items.length),
@@ -320,7 +353,16 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
           <div className="grid gap-5">
             <PickupNotice />
             {error ? <Alert type="error">{error}</Alert> : null}
-            <Card><h2 className="text-xl font-black text-white">Dados do cliente</h2><p className="mt-3 text-sm text-slate-300">{auth.profile?.full_name} | {auth.user?.email} | {auth.profile?.phone}</p>{missing.length ? <p className="mt-3 text-sm font-bold text-amber-100">Dados pendentes: {missing.join(", ")}</p> : null}</Card>
+            <Card>
+              <h2 className="text-xl font-black text-white">Dados do cliente</h2>
+              <p className="mt-3 text-sm text-slate-300">{auth.profile?.full_name} | {auth.user?.email} | {auth.profile?.phone}</p>
+              {missing.length ? (
+                <div className="mt-3 rounded-md border border-amber-300/30 bg-amber-300/10 p-3">
+                  <p className="text-sm font-bold text-amber-100">Dados pendentes: {missing.join(", ")}.</p>
+                  <a href="/minha-conta/perfil" className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md border border-amber-200/40 px-4 py-2 text-sm font-black text-amber-50 transition hover:bg-amber-200/10">Completar perfil</a>
+                </div>
+              ) : null}
+            </Card>
             <Card><h2 className="text-xl font-black text-white">Produtos</h2><div className="mt-4 grid gap-3">{cart.items.map((item) => <div key={itemKey(item)} className="flex justify-between gap-4 rounded-md border border-white/10 bg-white/5 p-3 text-sm"><span>{item.quantity}x {item.name} {item.variationName ? `- ${item.variationName}` : ""}</span><strong>{formatCurrency(Number(item.unitPrice || 0) * Number(item.quantity || 0))}</strong></div>)}</div></Card>
             <Card><h2 className="text-xl font-black text-white">Forma de retirada</h2><p className="mt-3 text-sm leading-6 text-slate-300">{pickupInfo.title}: {pickupInfo.address}, {pickupInfo.district}. Aguarde a confirmação de que o pedido está pronto e apresente documento, se solicitado.</p><p className="mt-3 text-sm text-slate-400">Seu endereço está cadastrado para futuras opções de entrega. Este pedido será retirado na loja.</p></Card>
             <Card>
@@ -329,7 +371,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
                 <button type="button" onClick={() => setPaymentMethod("pix")} className={`rounded-md border px-4 py-4 text-left transition ${paymentMethod === "pix" ? "border-lime-300/50 bg-lime-300/10 text-lime-100" : "border-white/10 bg-white/5 text-slate-200"}`}><QrCode className="mb-2" />Pix com 15% OFF</button>
                 <button type="button" onClick={() => setPaymentMethod("card")} className={`rounded-md border px-4 py-4 text-left transition ${paymentMethod === "card" ? "border-nt-cyan/50 bg-nt-cyan/10 text-nt-cyan" : "border-white/10 bg-white/5 text-slate-200"}`}><CreditCard className="mb-2" />Cartão em até 10x</button>
               </div>
-              {paymentMethod === "pix" ? <button type="button" disabled={processing || missing.length} onClick={() => finishCheckout()} className="mt-5 w-full rounded-md bg-nt-blue px-5 py-3 text-sm font-black text-white shadow-glow transition hover:bg-nt-cyan disabled:opacity-60">{processing ? "Gerando Pix..." : "Gerar Pix"}</button> : null}
+              {paymentMethod === "pix" ? <button type="button" disabled={processing} onClick={() => finishCheckout()} className="mt-5 w-full rounded-md bg-nt-blue px-5 py-3 text-sm font-black text-white shadow-glow transition hover:bg-nt-cyan disabled:cursor-wait disabled:opacity-60">{processing ? "Gerando Pix..." : "Gerar Pix"}</button> : null}
               {paymentMethod === "card" ? <div className="mt-5"><p className="mb-3 text-sm text-slate-300">As opções de parcelamento serão exibidas conforme o cartão. Apenas crédito.</p>{brickStatus ? <p className="mb-3 text-sm text-amber-100">{brickStatus}</p> : null}<div id="storeCardPaymentBrick" className="rounded-lg bg-white p-3 text-slate-950" /></div> : null}
             </Card>
           </div>
