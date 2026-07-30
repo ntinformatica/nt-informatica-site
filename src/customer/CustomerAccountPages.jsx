@@ -14,7 +14,7 @@ import {
   saveCustomerAddress,
   upsertCustomerProfile,
 } from "./customerService";
-import { formatCpf, formatPhone, passwordHelpText } from "./customerValidation";
+import { formatCpf, formatPhone, isValidCpf, passwordHelpText } from "./customerValidation";
 import { Alert, Field, inputClass } from "./CustomerAuthPages";
 
 const accountLinks = [
@@ -141,6 +141,7 @@ function ProfilePanel() {
   const [message, setMessage] = useState("");
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
+  const hasSavedValidCpf = isValidCpf(auth.profile?.cpf || "");
 
   useEffect(() => {
     setValues({
@@ -164,6 +165,7 @@ function ProfilePanel() {
     setMessage("");
     setSuccess("");
     try {
+      if (!isValidCpf(values.cpf)) throw new Error("Informe um CPF valido com 11 digitos.");
       await upsertCustomerProfile(auth.user.id, values);
       if (email !== auth.user.email) await auth.updateEmail(email);
       await auth.refreshProfile();
@@ -178,12 +180,12 @@ function ProfilePanel() {
   return (
     <Card>
       <h2 className="text-2xl font-black text-white">Meu Perfil</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-300">CPF fica somente leitura após o cadastro. Alteração de e-mail segue confirmação segura pelo Supabase.</p>
+      <p className="mt-2 text-sm leading-6 text-slate-300">CPF pode ser preenchido uma vez e fica somente leitura apos salvo corretamente. Alteracao de e-mail segue confirmacao segura pelo Supabase.</p>
       {message ? <div className="mt-5"><Alert type="error">{message}</Alert></div> : null}
       {success ? <div className="mt-5"><Alert type="success">{success}</Alert></div> : null}
       <form className="mt-6 grid gap-5 md:grid-cols-2" onSubmit={save}>
         <Field id="profile-name" label="Nome"><input id="profile-name" value={values.fullName} onChange={(event) => setField("fullName", event.target.value)} className={inputClass()} /></Field>
-        <Field id="profile-cpf" label="CPF"><input id="profile-cpf" value={values.cpf} className={`${inputClass()} opacity-75`} readOnly /></Field>
+        <Field id="profile-cpf" label="CPF" hint={hasSavedValidCpf ? "CPF salvo. Para alterar, fale com a NT Informatica." : "Digite 11 numeros para liberar o checkout."}><input id="profile-cpf" value={values.cpf} onChange={(event) => setField("cpf", formatCpf(event.target.value))} className={`${inputClass()} ${hasSavedValidCpf ? "opacity-75" : ""}`} inputMode="numeric" readOnly={hasSavedValidCpf} /></Field>
         <Field id="profile-email" label="E-mail"><input id="profile-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} className={inputClass()} /></Field>
         <Field id="profile-phone" label="Telefone"><input id="profile-phone" value={values.phone} onChange={(event) => setField("phone", formatPhone(event.target.value))} className={inputClass()} /></Field>
         <Field id="profile-birth" label="Data de nascimento"><input id="profile-birth" type="date" value={values.birthDate || ""} onChange={(event) => setField("birthDate", event.target.value)} className={inputClass()} /></Field>

@@ -1,6 +1,6 @@
 import { supabaseFunction, supabaseRequest } from "../lib/supabase";
 import { checkoutItemErrors, checkoutItems } from "../cart/cartStorage";
-import { onlyDigits } from "../customer/customerValidation";
+import { isValidCpf, onlyDigits } from "../customer/customerValidation";
 
 export const pickupInfo = {
   title: "Retirada na loja",
@@ -21,8 +21,9 @@ export function customerPayload(user, profile) {
 
 export function missingCheckoutProfileFields(user, profile) {
   const missing = [];
+  const cpf = onlyDigits(profile?.cpf || "");
   if (!profile?.full_name) missing.push("nome completo");
-  if (!profile?.cpf) missing.push("CPF");
+  if (!isValidCpf(cpf)) missing.push("CPF");
   if (!profile?.phone_normalized && !profile?.phone) missing.push("telefone");
   if (!user?.email) missing.push("e-mail");
   if (!profile?.terms_accepted_at) missing.push("aceite dos termos");

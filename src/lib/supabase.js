@@ -411,7 +411,15 @@ export async function supabaseFunction(name, options = {}) {
     }
   }
   if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.error || payload?.message || text || `Erro na funcao ${name}: ${response.status}`);
+    const message = payload?.error || payload?.message || text || `Erro na funcao ${name}: ${response.status}`;
+    console.error("Falha na Edge Function Supabase:", {
+      name,
+      status: response.status,
+      message,
+    });
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }

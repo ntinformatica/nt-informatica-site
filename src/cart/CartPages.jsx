@@ -1,5 +1,5 @@
 import { CreditCard, Minus, PackageCheck, Plus, QrCode, ShoppingCart, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Component, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { Footer } from "../components/Footer";
@@ -7,6 +7,7 @@ import { Header } from "../components/Header";
 import { Section } from "../components/Section";
 import { useCustomerAuth } from "../customer/CustomerAuthContext";
 import { Alert } from "../customer/CustomerAuthPages";
+import { onlyDigits } from "../customer/customerValidation";
 import { useCart } from "./CartContext";
 import { cartTotals, itemKey } from "./cartStorage";
 import { createCheckoutAttemptKey, createStoreCheckout, getOrderPaymentStatus, missingCheckoutProfileFields, pickupInfo } from "../store/storeCheckoutService";
@@ -23,11 +24,44 @@ function cardInstallments(cardData) {
   return Number(cardData?.installments || nested(cardData, ["payment_method", "installments"]) || 1);
 }
 
+function brickPayloadSummary(cardData) {
+  return {
+    hasToken: Boolean(cardData?.token || cardData?.cardToken || nested(cardData, ["payment_method", "token"])),
+    paymentMethodId: cardData?.payment_method_id || cardData?.paymentMethodId || nested(cardData, ["payment_method", "id"]) || "",
+    hasIssuer: Boolean(cardData?.issuer_id || cardData?.issuerId || nested(cardData, ["issuer", "id"])),
+    installments: cardInstallments(cardData),
+  };
+}
+
+class EcommerceErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Erro na área pública do e-commerce:", error, info);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <Section eyebrow="E-commerce" title="Não foi possível carregar esta etapa." description="Recarregue a página para tentar novamente. Se continuar acontecendo, fale com a NT Informática.">
+        <button type="button" onClick={() => window.location.reload()} className="rounded-md bg-nt-blue px-5 py-3 text-sm font-black text-white shadow-glow transition hover:bg-nt-cyan">Recarregar página</button>
+      </Section>
+    );
+  }
+}
+
 function PageShell({ children, onNavigate, getNavHref }) {
   return (
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
       <Header onNavigate={onNavigate} getNavHref={getNavHref} />
-      <main className="pt-20">{children}</main>
+      <main className="pt-20"><EcommerceErrorBoundary>{children}</EcommerceErrorBoundary></main>
       <Footer />
     </div>
   );
@@ -122,7 +156,12 @@ export function CartPage({ onNavigate, getNavHref, navigateTo }) {
 
 function useMercadoPagoBrick({ enabled, amount, onSubmit }) {
   const controllerRef = useRef(null);
+  const submitRef = useRef(onSubmit);
   const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    submitRef.current = onSubmit;
+  }, [onSubmit]);
 
   useEffect(() => {
     let mounted = true;
@@ -139,7 +178,10 @@ function useMercadoPagoBrick({ enabled, amount, onSubmit }) {
     }
 
     async function boot() {
-      if (!enabled) return;
+      if (!enabled) {
+        setStatus("");
+        return;
+      }
       setStatus("Carregando formulário seguro...");
       try {
         await loadScript("https://sdk.mercadopago.com/js/v2");
@@ -153,14 +195,27 @@ function useMercadoPagoBrick({ enabled, amount, onSubmit }) {
           initialization: { amount },
           customization: { paymentMethods: { types: { excluded: ["debit_card", "prepaid_card"] } } },
           callbacks: {
-            onReady: () => mounted && setStatus(""),
-            onSubmit,
+            onReady: () => {
+              console.info("Card Payment Brick pronto para o checkout.");
+              if (mounted) setStatus("");
+            },
+            onSubmit: async (cardData) => {
+              console.info("Card Payment Brick onSubmit executado.", brickPayloadSummary(cardData));
+              try {
+                return await submitRef.current?.(cardData);
+              } catch (error) {
+                console.error("Falha no submit do Card Payment Brick:", error);
+                if (mounted) setStatus(error?.message || "Não foi possível enviar o pagamento com cartão.");
+                throw error;
+              }
+            },
             onError: (error) => {
-              console.error("Erro no cartão do e-commerce.", error);
+              console.error("Erro no Card Payment Brick do e-commerce.", error);
               if (mounted) setStatus("Não foi possível carregar o formulário do cartão.");
             },
           },
         });
+        if (mounted) setStatus("");
       } catch (error) {
         console.error(error);
         if (mounted) setStatus(error.message || "Falha ao carregar cartão.");
@@ -175,7 +230,7 @@ function useMercadoPagoBrick({ enabled, amount, onSubmit }) {
         controllerRef.current = null;
       }
     };
-  }, [enabled, amount, onSubmit]);
+  }, [enabled, amount]);
 
   return status;
 }
@@ -189,6 +244,15 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
   const [attemptKey, setAttemptKey] = useState("");
   const missing = missingCheckoutProfileFields(auth.user, auth.profile);
   const totals = cartTotals(cart.items);
+
+  useEffect(() => {
+    console.info("Checkout perfil carregado.", {
+      authenticated: auth.authenticated,
+      profileLoaded: Boolean(auth.profile),
+      cpfDigits: onlyDigits(auth.profile?.cpf || "").length,
+      missingFields: missing,
+    });
+  }, [auth.authenticated, auth.profile, missing.join("|")]);
 
   useEffect(() => {
     if (!auth.loading && !auth.authenticated) {
@@ -213,6 +277,11 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
     const key = attemptKey || createCheckoutAttemptKey(cart.items, paymentMethod);
     setAttemptKey(key);
     try {
+      console.info("Inicio do checkout.", {
+        paymentMethod,
+        itemCount: cart.items.length,
+        hasPendingProfileFields: Boolean(missing.length),
+      });
       const result = await createStoreCheckout({
         user: auth.user,
         profile: auth.profile,
@@ -223,6 +292,11 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
         idempotencyKey: key,
       });
       const orderId = result?.data?.order?.id || result?.order?.id;
+      console.info("Resposta da Edge Function store-create-checkout.", {
+        ok: result?.ok !== false,
+        hasOrderId: Boolean(orderId),
+        paymentMethod,
+      });
       if (!orderId) throw new Error("Pedido criado, mas o identificador nao foi retornado.");
       navigateTo(`/pedido/${orderId}/pagamento`);
     } catch (checkoutError) {
