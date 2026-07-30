@@ -1,0 +1,300 @@
+-- NT Store Commerce - Phase 1 manual SQL test scenarios.
+-- Use only in a safe test database. Do not run against production without replacing
+-- every placeholder and reviewing the expected effect.
+-- Keep each scenario inside begin/rollback unless the purpose is to test persistence.
+
+-- Common setup helpers for manual tests:
+--
+-- select id, name, price, promo_price, stock, status, sku
+-- from public.products
+-- where status in ('disponível', 'disponivel')
+-- order by updated_at desc
+-- limit 5;
+--
+-- select id, product_id, name, price, promo_price, stock, active, status, sku
+-- from public.product_variations
+-- where active = true and status = 'ativo'
+-- order by updated_at desc
+-- limit 5;
+--
+-- select id, name, price, promo_price, stock, published, status, internal_code
+-- from public.assembled_pcs
+-- where published = true and status not in ('rascunho', 'desativado', 'esgotado')
+-- order by updated_at desc
+-- limit 5;
+
+-- 1. Criacao de pedido Pix.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999","customer_email":"cliente@example.com"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-pix-001'
+-- );
+-- rollback;
+
+-- 2. Criacao de pedido cartao em 10x.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999","customer_email":"cliente@example.com","customer_document":"12345678900"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'card',
+--   10,
+--   'site',
+--   'test-card-10x-001'
+-- );
+-- rollback;
+
+-- 3. Calculo correto de 15% no Pix.
+-- begin;
+-- with created as (
+--   select public.create_store_order_from_cart(
+--     '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--     '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--     'pix',
+--     1,
+--     'site',
+--     'test-pix-discount-001'
+--   ) as result
+-- )
+-- select
+--   result->>'subtotal_amount' as subtotal_amount,
+--   result->>'discount_amount' as discount_amount,
+--   result->>'total_amount' as total_amount
+-- from created;
+-- rollback;
+
+-- 4. Preco adulterado no frontend deve ser ignorado.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1,"price":0.01,"name":"Produto adulterado"}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-ignore-client-price-001'
+-- );
+-- rollback;
+
+-- 5. Produto inexistente.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"product","product_id":"11111111-1111-1111-1111-111111111111","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-product-not-found-001'
+-- );
+-- rollback;
+
+-- 6. Produto nao publicado/indisponivel.
+-- begin;
+-- -- Use um product_id real com status rascunho, esgotado ou sob encomenda.
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-unpublished-product-001'
+-- );
+-- rollback;
+
+-- 7. Estoque insuficiente.
+-- begin;
+-- -- Use quantidade maior que o estoque fisico menos reservas ativas.
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":999999}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-insufficient-stock-001'
+-- );
+-- rollback;
+
+-- 8. Duas tentativas simultaneas de reservar o ultimo item.
+-- -- Sessao A:
+-- -- begin;
+-- -- select public.create_store_order_from_cart(..., 'test-last-unit-session-a');
+-- -- -- mantenha a transacao aberta.
+-- -- Sessao B:
+-- -- begin;
+-- -- select public.create_store_order_from_cart(..., 'test-last-unit-session-b');
+-- -- rollback;
+-- -- Sessao A:
+-- -- rollback;
+
+-- 9. Retry com a mesma idempotency_key.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-idempotency-001'
+-- );
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-idempotency-001'
+-- );
+-- rollback;
+
+-- 10. Expiracao apos 20 minutos.
+-- begin;
+-- -- Primeiro crie um pedido de teste, depois use p_now futuro.
+-- select public.expire_store_orders(100, now() + interval '21 minutes');
+-- rollback;
+
+-- 11. Confirmacao de pagamento no prazo.
+-- begin;
+-- -- Crie um pedido, copie payment_id/payment_external_reference do retorno e confirme.
+-- select public.confirm_store_payment(
+--   p_payment_id => '00000000-0000-0000-0000-000000000000'::uuid,
+--   p_status => 'approved',
+--   p_mercado_pago_payment_id => 'mp-test-payment-001',
+--   p_provider_event_id => 'mp-event-confirm-001',
+--   p_raw_response => '{"status":"approved"}'::jsonb,
+--   p_idempotency_key => 'confirm-test-001'
+-- );
+-- rollback;
+
+-- 12. Confirmacao duplicada.
+-- begin;
+-- -- Execute a mesma chamada duas vezes com o mesmo provider_event_id.
+-- select public.confirm_store_payment(...);
+-- select public.confirm_store_payment(...);
+-- rollback;
+
+-- 13. Pagamento aprovado apos expiracao.
+-- begin;
+-- -- Crie pedido, expire com p_now futuro e depois confirme o pagamento.
+-- -- Esperado: financial_status approved e operational_status manual_review.
+-- rollback;
+
+-- 14. Criacao de stock_movement.
+-- begin;
+-- -- Confirme pagamento no prazo e consulte os movimentos dentro da transacao.
+-- select *
+-- from public.stock_movements
+-- where movement_source = 'payment_function'
+-- order by created_at desc
+-- limit 10;
+-- rollback;
+
+-- 15. Tentativa de segundo pagamento aprovado no mesmo pedido.
+-- begin;
+-- -- Crie um segundo store_payment manualmente para o mesmo pedido dentro da transacao
+-- -- e tente aprovar. Esperado: erro controlado/manual_review.
+-- rollback;
+
+-- 16. Item assembled_pc.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"assembled_pc","assembled_pc_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-assembled-pc-001'
+-- );
+-- rollback;
+
+-- 17. Variacao que nao pertence ao produto.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","variation_id":"11111111-1111-1111-1111-111111111111","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-wrong-variation-001'
+-- );
+-- rollback;
+
+-- 18. Produto sem variation_id.
+-- begin;
+-- -- Use um product_id real, disponivel, com SKU e estoque no produto base.
+-- -- Esperado: pedido criado sem acessar campos de product_variations.
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999","customer_email":"cliente@example.com"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-product-without-variation-001'
+-- );
+-- rollback;
+
+-- 19. Produto com variation_id valido.
+-- begin;
+-- -- Use product_id e variation_id reais, da mesma relacao, active = true, status = 'ativo' e estoque suficiente.
+-- -- Esperado: pedido criado usando preco, SKU, estoque e imagem da variacao quando preenchidos.
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999","customer_email":"cliente@example.com"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","variation_id":"11111111-1111-1111-1111-111111111111","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-product-valid-variation-001'
+-- );
+-- rollback;
+
+-- 20. Variacao inativa.
+-- begin;
+-- -- Use variation_id real do produto, active = false ou status diferente de 'ativo'.
+-- -- Esperado: "Variacao indisponivel para venda."
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999","customer_email":"cliente@example.com"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","variation_id":"11111111-1111-1111-1111-111111111111","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-product-inactive-variation-001'
+-- );
+-- rollback;
+
+-- 21. Variacao sem estoque.
+-- begin;
+-- -- Use variation_id real do produto, active = true, status = 'ativo', stock = 0.
+-- -- Esperado: "Estoque insuficiente."
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999","customer_email":"cliente@example.com"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","variation_id":"11111111-1111-1111-1111-111111111111","quantity":1}]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-product-empty-variation-stock-001'
+-- );
+-- rollback;
+
+-- 22. Ausencia de CPF no cartao.
+-- begin;
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999","customer_email":"cliente@example.com"}'::jsonb,
+--   '[{"item_type":"product","product_id":"00000000-0000-0000-0000-000000000000","quantity":1}]'::jsonb,
+--   'card',
+--   1,
+--   'site',
+--   'test-card-missing-document-001'
+-- );
+-- rollback;
+
+-- 23. Tentativa de executar RPC com papel nao autorizado.
+-- -- Execute como anon/authenticated comum. Esperado: "Operacao permitida somente via service_role."
+-- select public.create_store_order_from_cart(
+--   '{"customer_name":"Cliente Teste","customer_phone":"(47) 99999-9999","customer_phone_normalized":"47999999999"}'::jsonb,
+--   '[]'::jsonb,
+--   'pix',
+--   1,
+--   'site',
+--   'test-unauthorized-001'
+-- );

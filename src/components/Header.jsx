@@ -1,6 +1,7 @@
-import { Menu, X } from "lucide-react";
+import { LogOut, Menu, UserRound, X } from "lucide-react";
 import { useState } from "react";
 import logoNt from "../assets/nt-informatica-logo.jpg";
+import { useCustomerAuth } from "../customer/CustomerAuthContext";
 import { navLinks } from "../data/siteData";
 import { WhatsAppButton } from "./Button";
 
@@ -8,7 +9,9 @@ const contactMessage = "Olá, gostaria de falar com a NT Informática, Celulares
 
 export function Header({ onNavigate, getNavHref }) {
   const [open, setOpen] = useState(false);
+  const auth = useCustomerAuth();
   const hrefFor = (id) => getNavHref ? getNavHref(id) : `#${id}`;
+  const customerName = auth.profile?.full_name?.split(" ")[0] || auth.user?.user_metadata?.full_name?.split(" ")[0] || auth.user?.email?.split("@")[0] || "cliente";
   const handleNavigate = (id, event) => {
     setOpen(false);
     if (onNavigate) onNavigate(id, event);
@@ -35,8 +38,23 @@ export function Header({ onNavigate, getNavHref }) {
           ))}
         </nav>
 
-        <div className="hidden lg:block">
-          <WhatsAppButton message={contactMessage} />
+        <div className="hidden items-center gap-3 lg:flex">
+          {auth.authenticated ? (
+            <>
+              <span className="max-w-[140px] truncate text-sm font-bold text-slate-300">Olá, {customerName}</span>
+              <a href="/minha-conta" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-600 bg-white/5 px-4 py-2 text-sm font-bold text-white transition hover:border-nt-cyan hover:bg-nt-cyan/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-nt-cyan">
+                <UserRound size={17} /> Minha Conta
+              </a>
+              <button type="button" onClick={auth.signOut} className="grid h-11 w-11 place-items-center rounded-md border border-white/10 text-slate-300 transition hover:border-red-300/40 hover:bg-red-400/10 hover:text-red-100" aria-label="Sair">
+                <LogOut size={18} />
+              </button>
+            </>
+          ) : (
+            <>
+              <a href="/login" className="text-sm font-bold text-slate-300 transition hover:text-white">Entrar</a>
+              <a href="/cadastro" className="inline-flex min-h-11 items-center justify-center rounded-md bg-nt-blue px-4 py-2 text-sm font-black text-white shadow-glow transition hover:bg-nt-cyan">Cadastrar</a>
+            </>
+          )}
         </div>
 
         <button
@@ -61,6 +79,19 @@ export function Header({ onNavigate, getNavHref }) {
                 {label}
               </a>
             ))}
+            {auth.authenticated ? (
+              <div className="mt-2 grid gap-2 rounded-lg border border-white/10 bg-white/5 p-3">
+                <p className="text-sm font-bold text-slate-300">Olá, {customerName}</p>
+                <a href="/minha-conta" className="rounded-md px-3 py-3 text-sm font-semibold text-slate-200 hover:bg-white/5">Minha Conta</a>
+                <a href="/minha-conta/pedidos" className="rounded-md px-3 py-3 text-sm font-semibold text-slate-200 hover:bg-white/5">Meus Pedidos</a>
+                <button type="button" onClick={() => { setOpen(false); auth.signOut(); }} className="rounded-md px-3 py-3 text-left text-sm font-semibold text-red-100 hover:bg-red-400/10">Sair</button>
+              </div>
+            ) : (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <a href="/login" className="rounded-md border border-white/10 px-3 py-3 text-center text-sm font-bold text-slate-200 hover:bg-white/5">Entrar</a>
+                <a href="/cadastro" className="rounded-md bg-nt-blue px-3 py-3 text-center text-sm font-black text-white">Cadastrar</a>
+              </div>
+            )}
             <WhatsAppButton message={contactMessage} className="mt-2 w-full" />
           </nav>
         </div>

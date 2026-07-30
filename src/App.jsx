@@ -37,6 +37,9 @@ import { TechPlaceholder } from "./components/Placeholder";
 import { Section } from "./components/Section";
 import { AdminApp } from "./admin/AdminApp";
 import { isSupabaseConfigured } from "./lib/supabase";
+import { CustomerAuthProvider } from "./customer/CustomerAuthContext";
+import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from "./customer/CustomerAuthPages";
+import { CustomerAccountPage } from "./customer/CustomerAccountPages";
 import { listPublicGames } from "./admin/services/gameLibraryService";
 import { listPublicAssembledPcs, pcCategories, pcTypeLabel, pcTypeOptions } from "./admin/services/assembledPcService";
 import { classifyFps, formatBenchmarkResolution, formatFps, getGameImage, isValidHttpUrl, normalizeProductBenchmark, resolveBenchmarkGamesWithLibrary } from "./utils/pcBenchmark";
@@ -1546,7 +1549,7 @@ function Contact() {
   );
 }
 
-export default function App() {
+function AppRoutes() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [pendingSection, setPendingSection] = useState(null);
 
@@ -1587,8 +1590,34 @@ export default function App() {
     setPendingSection(id);
   };
 
+  const navigateTo = (path) => {
+    window.history.pushState({}, "", path);
+    setCurrentPath(window.location.pathname);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   if (currentPath.startsWith("/admin")) {
     return <AdminApp />;
+  }
+
+  if (currentPath === "/login") {
+    return <LoginPage onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/cadastro") {
+    return <RegisterPage onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/esqueci-senha") {
+    return <ForgotPasswordPage onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/redefinir-senha") {
+    return <ResetPasswordPage onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
+  }
+
+  if (currentPath.startsWith("/minha-conta")) {
+    return <CustomerAccountPage path={currentPath} onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
   }
 
   if (currentPath.startsWith("/computadores")) {
@@ -1620,5 +1649,17 @@ export default function App() {
         <MessageCircle />
       </a>
     </div>
+  );
+}
+
+export default function App() {
+  if (window.location.pathname.startsWith("/admin")) {
+    return <AdminApp />;
+  }
+
+  return (
+    <CustomerAuthProvider>
+      <AppRoutes />
+    </CustomerAuthProvider>
   );
 }

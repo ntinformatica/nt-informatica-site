@@ -215,6 +215,79 @@ export const supabase = {
         return { data: { session: null, user: null }, error };
       }
     },
+    async signUp({ email, password, options = {} }) {
+      try {
+        const payload = await authRequest("/signup", {
+          method: "POST",
+          body: JSON.stringify({
+            email,
+            password,
+            data: options.data || {},
+          }),
+        });
+        const session = normalizeAuthSession(payload);
+        if (session) {
+          writeAuthSession(session);
+          emitAuthChange("SIGNED_IN", session);
+        }
+        return { data: { session, user: payload?.user || session?.user || null }, error: null };
+      } catch (error) {
+        return { data: { session: null, user: null }, error };
+      }
+    },
+    async resetPasswordForEmail(email, options = {}) {
+      try {
+        const redirectTo = options.redirectTo ? `?redirect_to=${encodeURIComponent(options.redirectTo)}` : "";
+        await authRequest(`/recover${redirectTo}`, {
+          method: "POST",
+          body: JSON.stringify({
+            email,
+            gotrue_meta_security: {},
+          }),
+        });
+        return { data: {}, error: null };
+      } catch (error) {
+        return { data: null, error };
+      }
+    },
+    async setSession({ access_token, refresh_token }) {
+      try {
+        if (!access_token) throw new Error("Token de acesso ausente.");
+        const user = await authRequest("/user", {
+          method: "GET",
+          accessToken: access_token,
+        });
+        const session = normalizeAuthSession({
+          access_token,
+          refresh_token,
+          token_type: "bearer",
+          expires_in: 3600,
+          user,
+        });
+        writeAuthSession(session);
+        emitAuthChange("SIGNED_IN", session);
+        return { data: { session, user }, error: null };
+      } catch (error) {
+        return { data: { session: null, user: null }, error };
+      }
+    },
+    async updateUser(attributes) {
+      try {
+        const session = readAuthSession();
+        if (!session?.access_token) throw new Error("Sessao nao encontrada.");
+        const user = await authRequest("/user", {
+          method: "PUT",
+          accessToken: session.access_token,
+          body: JSON.stringify(attributes),
+        });
+        const nextSession = { ...session, user };
+        writeAuthSession(nextSession);
+        emitAuthChange("USER_UPDATED", nextSession);
+        return { data: { user }, error: null };
+      } catch (error) {
+        return { data: { user: null }, error };
+      }
+    },
     async getSession() {
       try {
         const session = await getValidAuthSession();
@@ -235,11 +308,12 @@ export const supabase = {
         },
       };
     },
-    async signOut() {
+    async signOut(options = {}) {
       const session = readAuthSession();
       try {
         if (session?.access_token) {
-          await authRequest("/logout", {
+          const scope = options.scope ? `?scope=${encodeURIComponent(options.scope)}` : "";
+          await authRequest(`/logout${scope}`, {
             method: "POST",
             accessToken: session.access_token,
           });

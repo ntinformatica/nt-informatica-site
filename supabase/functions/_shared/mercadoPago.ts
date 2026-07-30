@@ -17,23 +17,53 @@ function mercadoPagoHeaders(idempotencyKey = "") {
   return headers;
 }
 
+export class MercadoPagoHttpError extends Error {
+  status: number;
+  payload: unknown;
+  temporary: boolean;
+
+  constructor(status: number, payload: unknown) {
+    super(typeof payload === "string" ? payload : JSON.stringify(payload));
+    this.name = "MercadoPagoHttpError";
+    this.status = status;
+    this.payload = payload;
+    this.temporary = status === 429 || status >= 500;
+  }
+}
+
 async function mercadoPagoRequest(path: string, options: RequestInit = {}) {
-  const response = await fetch(`https://api.mercadopago.com${path}`, options);
-  const text = await response.text();
-  let payload: unknown = null;
-  if (text) {
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      payload = text;
+  const timeoutMs = Number(options.signal ? 0 : 15000);
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  try {
+    const response = await fetch(`https://api.mercadopago.com${path}`, {
+      ...options,
+      signal: options.signal || controller?.signal,
+    });
+    const text = await response.text();
+    let payload: unknown = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = text;
+      }
     }
-  }
 
-  if (!response.ok) {
-    throw new Error(typeof payload === "string" ? payload : JSON.stringify(payload));
-  }
+    if (!response.ok) {
+      throw new MercadoPagoHttpError(response.status, payload);
+    }
 
-  return payload as Record<string, unknown>;
+    return payload as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new MercadoPagoHttpError(504, { message: "Timeout ao chamar Mercado Pago." });
+    }
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function firstString(values: unknown[]): string {
@@ -299,6 +329,19 @@ export async function hmacSha256Hex(secret: string, payload: string) {
   return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function constantTimeEqual(left: string, right: string) {
+  const encoder = new TextEncoder();
+  const leftBytes = encoder.encode(left);
+  const rightBytes = encoder.encode(right);
+  if (leftBytes.length !== rightBytes.length) return false;
+
+  let diff = 0;
+  for (let index = 0; index < leftBytes.length; index += 1) {
+    diff |= leftBytes[index] ^ rightBytes[index];
+  }
+  return diff === 0;
+}
+
 export async function verifyMercadoPagoSignature(params: {
   signatureHeader: string;
   requestId: string;
@@ -320,5 +363,5 @@ export async function verifyMercadoPagoSignature(params: {
 
   const manifest = `id:${params.dataId};request-id:${params.requestId};ts:${timestamp};`;
   const expected = await hmacSha256Hex(secret, manifest);
-  return expected === received;
+  return constantTimeEqual(expected, received);
 }
