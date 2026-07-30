@@ -15,6 +15,14 @@ function formatCurrency(value) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
 }
 
+function nested(input, path) {
+  return path.reduce((current, key) => (current && typeof current === "object" ? current[key] : undefined), input);
+}
+
+function cardInstallments(cardData) {
+  return Number(cardData?.installments || nested(cardData, ["payment_method", "installments"]) || 1);
+}
+
 function PageShell({ children, onNavigate, getNavHref }) {
   return (
     <div className="min-h-screen overflow-x-hidden bg-nt-ink text-white">
@@ -210,18 +218,15 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
         profile: auth.profile,
         items: cart.items,
         paymentMethod,
-        installments: Number(cardData?.installments || 1),
-        card: cardData ? {
-          token: cardData.token,
-          payment_method_id: cardData.payment_method_id,
-          issuer_id: String(cardData.issuer_id || ""),
-        } : null,
+        installments: cardInstallments(cardData),
+        card: cardData || null,
         idempotencyKey: key,
       });
       const orderId = result?.data?.order?.id || result?.order?.id;
       if (!orderId) throw new Error("Pedido criado, mas o identificador nao foi retornado.");
       navigateTo(`/pedido/${orderId}/pagamento`);
     } catch (checkoutError) {
+      console.error("Falha ao finalizar checkout:", checkoutError);
       setError(checkoutError.message || "Não foi possível finalizar a compra.");
     } finally {
       setProcessing(false);

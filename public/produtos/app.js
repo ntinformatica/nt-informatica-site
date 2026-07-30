@@ -2683,7 +2683,7 @@ function productCartItem(product, variant = productVariant(product)) {
   const stock = Number(productField(product, variant, "stock") || 0);
   return {
     itemType: "product",
-    productId: product.id,
+    productId: product.supabaseId || product.id,
     variationId: variant?.id || "",
     name: product.name,
     variationName: variant?.name || variant?.color || "",

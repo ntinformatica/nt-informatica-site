@@ -1,4 +1,9 @@
 export const CART_STORAGE_KEY = "nt-store-cart-v1";
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isUuid(value) {
+  return typeof value === "string" && UUID_REGEX.test(value.trim());
+}
 
 export function itemKey(item) {
   return [
@@ -52,10 +57,27 @@ export function cartTotals(items) {
 
 export function checkoutItems(items) {
   return items.map((item) => ({
-    item_type: item.itemType,
-    product_id: item.productId || undefined,
-    variation_id: item.variationId || undefined,
-    assembled_pc_id: item.assembledPcId || undefined,
+    item_type: item.itemType || item.item_type,
+    product_id: String(item.productId || item.product_id || "").trim() || undefined,
+    variation_id: String(item.variationId || item.variation_id || "").trim() || undefined,
+    assembled_pc_id: String(item.assembledPcId || item.assembled_pc_id || "").trim() || undefined,
     quantity: Number(item.quantity || 1),
   }));
+}
+
+export function checkoutItemErrors(items) {
+  return checkoutItems(items).reduce((errors, item, index) => {
+    const label = `Item ${index + 1}`;
+    if (item.item_type === "product") {
+      if (!isUuid(item.product_id)) errors.push(`${label}: produto sem UUID valido`);
+      if (item.variation_id && !isUuid(item.variation_id)) errors.push(`${label}: variacao sem UUID valido`);
+      return errors;
+    }
+    if (item.item_type === "assembled_pc") {
+      if (!isUuid(item.assembled_pc_id)) errors.push(`${label}: computador sem UUID valido`);
+      return errors;
+    }
+    errors.push(`${label}: tipo de item invalido`);
+    return errors;
+  }, []);
 }

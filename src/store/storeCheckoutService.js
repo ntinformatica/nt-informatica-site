@@ -1,5 +1,5 @@
 import { supabaseFunction, supabaseRequest } from "../lib/supabase";
-import { checkoutItems } from "../cart/cartStorage";
+import { checkoutItemErrors, checkoutItems } from "../cart/cartStorage";
 import { onlyDigits } from "../customer/customerValidation";
 
 export const pickupInfo = {
@@ -44,17 +44,27 @@ export function createCheckoutAttemptKey(items, paymentMethod) {
 }
 
 export async function createStoreCheckout({ user, profile, items, paymentMethod, installments = 1, card = null, idempotencyKey }) {
-  return supabaseFunction("store-create-checkout", {
-    method: "POST",
-    body: JSON.stringify({
-      customer: customerPayload(user, profile),
-      items: checkoutItems(items),
-      payment_method: paymentMethod,
-      installments: paymentMethod === "pix" ? 1 : installments,
-      idempotency_key: idempotencyKey,
-      ...(paymentMethod === "card" ? { card } : {}),
-    }),
-  });
+  const itemErrors = checkoutItemErrors(items);
+  if (itemErrors.length) {
+    throw new Error(`Nao foi possivel finalizar: ${itemErrors.join("; ")}.`);
+  }
+
+  try {
+    return await supabaseFunction("store-create-checkout", {
+      method: "POST",
+      body: JSON.stringify({
+        customer: customerPayload(user, profile),
+        items: checkoutItems(items),
+        payment_method: paymentMethod,
+        installments: paymentMethod === "pix" ? 1 : installments,
+        idempotency_key: idempotencyKey,
+        ...(paymentMethod === "card" ? { card } : {}),
+      }),
+    });
+  } catch (error) {
+    console.error("Erro ao criar checkout da loja:", error);
+    throw new Error(error?.message || "Nao foi possivel finalizar a compra.");
+  }
 }
 
 export async function getOrderPaymentStatus(orderId) {

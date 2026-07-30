@@ -69,6 +69,31 @@ function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function nested(input: JsonObject, path: string[]) {
+  let current: unknown = input;
+  for (const key of path) {
+    if (!isObject(current)) return "";
+    current = current[key];
+  }
+  return current;
+}
+
+function unwrapCardPayload(input: JsonObject) {
+  const formData = input.formData;
+  if (isObject(formData)) return formData;
+  const paymentData = input.paymentData;
+  if (isObject(paymentData)) return paymentData;
+  return input;
+}
+
+function firstText(values: unknown[]) {
+  for (const value of values) {
+    const text = cleanText(value);
+    if (text) return text;
+  }
+  return "";
+}
+
 function isUuid(value: unknown) {
   return typeof value === "string" && UUID_REGEX.test(value.trim());
 }
@@ -188,12 +213,32 @@ function validateItems(value: unknown): StoreItem[] {
 function validateCard(value: unknown): CardInput {
   if (!isObject(value)) throw new Error("Dados do cartao obrigatorios.");
 
-  const token = cleanText(value.token);
-  const paymentMethodId = cleanText(value.payment_method_id || value.paymentMethodId).toLowerCase();
-  const issuerId = cleanText(value.issuer_id || value.issuerId);
+  const cardPayload = unwrapCardPayload(value);
+  const token = firstText([
+    cardPayload.token,
+    cardPayload.cardToken,
+    nested(cardPayload, ["payment_method", "token"]),
+  ]);
+  const paymentMethodId = firstText([
+    cardPayload.payment_method_id,
+    cardPayload.paymentMethodId,
+    nested(cardPayload, ["payment_method", "id"]),
+  ]).toLowerCase();
+  const issuerId = firstText([
+    cardPayload.issuer_id,
+    cardPayload.issuerId,
+    nested(cardPayload, ["issuer", "id"]),
+    nested(cardPayload, ["payment_method", "issuer_id"]),
+  ]);
+  const paymentTypeId = firstText([
+    cardPayload.payment_type_id,
+    cardPayload.paymentTypeId,
+    nested(cardPayload, ["payment_method", "type"]),
+  ]).toLowerCase();
 
   if (!token) throw new Error("Token do cartao nao informado.");
   if (!paymentMethodId) throw new Error("Bandeira do cartao nao informada.");
+  if (paymentTypeId && paymentTypeId !== "credit_card") throw new Error("Somente cartao de credito e aceito.");
 
   return {
     token,
