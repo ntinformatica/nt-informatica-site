@@ -55,6 +55,10 @@ function formatDate(value) {
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
 }
 
+function orderItemImage(item) {
+  return item?.main_image || item?.image_url || item?.configuration_snapshot?.main_image || "";
+}
+
 function routeKey(path) {
   if (path.includes("/pedidos")) return "pedidos";
   if (path.includes("/enderecos")) return "enderecos";
@@ -191,11 +195,12 @@ function ProfilePanel() {
   );
 }
 
-function OrdersPanel() {
+function OrdersPanel({ path = "" }) {
   const auth = useCustomerAuth();
   const [orders, setOrders] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
+  const routeOrderId = path.match(/^\/minha-conta\/pedidos\/([^/]+)/)?.[1] || "";
 
   useEffect(() => {
     let mounted = true;
@@ -206,6 +211,10 @@ function OrdersPanel() {
       mounted = false;
     };
   }, [auth.user?.email]);
+
+  useEffect(() => {
+    if (routeOrderId) openOrder(decodeURIComponent(routeOrderId));
+  }, [routeOrderId, auth.user?.email]);
 
   async function openOrder(orderId) {
     const details = await getCustomerOrderDetails(auth.user?.email, orderId);
@@ -232,7 +241,7 @@ function OrdersPanel() {
                 <td>{order.payment_method === "card" ? "Cartão" : order.payment_method === "pix" ? "Pix" : "-"}</td>
                 <td>{financialLabels[order.financial_status] || order.financial_status}</td>
                 <td>{operationalLabels[order.operational_status] || order.operational_status}</td>
-                <td><button type="button" onClick={() => openOrder(order.id)} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan hover:bg-nt-cyan/10">Ver detalhes</button></td>
+                <td><a href={`/minha-conta/pedidos/${encodeURIComponent(order.id)}`} onClick={(event) => { event.preventDefault(); window.history.pushState({}, "", `/minha-conta/pedidos/${encodeURIComponent(order.id)}`); openOrder(order.id); }} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan hover:bg-nt-cyan/10">Ver detalhes</a></td>
               </tr>
             ))}
           </tbody>
@@ -244,19 +253,48 @@ function OrdersPanel() {
             <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">Pedido</p><h3 className="mt-1 text-xl font-black text-white">{selected.order_number}</h3></div>
             <button type="button" onClick={() => setSelected(null)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Fechar</button>
           </div>
+          {(() => {
+            const payment = selected.store_payments?.[0];
+            const pixPending = payment?.payment_method === "pix" && payment?.qr_code && !["approved", "cancelled", "expired", "rejected", "refunded", "charged_back"].includes(payment.status);
+            return pixPending ? (
+              <div className="mt-5 rounded-md border border-lime-300/20 bg-lime-300/10 p-4">
+                <p className="font-black text-lime-100">Pix aguardando pagamento</p>
+                {payment.qr_code_base64 ? <img src={`data:image/png;base64,${payment.qr_code_base64}`} alt="QR Code Pix do pedido" className="mt-4 w-48 rounded-md bg-white p-2" /> : null}
+                <textarea readOnly value={payment.qr_code} className="mt-4 min-h-24 w-full rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-100" />
+              </div>
+            ) : null;
+          })()}
           <dl className="mt-5 grid gap-3 md:grid-cols-3">
             <div><dt className="text-xs text-slate-400">Pagamento</dt><dd className="font-bold text-white">{selected.payment_method === "card" ? "Cartão" : selected.payment_method === "pix" ? "Pix" : "-"}</dd></div>
             <div><dt className="text-xs text-slate-400">Financeiro</dt><dd className="font-bold text-white">{financialLabels[selected.financial_status] || selected.financial_status}</dd></div>
             <div><dt className="text-xs text-slate-400">Operação</dt><dd className="font-bold text-white">{operationalLabels[selected.operational_status] || selected.operational_status}</dd></div>
           </dl>
+          <div className="mt-5 rounded-md border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+            <p className="font-black text-white">Local de retirada</p>
+            <p className="mt-2">Rua Johann Sachse, 2891, Sala 1 - Badenfurt, Blumenau - SC.</p>
+            <p>Aguarde a confirmacao de que o pedido esta pronto antes de retirar.</p>
+          </div>
           <div className="mt-5 grid gap-3">
             {(selected.store_order_items || []).map((item) => (
               <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-white/5 p-4">
-                <div><p className="font-bold text-white">{item.product_name}</p><p className="text-sm text-slate-400">{item.variation_name || item.sku || item.internal_code}</p></div>
+                <div className="flex min-w-0 items-center gap-3">
+                  {orderItemImage(item) ? <img src={orderItemImage(item)} alt={item.product_name} className="h-14 w-14 rounded-md object-cover" /> : null}
+                  <div><p className="font-bold text-white">{item.product_name}</p><p className="text-sm text-slate-400">{item.variation_name || item.sku || item.internal_code}</p></div>
+                </div>
                 <p className="text-sm text-slate-300">{item.quantity} x {formatCurrency(item.final_unit_price)}</p>
               </div>
             ))}
           </div>
+          {selected.store_order_logs?.length ? (
+            <div className="mt-5 rounded-md border border-white/10 bg-white/5 p-4">
+              <p className="font-black text-white">Historico</p>
+              <div className="mt-3 grid gap-2 text-sm text-slate-300">
+                {selected.store_order_logs.map((log) => (
+                  <p key={log.id}><span className="text-slate-500">{formatDate(log.created_at)}</span> - {log.message || log.action}</p>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <p className="mt-5 text-right text-xl font-black text-nt-cyan">Total: {formatCurrency(selected.total_amount)}</p>
         </div>
       ) : null}
@@ -383,7 +421,7 @@ export function CustomerAccountPage({ path, onNavigate, getNavHref, navigateTo }
   const active = routeKey(path);
   return (
     <AccountShell path={path} onNavigate={onNavigate} getNavHref={getNavHref} navigateTo={navigateTo}>
-      {active === "pedidos" ? <OrdersPanel /> : null}
+      {active === "pedidos" ? <OrdersPanel path={path} /> : null}
       {active === "enderecos" ? <AddressesPanel /> : null}
       {active === "seguranca" ? <SecurityPanel /> : null}
       {active === "perfil" ? <ProfilePanel /> : null}

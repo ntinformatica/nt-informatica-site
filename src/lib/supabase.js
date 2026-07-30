@@ -80,6 +80,13 @@ function buildAuthUrl(path) {
   return `${supabaseUrl}/auth/v1${cleanPath}`;
 }
 
+function buildFunctionUrl(name) {
+  if (!assertSupabaseUrl()) {
+    throw new Error("URL do Supabase invalida. Use o Project URL no formato https://xxxx.supabase.co.");
+  }
+  return `${supabaseUrl}/functions/v1/${name}`;
+}
+
 function readAuthSession() {
   try {
     const stored = localStorage.getItem(authStorageKey);
@@ -374,6 +381,39 @@ export async function supabaseRequest(path, options = {}) {
     total: Number.isFinite(total) ? total : null,
     contentRange,
   };
+}
+
+export async function supabaseFunction(name, options = {}) {
+  if (!isSupabaseConfigured) {
+    throw new Error("Supabase nao configurado.");
+  }
+
+  const session = readAuthSession();
+  const headers = {
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${session?.access_token || supabaseAnonKey}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    ...options.headers,
+  };
+
+  const response = await fetch(buildFunctionUrl(name), {
+    ...options,
+    headers,
+  });
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || payload?.message || text || `Erro na funcao ${name}: ${response.status}`);
+  }
+  return payload;
 }
 
 export function storagePublicUrl(bucket, path) {

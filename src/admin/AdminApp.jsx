@@ -20,6 +20,7 @@ import {
   Plus,
   Search,
   Settings,
+  ShoppingBag,
   Pause,
   Star,
   Square,
@@ -97,6 +98,7 @@ import {
   ServiceOrdersManagerPage,
 } from "./pages/service-orders/ServiceOrdersPages";
 import { ServiceOrderViewPage } from "./pages/service-orders/ServiceOrderViewPage";
+import { StoreOrdersPage } from "./pages/store-orders/StoreOrdersPage";
 import {
   createProduct,
   deleteProduct,
@@ -109,6 +111,7 @@ import { createStockMovement, listStockMovements, previewStockMovement } from ".
 
 const menuItems = [
   ["Dashboard", "/admin", Home],
+  ["Pedidos", "/admin/pedidos", ShoppingBag],
   ["Produtos", "/admin/produtos", Boxes],
   ["PCs Montados", "/admin/pcs", Monitor],
   ["Biblioteca de Jogos", "/admin/jogos", Gamepad2],
@@ -324,6 +327,7 @@ function calculateCashPrice(value) {
 function routeInfo(pathname) {
   const cleanPath = pathname.replace(/\/$/, "") || "/admin";
   if (cleanPath === "/admin/login") return { page: "login" };
+  if (cleanPath === "/admin/pedidos") return { page: "storeOrders" };
   if (cleanPath.startsWith("/admin/os/visualizar/")) {
     return { page: "serviceOrderView", id: decodeURIComponent(cleanPath.replace("/admin/os/visualizar/", "")) };
   }
@@ -4256,6 +4260,7 @@ export function AdminApp() {
   if (!adminUser) return <LoginPage onLogin={loginAdmin} authError={authError} />;
 
   const titles = {
+    storeOrders: ["Pedidos", "Acompanhamento financeiro e operacional dos pedidos do e-commerce."],
     dashboard: ["Dashboard", "Resumo rápido do catálogo e da operação."],
     products: ["Produtos", "Busca, filtros, estoque, publicação e ações rápidas."],
     productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
@@ -4293,6 +4298,7 @@ export function AdminApp() {
       {error ? <div className="mb-5 rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
       {loading ? <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando dados do painel...</p> : null}
       {!loading && info.page === "dashboard" ? <Dashboard products={products} categories={categories} pcs={pcs} arenaData={arenaData} /> : null}
+      {!loading && info.page === "storeOrders" ? <StoreOrdersPage /> : null}
       {!loading && info.page === "products" ? (
         <ProductsPage
           products={products}

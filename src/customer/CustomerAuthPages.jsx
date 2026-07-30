@@ -81,7 +81,9 @@ export function LoginPage({ onNavigate, getNavHref, navigateTo }) {
       if (!remember) {
         // Supabase Auth keeps the browser session by default; this checkbox is reserved for future session policy.
       }
-      navigateTo("/minha-conta");
+      const redirect = sessionStorage.getItem("nt-post-login-redirect") || "/minha-conta";
+      sessionStorage.removeItem("nt-post-login-redirect");
+      navigateTo(redirect);
     } catch (error) {
       setMessage(error.message);
     } finally {

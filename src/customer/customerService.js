@@ -82,7 +82,7 @@ export async function getCustomerOrderDetails(email, orderId) {
   if (!email || !orderId) return null;
   const rows = await supabaseRequest(
     `/store_orders?id=eq.${encodeURIComponent(orderId)}&customer_email=eq.${encodeURIComponent(email)}`
-    + "&select=*,store_order_items(*),store_payments(id,payment_method,payment_type,status,status_detail,amount,installments,installment_amount,created_at,updated_at)&limit=1",
+    + "&select=*,store_order_items(*),store_payments(id,payment_method,payment_type,status,status_detail,amount,installments,installment_amount,qr_code,qr_code_base64,ticket_url,expires_at,created_at,updated_at),store_order_logs(id,action,message,created_at,metadata)&limit=1",
   ).catch((error) => {
     console.warn("Nao foi possivel carregar detalhe do pedido:", error);
     return [];

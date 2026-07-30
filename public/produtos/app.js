@@ -2650,6 +2650,77 @@ function productField(product, variant, field) {
   return variant?.[field] ?? product[field];
 }
 
+const CART_STORAGE_KEY = "nt-store-cart-v1";
+
+function cartItemKey(item) {
+  return [item.itemType, item.productId || "", item.variationId || "", item.assembledPcId || ""].join(":");
+}
+
+function readStoreCart() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeStoreCart(items) {
+  localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
+  window.dispatchEvent(new CustomEvent("nt-cart-updated", { detail: { items } }));
+  updateCatalogCartCount(items);
+}
+
+function updateCatalogCartCount(items = readStoreCart()) {
+  const badge = document.querySelector("#catalogCartCount");
+  if (!badge) return;
+  const total = items.reduce((sum, item) => sum + Math.max(0, Number(item.quantity || 0)), 0);
+  badge.textContent = String(total);
+}
+
+function productCartItem(product, variant = productVariant(product)) {
+  const images = productImages(product, variant);
+  const stock = Number(productField(product, variant, "stock") || 0);
+  return {
+    itemType: "product",
+    productId: product.id,
+    variationId: variant?.id || "",
+    name: product.name,
+    variationName: variant?.name || variant?.color || "",
+    image: images[0] || "",
+    unitPrice: parsePriceValue(productField(product, variant, "price")) || 0,
+    cashPrice: parsePriceValue(productField(product, variant, "cashPrice")) || 0,
+    stock: Number.isFinite(stock) ? stock : 0,
+    sku: productField(product, variant, "sku") || product.sku || "",
+    slug: product.slug || product.id || "",
+    quantity: 1,
+  };
+}
+
+function addProductToCart(product, variant = productVariant(product), buyNow = false) {
+  if (!stockStatus(product, variant).available) {
+    alert("Produto indisponível para compra online.");
+    return;
+  }
+  const item = productCartItem(product, variant);
+  const items = readStoreCart();
+  const key = cartItemKey(item);
+  const existing = items.find((entry) => cartItemKey(entry) === key);
+  const nextItems = existing
+    ? items.map((entry) => cartItemKey(entry) === key ? { ...entry, quantity: Math.min(Number(entry.stock || item.stock || 999), Number(entry.quantity || 0) + 1) } : entry)
+    : [...items, item];
+  writeStoreCart(nextItems);
+  if (buyNow) {
+    window.location.href = "/carrinho";
+  } else {
+    alert("Produto adicionado ao carrinho.");
+  }
+}
+
+updateCatalogCartCount();
+window.addEventListener("storage", () => updateCatalogCartCount());
+window.addEventListener("nt-cart-updated", (event) => updateCatalogCartCount(event.detail?.items));
+
 function stockStatus(product, variant = productVariant(product)) {
   const rawStock = productField(product, variant, "stock");
   const stock = Number(rawStock ?? 0);
@@ -2667,7 +2738,7 @@ function renderStockStatus(product, variant = productVariant(product)) {
 }
 
 function buyButtonLabel(product, variant = productVariant(product)) {
-  return stockStatus(product, variant).available ? "Comprar" : "Consulte disponibilidade";
+  return stockStatus(product, variant).available ? "Adicionar ao carrinho" : "Consulte disponibilidade";
 }
 
 function whatsappHref(product, variant = productVariant(product)) {
@@ -2885,8 +2956,9 @@ function updateDetailVariant(product, index) {
 
   const buyButton = document.querySelector("#detailBuyButton");
   if (buyButton) {
-    buyButton.href = whatsappHref(product, variant);
+    buyButton.dataset.variantIndex = String(index);
     buyButton.textContent = buyButtonLabel(product, variant);
+    buyButton.disabled = !stockStatus(product, variant).available;
   }
 
   const selectedVariantName = document.querySelector("#selectedVariantName");
@@ -2927,7 +2999,8 @@ function renderProductDetail(product) {
         <div id="detailPrice">${renderPrice(product, variant)}</div>
         <div id="detailTerms">${renderTerms(product, variant)}</div>
         <div class="detail-actions">
-          <a id="detailBuyButton" class="buy-button" href="${whatsappHref(product, variant)}" target="_blank" rel="noreferrer">${buyButtonLabel(product, variant)}</a>
+          ${stockStatus(product, variant).available ? `<button id="detailBuyButton" class="buy-button" type="button" data-product-id="${product.id}" data-variant-index="0">${buyButtonLabel(product, variant)}</button>` : `<a id="detailBuyButton" class="buy-button" href="${whatsappHref(product, variant)}" target="_blank" rel="noreferrer">${buyButtonLabel(product, variant)}</a>`}
+          <a class="secondary-button" href="${whatsappHref(product, variant)}" target="_blank" rel="noreferrer">Falar pelo WhatsApp</a>
           <button class="share-button" type="button" data-share-url="${absoluteProductHref(product)}" data-share-title="${product.name}">Compartilhar</button>
           <a class="secondary-button" href="${categoryHref(product.category)}">Voltar para ${product.category}</a>
         </div>
@@ -2976,7 +3049,8 @@ function renderProductCards(items) {
           ${renderPrice(product)}
           ${renderTerms(product)}
           ${product.id ? `<a class="secondary-button" href="${productHref(product)}">Ver detalhes</a>` : ""}
-          <a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>
+          ${stockStatus(product).available ? `<button class="buy-button add-cart-button" type="button" data-product-id="${product.id}">${buyButtonLabel(product)}</button>` : `<a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>`}
+          ${stockStatus(product).available ? `<a class="secondary-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">WhatsApp</a>` : ""}
         </div>
       </article>
     `)
@@ -3132,6 +3206,13 @@ sortSelect?.addEventListener("change", (event) => {
 });
 
 grid.addEventListener("click", (event) => {
+  const cartButton = event.target.closest(".add-cart-button, #detailBuyButton[data-product-id]");
+  if (cartButton) {
+    const product = products.find((item) => item.id === cartButton.dataset.productId) || productFromUrl();
+    if (product) addProductToCart(product, productVariant(product, Number(cartButton.dataset.variantIndex || 0)));
+    return;
+  }
+
   const shareButton = event.target.closest(".share-button");
   if (shareButton) {
     shareProduct(shareButton);

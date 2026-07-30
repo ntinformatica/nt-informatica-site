@@ -16,7 +16,7 @@
     <meta name="twitter:title" content="Produtos | NT Informática, Celulares e Games">
     <meta name="twitter:description" content="Produtos gamers, informática e acessórios selecionados com atendimento especializado.">
     <meta name="twitter:image" content="https://nt-informatica-site.vercel.app/arena/assets/nt-informatica-logo.jpg">
-    <link rel="stylesheet" href="/produtos/styles.css?v=20260709-1530">
+    <link rel="stylesheet" href="/produtos/styles.css?v=20260730-commerce">
   </head>
   <body>
     <header class="site-header">
@@ -27,7 +27,10 @@
           <small>Produtos por categoria</small>
         </span>
       </a>
-      <a class="back-link" href="/#produtos">Voltar ao site</a>
+      <nav class="header-actions" aria-label="Navegação do catálogo">
+        <a class="cart-link" href="/carrinho">Carrinho <span id="catalogCartCount">0</span></a>
+        <a class="back-link" href="/#produtos">Voltar ao site</a>
+      </nav>
     </header>
 
     <main>
@@ -72,7 +75,7 @@
 
     <script src="/produtos/supabase-config.js?v=20260709-1120"></script>
     <script src="/produtos/supabase-products.js?v=20260709-1120"></script>
-    <script src="/produtos/app.js?v=20260709-1530"></script>
+    <script src="/produtos/app.js?v=20260730-commerce"></script>
   </body>
 </html>
 

@@ -40,6 +40,8 @@ import { isSupabaseConfigured } from "./lib/supabase";
 import { CustomerAuthProvider } from "./customer/CustomerAuthContext";
 import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from "./customer/CustomerAuthPages";
 import { CustomerAccountPage } from "./customer/CustomerAccountPages";
+import { CartProvider, useCart } from "./cart/CartContext";
+import { CartPage, CheckoutPage, OrderPaymentPage } from "./cart/CartPages";
 import { listPublicGames } from "./admin/services/gameLibraryService";
 import { listPublicAssembledPcs, pcCategories, pcTypeLabel, pcTypeOptions } from "./admin/services/assembledPcService";
 import { classifyFps, formatBenchmarkResolution, formatFps, getGameImage, isValidHttpUrl, normalizeProductBenchmark, resolveBenchmarkGamesWithLibrary } from "./utils/pcBenchmark";
@@ -980,10 +982,27 @@ function PcCardImage({ pc, image }) {
   );
 }
 
+function pcCartItem(pc) {
+  const images = pcGallery(pc);
+  return {
+    itemType: "assembled_pc",
+    assembledPcId: pc.id,
+    name: pc.name,
+    image: images[0] || "",
+    unitPrice: parseMoney(pc.price) || 0,
+    cashPrice: pcCashPrice(pc) || 0,
+    stock: Number(pc.stock || 0),
+    sku: pc.internalCode || "",
+    slug: pc.slug || "",
+  };
+}
+
 function PcCard({ pc }) {
+  const cart = useCart();
   const images = pcGallery(pc);
   const available = Number(pc.stock || 0) >= 1;
   const summaryItems = [pc.processor, pc.graphicsCard, pc.memory, pc.storage].filter(Boolean).slice(0, 4);
+  const addToCart = () => cart.addItem(pcCartItem(pc));
 
   return (
     <Card className="flex flex-col">
@@ -1002,8 +1021,9 @@ function PcCard({ pc }) {
         <PcPriceBlock pc={pc} />
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Button href={'/computadores/' + encodeURIComponent(pc.slug)} variant="secondary">Ver detalhes</Button>
-          {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))}>Comprar</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
+          {available ? <button type="button" onClick={addToCart} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-nt-blue px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:-translate-y-0.5 hover:bg-nt-cyan focus:outline-none focus:ring-2 focus:ring-nt-cyan focus:ring-offset-2 focus:ring-offset-nt-ink">Adicionar ao carrinho</button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
         </div>
+        {available ? <WhatsAppButton message={pcWhatsappMessage(pc)} className="mt-3 w-full">Falar pelo WhatsApp</WhatsAppButton> : null}
       </div>
     </Card>
   );
@@ -1370,6 +1390,7 @@ function BenchmarkSection({ pc }) {
 }
 
 function PcDetail({ pc }) {
+  const cart = useCart();
   const available = Number(pc.stock || 0) >= 1;
   const targetUses = pcList(pc.targetUses);
   const benchmark = normalizeProductBenchmark(pc);
@@ -1410,7 +1431,9 @@ function PcDetail({ pc }) {
           <PcPriceBlock pc={pc} detail />
           <p className="mt-5 text-sm leading-6 text-slate-300">{pc.fullDescription || pc.shortDescription || "Computador montado e revisado pela NT Informática."}</p>
           <div className="mt-6 grid gap-3">
-            {available ? <Button href={whatsappLink(pcWhatsappMessage(pc))} className="w-full">Comprar pelo WhatsApp</Button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'} className="w-full">Consultar disponibilidade</WhatsAppButton>}
+            {available ? <button type="button" onClick={() => cart.addItem(pcCartItem(pc))} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-nt-blue px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:-translate-y-0.5 hover:bg-nt-cyan focus:outline-none focus:ring-2 focus:ring-nt-cyan focus:ring-offset-2 focus:ring-offset-nt-ink">Adicionar ao carrinho</button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'} className="w-full">Consultar disponibilidade</WhatsAppButton>}
+            {available ? <button type="button" onClick={() => { cart.addItem(pcCartItem(pc), { buyNow: true }); window.location.href = "/carrinho"; }} className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-slate-600 bg-white/5 px-5 py-3 text-sm font-bold text-white transition hover:-translate-y-0.5 hover:border-nt-cyan hover:bg-nt-cyan/10 focus:outline-none focus:ring-2 focus:ring-nt-cyan focus:ring-offset-2 focus:ring-offset-nt-ink">Comprar agora</button> : null}
+            {available ? <WhatsAppButton message={pcWhatsappMessage(pc)} className="w-full">Falar pelo WhatsApp</WhatsAppButton> : null}
             <PcShareButton pc={pc} />
             <Button href={whatsappShareUrl} variant="secondary" className="w-full">Compartilhar no WhatsApp</Button>
             <Button href="/computadores" variant="secondary" className="w-full">Voltar para computadores</Button>
@@ -1620,6 +1643,19 @@ function AppRoutes() {
     return <CustomerAccountPage path={currentPath} onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
   }
 
+  if (currentPath === "/carrinho") {
+    return <CartPage onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
+  }
+
+  if (currentPath === "/checkout") {
+    return <CheckoutPage onNavigate={handleNavigation} getNavHref={getNavHref} navigateTo={navigateTo} />;
+  }
+
+  if (currentPath.startsWith("/pedido/") && currentPath.endsWith("/pagamento")) {
+    const orderId = currentPath.replace(/^\/pedido\//, "").replace(/\/pagamento$/, "");
+    return <OrderPaymentPage orderId={decodeURIComponent(orderId)} onNavigate={handleNavigation} getNavHref={getNavHref} />;
+  }
+
   if (currentPath.startsWith("/computadores")) {
     return <ComputersPage path={currentPath} onNavigate={handleNavigation} getNavHref={getNavHref} />;
   }
@@ -1659,7 +1695,9 @@ export default function App() {
 
   return (
     <CustomerAuthProvider>
-      <AppRoutes />
+      <CartProvider>
+        <AppRoutes />
+      </CartProvider>
     </CustomerAuthProvider>
   );
 }

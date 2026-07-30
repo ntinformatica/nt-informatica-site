@@ -1,6 +1,7 @@
-import { LogOut, Menu, UserRound, X } from "lucide-react";
+import { LogOut, Menu, ShoppingCart, UserRound, X } from "lucide-react";
 import { useState } from "react";
 import logoNt from "../assets/nt-informatica-logo.jpg";
+import { useCart } from "../cart/CartContext";
 import { useCustomerAuth } from "../customer/CustomerAuthContext";
 import { navLinks } from "../data/siteData";
 import { WhatsAppButton } from "./Button";
@@ -10,6 +11,7 @@ const contactMessage = "Olá, gostaria de falar com a NT Informática, Celulares
 export function Header({ onNavigate, getNavHref }) {
   const [open, setOpen] = useState(false);
   const auth = useCustomerAuth();
+  const cart = useCart();
   const hrefFor = (id) => getNavHref ? getNavHref(id) : `#${id}`;
   const customerName = auth.profile?.full_name?.split(" ")[0] || auth.user?.user_metadata?.full_name?.split(" ")[0] || auth.user?.email?.split("@")[0] || "cliente";
   const handleNavigate = (id, event) => {
@@ -39,6 +41,10 @@ export function Header({ onNavigate, getNavHref }) {
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
+          <a href="/carrinho" className="relative grid h-11 w-11 place-items-center rounded-md border border-white/10 text-slate-200 transition hover:border-nt-cyan hover:bg-nt-cyan/10" aria-label={`Carrinho com ${cart.totals.count} itens`}>
+            <ShoppingCart size={18} />
+            {cart.totals.count ? <span className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-nt-cyan px-1 text-xs font-black text-nt-ink">{cart.totals.count}</span> : null}
+          </a>
           {auth.authenticated ? (
             <>
               <span className="max-w-[140px] truncate text-sm font-bold text-slate-300">Olá, {customerName}</span>
@@ -92,6 +98,9 @@ export function Header({ onNavigate, getNavHref }) {
                 <a href="/cadastro" className="rounded-md bg-nt-blue px-3 py-3 text-center text-sm font-black text-white">Cadastrar</a>
               </div>
             )}
+            <a href="/carrinho" className="relative rounded-md border border-white/10 px-3 py-3 text-center text-sm font-bold text-slate-200 hover:bg-white/5">
+              Carrinho {cart.totals.count ? `(${cart.totals.count})` : ""}
+            </a>
             <WhatsAppButton message={contactMessage} className="mt-2 w-full" />
           </nav>
         </div>
