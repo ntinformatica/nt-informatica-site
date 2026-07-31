@@ -522,13 +522,7 @@ function buildCardOrderBody(params: {
   const payer: JsonObject = {
     email: customer.customer_email || payment.payer_email,
     first_name: firstName(customer.customer_name),
-    identification: {
-      type: "CPF",
-      number: onlyDigits(customer.customer_document),
-    },
   };
-  const surname = lastName(customer.customer_name);
-  if (surname) payer.last_name = surname;
 
   return {
     type: "online",
@@ -649,21 +643,19 @@ function providerDetail(payload: unknown) {
   if (!isObject(payload)) return cleanText(payload);
   return firstString([
     payload.status_detail,
-    ...findDeepStrings(payload, (key, value) => key.endsWith("status_detail") && Boolean(value)),
+    payload.status,
     payload.code,
     payload.error,
     payload.message,
     ...findDeepStrings(payload, (key, value) =>
-      ["code", "error", "message"].some((name) => key.endsWith(name)) && Boolean(value)
+      ["status_detail", "status", "code", "error", "message"].some((name) => key.endsWith(name)) && Boolean(value)
     ),
-    payload.status,
-    ...findDeepStrings(payload, (key, value) => key.endsWith("status") && Boolean(value)),
   ]);
 }
 
 function cardRejectionMessage(status: unknown, statusDetail: unknown) {
   const normalized = `${cleanText(status)} ${cleanText(statusDetail)}`.toLowerCase();
-  if (normalized.includes("insufficient_amount") || normalized.includes("insufficient_funds") || normalized.includes("insufficient")) {
+  if (normalized.includes("insufficient_amount") || normalized.includes("insufficient_funds")) {
     return "Pagamento recusado por limite insuficiente. Verifique seu limite ou tente outro cartao.";
   }
   if (normalized.includes("invalid_installments") || normalized.includes("installments")) {
@@ -682,64 +674,6 @@ function cardRejectionMessage(status: unknown, statusDetail: unknown) {
     return "Pagamento em processamento. Aguarde a confirmacao.";
   }
   return "Pagamento recusado. Tente outro cartao ou outra forma de pagamento.";
-}
-
-function isCardRejection(status: unknown, statusDetail: unknown) {
-  const normalized = `${cleanText(status)} ${cleanText(statusDetail)}`.toLowerCase();
-  return (
-    normalized.includes("cc_rejected")
-    || normalized.includes("rejected")
-    || normalized.includes("failed")
-    || normalized.includes("insufficient")
-    || normalized.includes("bad_filled")
-    || normalized.includes("badfilled")
-    || normalized.includes("high_risk")
-    || normalized.includes("invalid_installments")
-    || normalized.includes("not_authorized")
-    || normalized.includes("unauthorized")
-    || normalized.includes("call_for_authorize")
-  );
-}
-
-function cardStatusInfo(order: JsonObject) {
-  const transaction = mercadoPagoPaymentTransaction(order) || {};
-  const statusDetails = findDeepStrings(order, (key, value) => key.endsWith("status_detail") && Boolean(value));
-  const statuses = findDeepStrings(order, (key, value) => key.endsWith("status") && Boolean(value));
-  const transactionStatus = firstString([transaction.status, ...statuses]);
-  const transactionStatusDetail = firstString([transaction.status_detail, ...statusDetails]);
-
-  return {
-    orderStatus: cleanText(order.status),
-    orderStatusDetail: cleanText(order.status_detail),
-    transactionStatus,
-    transactionStatusDetail,
-    statusDetail: firstString([transactionStatusDetail, order.status_detail, ...statusDetails]),
-    status: firstString([transactionStatus, order.status, ...statuses]),
-  };
-}
-
-function logCardStatusStructure(params: {
-  orderId: unknown;
-  paymentId: unknown;
-  httpStatus: number;
-  providerOrderId?: string;
-  transactionId?: string;
-  statusInfo: ReturnType<typeof cardStatusInfo>;
-  mappedStatus: string;
-}) {
-  const { orderId, paymentId, httpStatus, providerOrderId = "", transactionId = "", statusInfo, mappedStatus } = params;
-  console.info("Mercado Pago card status structure.", {
-    orderId,
-    paymentId,
-    httpStatus,
-    providerOrderId,
-    transactionId,
-    orderStatus: statusInfo.orderStatus,
-    orderStatusDetail: statusInfo.orderStatusDetail,
-    transactionStatus: statusInfo.transactionStatus,
-    transactionStatusDetail: statusInfo.transactionStatusDetail,
-    mappedStatus,
-  });
 }
 
 async function markCardPaymentRejected(params: {
@@ -964,15 +898,7 @@ Deno.serve(async (request) => {
 
     if (!mpResponse.ok) {
       const statusDetail = providerDetail(mpResponse.payload) || `http_${mpResponse.status}`;
-      const rejectedByProvider = isCardRejection("", statusDetail);
-      console.info("Mercado Pago card error structure.", {
-        orderId: order.order_id,
-        paymentId: payment.id,
-        httpStatus: mpResponse.status,
-        statusDetail,
-        rejectedByProvider,
-      });
-      if (!mpResponse.temporary && rejectedByProvider) {
+      if (!mpResponse.temporary && (mpResponse.status === 400 || mpResponse.status === 422)) {
         payment = await markCardPaymentRejected({
           order,
           payment,
@@ -1004,11 +930,8 @@ Deno.serve(async (request) => {
     const transaction = mercadoPagoPaymentTransaction(mercadoPagoOrder) || {};
     const transactionId = mercadoPagoPaymentTransactionId(mercadoPagoOrder);
     const method = mercadoPagoPaymentMethod(mercadoPagoOrder);
-    const statusInfo = cardStatusInfo(mercadoPagoOrder);
-    const statusDetail = statusInfo.statusDetail;
-    const mappedStatus = isCardRejection(statusInfo.status, statusDetail)
-      ? "rejected"
-      : mapMercadoPagoStatus(statusInfo.status || statusDetail || "pending");
+    const mappedStatus = mapMercadoPagoStatus(transaction.status || transaction.status_detail || mercadoPagoOrder.status || mercadoPagoOrder.status_detail || "pending");
+    const statusDetail = cleanText(transaction.status_detail || mercadoPagoOrder.status_detail);
     const cardBrand = firstString([method.id, input.card?.payment_method_id]);
     const cardLastFour = firstString([
       method.last_four_digits,
@@ -1016,16 +939,6 @@ Deno.serve(async (request) => {
       method.last4,
       isObject(method.card) ? method.card.last_four_digits : "",
     ]).replace(/\D/g, "").slice(-4);
-
-    logCardStatusStructure({
-      orderId: order.order_id,
-      paymentId: payment.id,
-      httpStatus: mpResponse.status,
-      providerOrderId,
-      transactionId,
-      statusInfo,
-      mappedStatus,
-    });
 
     payment = await patchStorePayment(String(payment.id), {
       mercado_pago_order_id: providerOrderId || null,

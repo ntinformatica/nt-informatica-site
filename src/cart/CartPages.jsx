@@ -33,6 +33,35 @@ function brickPayloadSummary(cardData) {
   };
 }
 
+function checkoutResultOrder(result) {
+  return result?.data?.order || result?.order || result?.details?.order || null;
+}
+
+function checkoutResultPayment(result) {
+  return result?.data?.payment || result?.payment || result?.details?.payment || null;
+}
+
+function checkoutResultOrderId(result) {
+  return checkoutResultOrder(result)?.id || result?.data?.order_id || result?.order_id || "";
+}
+
+function checkoutPaymentStatus(result) {
+  return String(checkoutResultPayment(result)?.status || checkoutResultOrder(result)?.financial_status || "").toLowerCase();
+}
+
+function checkoutPaymentStatusDetail(result) {
+  return String(checkoutResultPayment(result)?.status_detail || "").toLowerCase();
+}
+
+function checkoutRejectionMessage(error) {
+  const detail = checkoutPaymentStatusDetail(error);
+  const message = String(error?.message || "");
+  if (detail.includes("insufficient_amount") || detail.includes("insufficient_funds")) {
+    return "Pagamento recusado por limite insuficiente. Verifique seu limite ou tente outro cartão.";
+  }
+  return message || "Pagamento recusado. Tente outro cartão ou outra forma de pagamento.";
+}
+
 class EcommerceErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -324,13 +353,25 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
         card: cardData || null,
         idempotencyKey: key,
       });
-      const orderId = result?.data?.order?.id || result?.order?.id;
+      const orderId = checkoutResultOrderId(result);
+      const paymentStatus = checkoutPaymentStatus(result);
+      const paymentStatusDetail = checkoutPaymentStatusDetail(result);
       console.info("Resposta da Edge Function store-create-checkout.", {
         ok: result?.ok !== false,
         hasOrderId: Boolean(orderId),
         paymentMethod,
+        paymentStatus,
+        paymentStatusDetail,
       });
       if (!orderId) throw new Error("Pedido criado, mas o identificador nao foi retornado.");
+      if (["rejected", "failed"].includes(paymentStatus)) {
+        setError("Pagamento recusado. Tente outro cartão ou outra forma de pagamento.");
+        setAttemptKey("");
+        return;
+      }
+      if (["approved", "paid"].includes(paymentStatus)) {
+        cart.clearCart();
+      }
       navigateTo(`/pedido/${orderId}/pagamento`);
     } catch (checkoutError) {
       console.error("Falha ao finalizar checkout:", {
@@ -341,7 +382,16 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
         hasOrder: Boolean(checkoutError?.details?.order),
         hasPayment: Boolean(checkoutError?.details?.payment),
       });
-      setError(checkoutError.message || "Não foi possível finalizar a compra.");
+      const rejectedOrderId = checkoutResultOrderId(checkoutError);
+      const rejectedStatus = checkoutPaymentStatus(checkoutError);
+      if (["rejected", "failed"].includes(rejectedStatus)) {
+        setError(checkoutRejectionMessage(checkoutError));
+        setAttemptKey("");
+      } else if (rejectedOrderId && ["processing", "in_process", "pending"].includes(rejectedStatus)) {
+        navigateTo(`/pedido/${rejectedOrderId}/pagamento`);
+      } else {
+        setError(checkoutError.message || "Não foi possível finalizar a compra.");
+      }
     } finally {
       setProcessing(false);
     }
