@@ -423,6 +423,16 @@ export function OrderPaymentPage({ orderId, onNavigate, getNavHref }) {
 
   const payment = order?.store_payments?.[0];
   const status = payment?.status || order?.financial_status || "pending";
+  const paymentInManualReview = status === "processing" && payment?.status_detail === "pending_review_manual";
+  const paymentTitle = status === "approved"
+    ? "Pagamento aprovado"
+    : status === "expired"
+      ? "Pagamento expirado"
+      : status === "rejected"
+        ? "Pagamento recusado"
+        : paymentInManualReview
+          ? "Pagamento em análise"
+          : "Aguardando pagamento";
   const pixCode = payment?.qr_code || "";
 
   async function copyPix() {
@@ -438,8 +448,8 @@ export function OrderPaymentPage({ orderId, onNavigate, getNavHref }) {
         {!order ? <Card>Consultando pedido...</Card> : (
           <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
             <Card>
-              <div className="flex items-center gap-3"><PackageCheck className="text-nt-cyan" /><h2 className="text-2xl font-black text-white">{status === "approved" ? "Pagamento aprovado" : status === "expired" ? "Pagamento expirado" : status === "rejected" ? "Pagamento recusado" : "Aguardando pagamento"}</h2></div>
-              <p className="mt-3 text-sm leading-6 text-slate-300">Status financeiro: {status}. Quando aprovado, aguarde a preparação do pedido para retirada na loja.</p>
+              <div className="flex items-center gap-3"><PackageCheck className="text-nt-cyan" /><h2 className="text-2xl font-black text-white">{paymentTitle}</h2></div>
+              <p className="mt-3 text-sm leading-6 text-slate-300">{paymentInManualReview ? "Seu pagamento está em análise pela operadora. Assim que houver atualização, o pedido será atualizado automaticamente." : `Status financeiro: ${status}. Quando aprovado, aguarde a preparação do pedido para retirada na loja.`}</p>
               {payment?.payment_method === "pix" && pixCode && status !== "approved" ? (
                 <div className="mt-6 grid gap-4">
                   {payment.qr_code_base64 ? <img src={`data:image/png;base64,${payment.qr_code_base64}`} alt="QR Code Pix" className="mx-auto w-full max-w-xs rounded-lg bg-white p-3" /> : null}
