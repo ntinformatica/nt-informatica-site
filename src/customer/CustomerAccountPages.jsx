@@ -129,6 +129,9 @@ function AccountShell({ path, onNavigate, getNavHref, navigateTo, children }) {
 
 function ProfilePanel() {
   const auth = useCustomerAuth();
+  const metadata = auth.user?.user_metadata || {};
+  const termsAccepted = Boolean(auth.profile?.terms_accepted_at || metadata.terms_accepted || metadata.acceptTerms || metadata.termsAccepted);
+  const privacyAccepted = Boolean(auth.profile?.privacy_accepted_at || metadata.privacy_accepted || metadata.acceptPrivacy || metadata.privacyAccepted);
   const [values, setValues] = useState({
     fullName: auth.profile?.full_name || "",
     cpf: auth.profile?.cpf ? formatCpf(auth.profile.cpf) : "",
@@ -136,6 +139,10 @@ function ProfilePanel() {
     phone: auth.profile?.phone || "",
     secondaryPhone: auth.profile?.secondary_phone || "",
     avatarUrl: auth.profile?.avatar_url || "",
+    acceptTerms: termsAccepted,
+    acceptPrivacy: privacyAccepted,
+    termsAcceptedAt: auth.profile?.terms_accepted_at || "",
+    privacyAcceptedAt: auth.profile?.privacy_accepted_at || "",
   });
   const [email, setEmail] = useState(auth.user?.email || "");
   const [message, setMessage] = useState("");
@@ -151,9 +158,13 @@ function ProfilePanel() {
       phone: auth.profile?.phone || "",
       secondaryPhone: auth.profile?.secondary_phone || "",
       avatarUrl: auth.profile?.avatar_url || "",
+      acceptTerms: termsAccepted,
+      acceptPrivacy: privacyAccepted,
+      termsAcceptedAt: auth.profile?.terms_accepted_at || "",
+      privacyAcceptedAt: auth.profile?.privacy_accepted_at || "",
     });
     setEmail(auth.user?.email || "");
-  }, [auth.profile, auth.user?.email]);
+  }, [auth.profile, auth.user?.email, termsAccepted, privacyAccepted]);
 
   function setField(field, value) {
     setValues((current) => ({ ...current, [field]: value }));
@@ -166,6 +177,8 @@ function ProfilePanel() {
     setSuccess("");
     try {
       if (!isValidCpf(values.cpf)) throw new Error("Informe um CPF valido com 11 digitos.");
+      if (!values.termsAcceptedAt && !values.acceptTerms) throw new Error("Aceite os Termos de Uso para continuar.");
+      if (!values.privacyAcceptedAt && !values.acceptPrivacy) throw new Error("Aceite a Politica de Privacidade para continuar.");
       await upsertCustomerProfile(auth.user.id, values);
       if (email !== auth.user.email) await auth.updateEmail(email);
       await auth.refreshProfile();
@@ -191,6 +204,27 @@ function ProfilePanel() {
         <Field id="profile-birth" label="Data de nascimento"><input id="profile-birth" type="date" value={values.birthDate || ""} onChange={(event) => setField("birthDate", event.target.value)} className={inputClass()} /></Field>
         <Field id="profile-secondary" label="Telefone secundário"><input id="profile-secondary" value={values.secondaryPhone} onChange={(event) => setField("secondaryPhone", formatPhone(event.target.value))} className={inputClass()} /></Field>
         <Field id="profile-avatar" label="Foto de perfil por URL" hint="Upload de foto pode ser ligado ao Storage em uma etapa futura."><input id="profile-avatar" value={values.avatarUrl} onChange={(event) => setField("avatarUrl", event.target.value)} className={inputClass()} /></Field>
+        <div className="md:col-span-2 rounded-md border border-white/10 bg-white/5 p-4">
+          <h3 className="text-base font-black text-white">Termos e privacidade</h3>
+          <div className="mt-4 grid gap-3 text-sm text-slate-300">
+            {values.termsAcceptedAt ? (
+              <p className="font-bold text-lime-100">Termos de Uso aceitos em {formatDate(values.termsAcceptedAt)}.</p>
+            ) : (
+              <label className="flex gap-3">
+                <input type="checkbox" checked={values.acceptTerms} onChange={(event) => setField("acceptTerms", event.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-950 text-nt-cyan" />
+                <span>Aceito os <a href="/termos-de-uso" target="_blank" rel="noreferrer" className="font-black text-nt-cyan hover:text-white">Termos de Uso</a>.</span>
+              </label>
+            )}
+            {values.privacyAcceptedAt ? (
+              <p className="font-bold text-lime-100">Politica de Privacidade aceita em {formatDate(values.privacyAcceptedAt)}.</p>
+            ) : (
+              <label className="flex gap-3">
+                <input type="checkbox" checked={values.acceptPrivacy} onChange={(event) => setField("acceptPrivacy", event.target.checked)} className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-950 text-nt-cyan" />
+                <span>Aceito a <a href="/politica-de-privacidade" target="_blank" rel="noreferrer" className="font-black text-nt-cyan hover:text-white">Politica de Privacidade</a>.</span>
+              </label>
+            )}
+          </div>
+        </div>
         <div className="flex items-end"><button type="submit" disabled={saving} className="min-h-12 w-full rounded-md bg-nt-blue px-5 py-3 text-sm font-black text-white shadow-glow transition hover:bg-nt-cyan disabled:opacity-60">{saving ? "Salvando..." : "Salvar perfil"}</button></div>
       </form>
     </Card>

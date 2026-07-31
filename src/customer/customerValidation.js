@@ -75,6 +75,8 @@ export function passwordHelpText(value = "") {
 }
 
 export function normalizeProfilePayload(values) {
+  const termsAcceptedAt = values.termsAcceptedAt || values.terms_accepted_at || (values.acceptTerms ? new Date().toISOString() : undefined);
+  const privacyAcceptedAt = values.privacyAcceptedAt || values.privacy_accepted_at || (values.acceptPrivacy ? new Date().toISOString() : undefined);
   return {
     full_name: String(values.fullName || values.full_name || "").trim(),
     cpf: onlyDigits(values.cpf),
@@ -84,6 +86,8 @@ export function normalizeProfilePayload(values) {
     secondary_phone: values.secondaryPhone ? formatPhone(values.secondaryPhone) : "",
     secondary_phone_normalized: values.secondaryPhone ? onlyDigits(values.secondaryPhone) : "",
     avatar_url: String(values.avatarUrl || values.avatar_url || "").trim(),
+    terms_accepted_at: termsAcceptedAt,
+    privacy_accepted_at: privacyAcceptedAt,
   };
 }
 
