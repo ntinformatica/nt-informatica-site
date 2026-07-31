@@ -606,6 +606,14 @@ async function patchStorePayment(paymentId: string, values: JsonObject) {
   return fromRows(rows) as JsonObject | null;
 }
 
+async function patchStoreOrder(orderId: string, values: JsonObject) {
+  const rows = await supabaseRest(`/store_orders?id=eq.${encodeURIComponent(orderId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(values),
+  });
+  return fromRows(rows) as JsonObject | null;
+}
+
 async function insertStorePaymentEvent(event: JsonObject) {
   await supabaseRest("/store_payment_events", {
     method: "POST",
@@ -624,6 +632,107 @@ function providerErrorMessage(status: number) {
   if (status === 429) return "Mercado Pago recebeu muitas tentativas. Tente novamente em instantes.";
   if (status >= 500) return "Mercado Pago indisponivel no momento.";
   return "Falha ao criar pagamento no Mercado Pago.";
+}
+
+function providerDetail(payload: unknown) {
+  if (!isObject(payload)) return cleanText(payload);
+  return firstString([
+    payload.status_detail,
+    payload.status,
+    payload.code,
+    payload.error,
+    payload.message,
+    ...findDeepStrings(payload, (key, value) =>
+      ["status_detail", "status", "code", "error", "message"].some((name) => key.endsWith(name)) && Boolean(value)
+    ),
+  ]);
+}
+
+function cardRejectionMessage(status: unknown, statusDetail: unknown) {
+  const normalized = `${cleanText(status)} ${cleanText(statusDetail)}`.toLowerCase();
+  if (normalized.includes("insufficient_amount") || normalized.includes("insufficient_funds")) {
+    return "Pagamento recusado por limite insuficiente. Verifique seu limite ou tente outro cartao.";
+  }
+  if (normalized.includes("invalid_installments") || normalized.includes("installments")) {
+    return "A quantidade de parcelas selecionada nao e aceita por este cartao.";
+  }
+  if (normalized.includes("high_risk") || normalized.includes("risk")) {
+    return "O pagamento nao foi autorizado. Tente outro meio de pagamento.";
+  }
+  if (normalized.includes("invalid") || normalized.includes("bad_filled") || normalized.includes("badfilled")) {
+    return "Dados do cartao invalidos. Confira as informacoes e tente novamente.";
+  }
+  if (normalized.includes("unauthorized") || normalized.includes("not_authorized") || normalized.includes("call_for_authorize")) {
+    return "Cartao nao autorizado. Fale com o banco ou tente outro cartao.";
+  }
+  if (normalized.includes("processing") || normalized.includes("in_process")) {
+    return "Pagamento em processamento. Aguarde a confirmacao.";
+  }
+  return "Pagamento recusado. Tente outro cartao ou outra forma de pagamento.";
+}
+
+async function markCardPaymentRejected(params: {
+  order: JsonObject;
+  payment: JsonObject;
+  statusDetail: string;
+  sanitizedPayload: unknown;
+  providerStatus?: number;
+}) {
+  const { order, payment, statusDetail, sanitizedPayload, providerStatus } = params;
+  const now = new Date().toISOString();
+  const paymentId = String(payment.id || "");
+  const orderId = String(order.order_id || payment.order_id || "");
+
+  let rejectedPayment = payment;
+  if (paymentId) {
+    rejectedPayment = await patchStorePayment(paymentId, {
+      status: "rejected",
+      status_detail: statusDetail,
+      raw_response: { mercadoPagoRejection: sanitizedPayload },
+      metadata: {
+        ...(isObject(payment.metadata) ? payment.metadata : {}),
+        lastProviderRejectionAt: now,
+        lastProviderErrorStatus: providerStatus || null,
+      },
+    }) || payment;
+  }
+
+  if (orderId) {
+    await patchStoreOrder(orderId, {
+      financial_status: "rejected",
+      operational_status: "cancelled",
+      cancelled_at: now,
+      metadata: {
+        ...(isObject(order.metadata) ? order.metadata : {}),
+        rejectedBy: "store-create-checkout",
+        rejectedAt: now,
+        rejectionStatusDetail: statusDetail,
+      },
+    }).catch((error) => {
+      console.warn("Falha ao marcar pedido recusado no checkout.", error);
+    });
+  }
+
+  await insertStorePaymentEvent({
+    payment_id: rejectedPayment.id,
+    provider: "mercado_pago",
+    provider_event_id: `${rejectedPayment.id}:card-rejected:${statusDetail || providerStatus || Date.now()}`,
+    event_type: "store_payment.card_rejected",
+    event_status: "rejected",
+    payload: sanitizedPayload,
+    processed: true,
+    processed_at: now,
+  });
+
+  console.info("Pagamento com cartao recusado.", {
+    orderId,
+    paymentId,
+    status: "rejected",
+    statusDetail,
+    providerStatus: providerStatus || null,
+  });
+
+  return rejectedPayment;
 }
 
 function checkoutErrorStatus(message: string) {
@@ -783,6 +892,23 @@ Deno.serve(async (request) => {
     const sanitizedPayload = sanitizeDeep(mpResponse.payload);
 
     if (!mpResponse.ok) {
+      const statusDetail = providerDetail(mpResponse.payload) || `http_${mpResponse.status}`;
+      if (!mpResponse.temporary && (mpResponse.status === 400 || mpResponse.status === 422)) {
+        payment = await markCardPaymentRejected({
+          order,
+          payment,
+          statusDetail,
+          sanitizedPayload,
+          providerStatus: mpResponse.status,
+        });
+        return fail(request, cardRejectionMessage("rejected", statusDetail), 402, {
+          order: publicOrder({ ...order, financial_status: "rejected", operational_status: "cancelled" }),
+          payment: publicPayment(payment, "card"),
+          status: "rejected",
+          status_detail: statusDetail,
+        });
+      }
+
       await patchStorePayment(String(payment.id), {
         raw_response: { mercadoPagoError: sanitizedPayload },
         metadata: {
@@ -800,6 +926,7 @@ Deno.serve(async (request) => {
     const transactionId = mercadoPagoPaymentTransactionId(mercadoPagoOrder);
     const method = mercadoPagoPaymentMethod(mercadoPagoOrder);
     const mappedStatus = mapMercadoPagoStatus(transaction.status || transaction.status_detail || mercadoPagoOrder.status || mercadoPagoOrder.status_detail || "pending");
+    const statusDetail = cleanText(transaction.status_detail || mercadoPagoOrder.status_detail);
     const cardBrand = firstString([method.id, input.card?.payment_method_id]);
     const cardLastFour = firstString([
       method.last_four_digits,
@@ -813,7 +940,7 @@ Deno.serve(async (request) => {
       mercado_pago_payment_id: transactionId || providerOrderId || null,
       mercado_pago_transaction_id: transactionId || null,
       status: mappedStatus,
-      status_detail: cleanText(transaction.status_detail || mercadoPagoOrder.status_detail),
+      status_detail: statusDetail,
       payment_type: "credit_card",
       installments: input.installments || 1,
       payer_email: input.customer.customer_email,
@@ -839,6 +966,22 @@ Deno.serve(async (request) => {
       processed: true,
       processed_at: new Date().toISOString(),
     });
+
+    if (mappedStatus === "rejected") {
+      payment = await markCardPaymentRejected({
+        order,
+        payment,
+        statusDetail,
+        sanitizedPayload,
+        providerStatus: mpResponse.status,
+      });
+      return fail(request, cardRejectionMessage(mappedStatus, statusDetail), 402, {
+        order: publicOrder({ ...order, financial_status: "rejected", operational_status: "cancelled" }),
+        payment: publicPayment(payment, "card"),
+        status: mappedStatus,
+        status_detail: statusDetail,
+      });
+    }
 
     return ok(request, {
       order: publicOrder(order),

@@ -333,7 +333,14 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
       if (!orderId) throw new Error("Pedido criado, mas o identificador nao foi retornado.");
       navigateTo(`/pedido/${orderId}/pagamento`);
     } catch (checkoutError) {
-      console.error("Falha ao finalizar checkout:", checkoutError);
+      console.error("Falha ao finalizar checkout:", {
+        message: checkoutError?.message || "",
+        status: checkoutError?.status || null,
+        paymentStatus: checkoutError?.details?.status || null,
+        statusDetail: checkoutError?.details?.status_detail || null,
+        hasOrder: Boolean(checkoutError?.details?.order),
+        hasPayment: Boolean(checkoutError?.details?.payment),
+      });
       setError(checkoutError.message || "Não foi possível finalizar a compra.");
     } finally {
       setProcessing(false);

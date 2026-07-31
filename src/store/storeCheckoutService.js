@@ -66,8 +66,15 @@ export async function createStoreCheckout({ user, profile, items, paymentMethod,
       }),
     });
   } catch (error) {
-    console.error("Erro ao criar checkout da loja:", error);
-    throw new Error(error?.message || "Nao foi possivel finalizar a compra.");
+    console.error("Erro ao criar checkout da loja:", {
+      message: error?.message || "",
+      status: error?.status || null,
+      paymentStatus: error?.details?.status || null,
+      statusDetail: error?.details?.status_detail || null,
+      hasOrder: Boolean(error?.details?.order),
+      hasPayment: Boolean(error?.details?.payment),
+    });
+    throw error;
   }
 }
 

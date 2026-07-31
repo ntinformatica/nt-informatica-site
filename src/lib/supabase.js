@@ -416,9 +416,11 @@ export async function supabaseFunction(name, options = {}) {
       name,
       status: response.status,
       message,
+      details: payload?.details || null,
     });
     const error = new Error(message);
     error.status = response.status;
+    error.details = payload?.details || null;
     throw error;
   }
   return payload;
