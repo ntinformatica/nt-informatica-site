@@ -137,7 +137,8 @@ function orderItemCatalogHref(item) {
   }
   if (itemType === "product") {
     const productId = String(item?.product_id || "").trim();
-    return productId ? "/produtos?produto=" + encodeURIComponent(productId) : "";
+    const productIdentifier = slug || productId;
+    return productIdentifier ? "/produtos?produto=" + encodeURIComponent(productIdentifier) : "";
   }
   return "";
 }

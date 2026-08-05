@@ -2540,8 +2540,17 @@ function publicProductVisible(product) {
 
 function productFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const requested = params.get("produto");
-  return products.find((product) => product.id === requested);
+  const requested = String(params.get("produto") || "").trim();
+  if (!requested) return null;
+  return products.find((product) => (
+    String(product.id || "") === requested
+    || String(product.supabaseId || "") === requested
+    || String(product.slug || "") === requested
+  ));
+}
+
+function requestedProductParam() {
+  return String(new URLSearchParams(window.location.search).get("produto") || "").trim();
 }
 
 function activeProductVariants(product) {
@@ -2982,7 +2991,7 @@ function renderProductDetail(product) {
   });
 
   grid.innerHTML = `
-    <article class="product-detail">
+    <article class="product-detail catalog-product-highlight">
       <div class="detail-gallery">
         ${renderDetailMainImage(product, mainImage)}
         <div id="detailThumbs" class="detail-thumbs" aria-label="Fotos do produto">
@@ -3090,6 +3099,27 @@ function renderSearchResults(query) {
   }
 
   grid.innerHTML = renderProductCards(results);
+  scrollToCatalogProducts();
+}
+
+function renderMissingProduct(requested) {
+  currentCategory = "";
+  currentSearch = "";
+  title.textContent = "Produto indisponivel";
+  pageTitle.textContent = "Produto indisponivel";
+  count.textContent = "0 produtos";
+
+  document.querySelectorAll(".category-button").forEach((button) => {
+    button.classList.remove("active");
+  });
+
+  grid.innerHTML = `
+    <article class="empty-category">
+      <strong>Produto nao encontrado</strong>
+      <p>Este produto nao esta mais disponivel no catalogo.</p>
+      ${requested ? `<p class="catalog-muted">Codigo pesquisado: ${requested}</p>` : ""}
+    </article>
+  `;
   scrollToCatalogProducts();
 }
 
@@ -3255,9 +3285,12 @@ async function initializeCatalog() {
   await loadPublicCatalog();
   renderCategoryButtons();
 
+  const requestedProduct = requestedProductParam();
   const selectedProduct = productFromUrl();
   if (selectedProduct && publicProductVisible(selectedProduct)) {
     renderProductDetail(selectedProduct);
+  } else if (requestedProduct) {
+    renderMissingProduct(requestedProduct);
   } else {
     setCategory(categoryFromUrl(), { scroll: hasCategoryParam() });
   }

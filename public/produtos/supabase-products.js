@@ -117,6 +117,7 @@
     return {
       id: product.slug || product.id,
       supabaseId: product.id,
+      slug: product.slug || "",
       name: product.name,
       category,
       price: formatCurrency(product.price) || "Consulte",
