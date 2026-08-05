@@ -3045,12 +3045,16 @@ function renderProductCards(items) {
           <small>${product.category}</small>
           <h3>${product.id ? `<a href="${productHref(product)}">${product.name}</a>` : product.name}</h3>
           <p>${product.summary ?? product.description}</p>
-          ${renderStockStatus(product)}
-          ${renderPrice(product)}
-          ${renderTerms(product)}
-          ${product.id ? `<a class="secondary-button" href="${productHref(product)}">Ver detalhes</a>` : ""}
-          ${stockStatus(product).available ? `<button class="buy-button add-cart-button" type="button" data-product-id="${product.id}">${buyButtonLabel(product)}</button>` : `<a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>`}
-          ${stockStatus(product).available ? `<a class="secondary-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">WhatsApp</a>` : ""}
+          <div class="product-footer">
+            ${renderStockStatus(product)}
+            ${renderPrice(product)}
+            ${renderTerms(product)}
+            <div class="product-actions">
+              ${product.id ? `<a class="secondary-button" href="${productHref(product)}">Ver detalhes</a>` : ""}
+              ${stockStatus(product).available ? `<button class="buy-button add-cart-button" type="button" data-product-id="${product.id}">${buyButtonLabel(product)}</button>` : `<a class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>`}
+              ${stockStatus(product).available ? `<a class="secondary-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">WhatsApp</a>` : ""}
+            </div>
+          </div>
         </div>
       </article>
     `)

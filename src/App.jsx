@@ -585,9 +585,9 @@ function Services() {
     <Section id="servicos" eyebrow="Serviços" title="Assistência técnica para celular, computador, notebook e videogame.">
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         {services.map(({ title, icon: Icon, items, whatsappMessage }) => (
-          <Card key={title}>
+          <Card key={title} className="flex h-full flex-col">
             <IconBadge icon={Icon} />
-            <h3 className="text-xl font-black text-white">{title}</h3>
+            <h3 className="text-xl font-black text-white sm:min-h-[3.5rem]">{title}</h3>
             <ul className="mt-5 grid gap-2 text-sm text-slate-300">
               {items.map((item) => (
                 <li key={item} className="flex items-center gap-2">
@@ -595,7 +595,9 @@ function Services() {
                 </li>
               ))}
             </ul>
-            <WhatsAppButton message={whatsappMessage} className="mt-6 w-full">Solicitar orçamento</WhatsAppButton>
+            <div className="mt-auto pt-6">
+              <WhatsAppButton message={whatsappMessage} className="w-full">Solicitar orçamento</WhatsAppButton>
+            </div>
           </Card>
         ))}
       </div>
@@ -1005,7 +1007,7 @@ function PcCard({ pc }) {
   const addToCart = () => cart.addItem(pcCartItem(pc));
 
   return (
-    <Card className="flex flex-col">
+    <Card className="flex h-full flex-col">
       <PcCardImage pc={pc} image={images[0]} />
       <div className="mt-5 flex flex-1 flex-col">
         <div className="flex flex-wrap items-center gap-2">
@@ -1013,17 +1015,19 @@ function PcCard({ pc }) {
           <span className={'rounded-full border px-3 py-1 text-xs font-bold ' + (available ? "border-lime-300/30 bg-lime-300/10 text-lime-200" : "border-red-300/30 bg-red-300/10 text-red-200")}>{available ? "Em estoque" : "Esgotado"}</span>
           {pc.featured ? <span className="rounded-full border border-yellow-300/30 bg-yellow-300/10 px-3 py-1 text-xs font-bold text-yellow-100">Destaque</span> : null}
         </div>
-        <h3 className="mt-4 text-2xl font-black text-white">{pc.name}</h3>
-        <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-300">{pc.shortDescription || pcSummary(pc) || "Computador montado pela NT Informática."}</p>
-        <dl className="mt-4 grid gap-2 text-sm">
+        <h3 className="mt-4 text-2xl font-black leading-tight text-white sm:min-h-[4rem]">{pc.name}</h3>
+        <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-300 sm:min-h-[3rem]">{pc.shortDescription || pcSummary(pc) || "Computador montado pela NT Informática."}</p>
+        <dl className="mt-4 grid content-start gap-2 text-sm sm:min-h-[9.5rem]">
           {summaryItems.map((item) => <div key={item} className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-slate-200">{item}</div>)}
         </dl>
-        <PcPriceBlock pc={pc} />
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <Button href={'/computadores/' + encodeURIComponent(pc.slug)} variant="secondary">Ver detalhes</Button>
-          {available ? <button type="button" onClick={addToCart} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-nt-blue px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:-translate-y-0.5 hover:bg-nt-cyan focus:outline-none focus:ring-2 focus:ring-nt-cyan focus:ring-offset-2 focus:ring-offset-nt-ink">Adicionar ao carrinho</button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
+        <div className="mt-auto pt-5">
+          <PcPriceBlock pc={pc} />
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <Button href={'/computadores/' + encodeURIComponent(pc.slug)} variant="secondary">Ver detalhes</Button>
+            {available ? <button type="button" onClick={addToCart} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-nt-blue px-5 py-3 text-sm font-bold text-white shadow-glow transition hover:-translate-y-0.5 hover:bg-nt-cyan focus:outline-none focus:ring-2 focus:ring-nt-cyan focus:ring-offset-2 focus:ring-offset-nt-ink">Adicionar ao carrinho</button> : <WhatsAppButton message={'Olá! Gostaria de consultar disponibilidade do computador ' + pc.name + '.'}>Consultar</WhatsAppButton>}
+          </div>
+          {available ? <WhatsAppButton message={pcWhatsappMessage(pc)} className="mt-3 w-full">Falar pelo WhatsApp</WhatsAppButton> : null}
         </div>
-        {available ? <WhatsAppButton message={pcWhatsappMessage(pc)} className="mt-3 w-full">Falar pelo WhatsApp</WhatsAppButton> : null}
       </div>
     </Card>
   );

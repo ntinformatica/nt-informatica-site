@@ -112,10 +112,6 @@ function firstName(value: string) {
   return cleanText(value).split(/\s+/)[0]?.slice(0, 60) || "Cliente";
 }
 
-function lastName(value: string) {
-  return cleanText(value).split(/\s+/).slice(1).join(" ").slice(0, 60);
-}
-
 function maskDocument(value: unknown) {
   const digits = onlyDigits(value);
   if (!digits) return "";
@@ -519,10 +515,6 @@ function buildCardOrderBody(params: {
 }) {
   const { order, payment, customer, card, installments } = params;
   const amount = safeMoney(payment.amount || order.total_amount);
-  const payer: JsonObject = {
-    email: customer.customer_email || payment.payer_email,
-    first_name: firstName(customer.customer_name),
-  };
 
   return {
     type: "online",
@@ -530,7 +522,10 @@ function buildCardOrderBody(params: {
     external_reference: payment.external_reference,
     description: buildDescription(order),
     total_amount: amount.toFixed(2),
-    payer,
+    payer: {
+      email: customer.customer_email || payment.payer_email,
+      first_name: firstName(customer.customer_name),
+    },
     transactions: {
       payments: [
         {
