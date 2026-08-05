@@ -20,13 +20,23 @@ export const storeFinancialLabels = {
 
 export const storeOperationalLabels = {
   awaiting_payment: "Aguardando pagamento",
-  paid: "Pago",
+  paid: "Pagamento confirmado",
   separating: "Separando pedido",
   ready_for_pickup: "Pronto para retirada",
-  delivered: "Retirado",
+  delivered: "Retirado / Entregue",
   cancelled: "Cancelado",
   manual_review: "Revisao manual",
 };
+
+export const storeOperationalOptions = [
+  "awaiting_payment",
+  "paid",
+  "separating",
+  "ready_for_pickup",
+  "delivered",
+  "cancelled",
+  "manual_review",
+];
 
 export const storeOperationalFlow = [
   "paid",
@@ -89,6 +99,23 @@ export function orderMatchesSearch(order, term) {
   return false;
 }
 
+export function allowedStoreOperationalStatuses(order) {
+  const current = order?.operational_status || "awaiting_payment";
+  let allowed = [];
+
+  if (current === "manual_review") {
+    allowed = ["manual_review", "cancelled"];
+  } else if (order?.financial_status === "approved") {
+    allowed = storeOperationalFlow;
+  } else if (["pending", "processing"].includes(order?.financial_status)) {
+    allowed = ["awaiting_payment", "cancelled"];
+  } else {
+    allowed = ["cancelled"];
+  }
+
+  return [...new Set([current, ...allowed].filter((status) => storeOperationalOptions.includes(status)))];
+}
+
 export async function listStoreOrders() {
   const rows = await supabaseRequest(
     `/store_orders?select=${encodeURIComponent(orderSelect)}&order=created_at.desc&limit=500`,
@@ -104,7 +131,7 @@ export async function listStoreOrders() {
 
 export async function updateStoreOrderOperationalStatus(order, nextStatus) {
   if (!order?.id) throw new Error("Pedido invalido.");
-  if (!storeOperationalFlow.includes(nextStatus)) throw new Error("Status operacional invalido.");
+  if (!allowedStoreOperationalStatuses(order).includes(nextStatus)) throw new Error("Transicao operacional nao permitida para este pedido.");
 
   const now = new Date().toISOString();
   const patch = {

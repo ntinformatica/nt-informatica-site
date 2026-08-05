@@ -1,6 +1,7 @@
 import { CalendarDays, CheckCircle2, ClipboardList, CreditCard, Eye, PackageCheck, RefreshCw, Search, WalletCards } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  allowedStoreOperationalStatuses,
   formatStoreDateTime,
   formatStoreMoney,
   listStoreOrders,
@@ -10,6 +11,7 @@ import {
   storeFinancialLabels,
   storeOperationalFlow,
   storeOperationalLabels,
+  storeOperationalOptions,
   updateStoreOrderInternalNotes,
   updateStoreOrderOperationalStatus,
 } from "../../services/storeOrderService";
@@ -63,6 +65,29 @@ function statusBadge(value, labels, tones) {
   );
 }
 
+function OperationalStatusSelect({ order, saving = false, onChange }) {
+  const allowedStatuses = allowedStoreOperationalStatuses(order);
+  const current = order.operational_status || "awaiting_payment";
+  return (
+    <label className="block min-w-[190px] text-xs font-black text-slate-300" onClick={(event) => event.stopPropagation()}>
+      <span className="sr-only">Status operacional</span>
+      <select
+        value={current}
+        disabled={saving}
+        onChange={(event) => onChange(order, event.target.value)}
+        className={`min-h-10 w-full rounded-md border bg-slate-950 px-3 py-2 text-xs font-black outline-none transition focus:border-nt-cyan disabled:cursor-wait disabled:opacity-60 ${operationalTones[current] || "border-slate-700 text-slate-100"}`}
+      >
+        {storeOperationalOptions.map((status) => (
+          <option key={status} value={status} disabled={!allowedStatuses.includes(status)}>
+            {storeOperationalLabels[status]}
+          </option>
+        ))}
+      </select>
+      {saving ? <span className="mt-1 block text-[11px] text-nt-cyan">Salvando...</span> : null}
+    </label>
+  );
+}
+
 function SummaryCard({ label, value, icon: Icon, tone = "cyan" }) {
   const tones = {
     cyan: "text-nt-cyan bg-nt-cyan/10",
@@ -96,7 +121,7 @@ function orderImage(item) {
 
 function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes }) {
   const payment = orderPayment(order);
-  const canAdvance = order.financial_status === "approved";
+  const allowedStatuses = allowedStoreOperationalStatuses(order);
   return (
     <section className="glass rounded-lg p-5 shadow-card">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -110,10 +135,10 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes })
             <button
               key={status}
               type="button"
-              disabled={saving || (!canAdvance && status !== "cancelled")}
+              disabled={saving || !allowedStatuses.includes(status)}
               onClick={() => onStatus(status)}
               className={`min-h-10 rounded-md border px-3 py-2 text-xs font-black transition hover:border-nt-cyan disabled:cursor-not-allowed disabled:opacity-45 ${order.operational_status === status ? "border-nt-cyan bg-nt-cyan/10 text-nt-cyan" : "border-slate-700 bg-white/5 text-slate-100"}`}
-              title={!canAdvance && status !== "cancelled" ? "Aguarde o pagamento aprovado para avancar o fluxo operacional." : ""}
+              title={!allowedStatuses.includes(status) ? "Transicao operacional nao permitida para este pedido." : ""}
             >
               {storeOperationalLabels[status]}
             </button>
@@ -205,7 +230,10 @@ export function StoreOrdersPage() {
   const [selectedId, setSelectedId] = useState("");
   const [quickFilter, setQuickFilter] = useState("all");
   const [filters, setFilters] = useState({ startDate: "", endDate: "", paymentMethod: "", customer: "", orderNumber: "", document: "", phone: "", search: "" });
-  const [saving, setSaving] = useState(false);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [savingStatusId, setSavingStatusId] = useState("");
+  const detailsRef = useRef(null);
+  const pendingScrollOrderIdRef = useRef("");
   const selectedOrder = orders.find((order) => order.id === selectedId) || null;
   const [notes, setNotes] = useState("");
 
@@ -231,6 +259,41 @@ export function StoreOrdersPage() {
   useEffect(() => {
     setNotes(selectedOrder?.pickup_notes || "");
   }, [selectedOrder?.id]);
+
+  useEffect(() => {
+    if (!selectedOrder || pendingScrollOrderIdRef.current !== selectedOrder.id) return;
+    pendingScrollOrderIdRef.current = "";
+    requestAnimationFrame(() => {
+      detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, [selectedOrder?.id]);
+
+  function mergeUpdatedOrder(updatedOrder) {
+    if (!updatedOrder?.id) return;
+    setOrders((currentOrders) => currentOrders.map((order) => (
+      order.id === updatedOrder.id
+        ? {
+            ...order,
+            ...updatedOrder,
+            store_order_items: order.store_order_items,
+            store_payments: order.store_payments,
+            store_order_logs: order.store_order_logs,
+          }
+        : order
+    )));
+  }
+
+  function openOrder(orderId) {
+    pendingScrollOrderIdRef.current = orderId;
+    if (selectedId === orderId) {
+      pendingScrollOrderIdRef.current = "";
+      requestAnimationFrame(() => {
+        detailsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      return;
+    }
+    setSelectedId(orderId);
+  }
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -265,37 +328,43 @@ export function StoreOrdersPage() {
     setFilters((current) => ({ ...current, [field]: value }));
   }
 
-  async function changeStatus(status) {
-    if (!selectedOrder) return;
-    setSaving(true);
+  async function changeStatus(order, status) {
+    if (!order || order.operational_status === status) return;
+    const previousStatus = order.operational_status;
+    setSavingStatusId(order.id);
     setError("");
     setNotice("");
     try {
-      await updateStoreOrderOperationalStatus(selectedOrder, status);
+      const updatedOrder = await updateStoreOrderOperationalStatus(order, status);
+      mergeUpdatedOrder(updatedOrder || { id: order.id, operational_status: status });
       setNotice("Status operacional atualizado.");
-      await load();
     } catch (statusError) {
-      console.error(statusError);
+      console.error("Falha ao atualizar status operacional do pedido:", {
+        orderId: order.id,
+        previousStatus,
+        nextStatus: status,
+        error: statusError,
+      });
       setError(statusError.message || "Nao foi possivel atualizar o status operacional.");
     } finally {
-      setSaving(false);
+      setSavingStatusId("");
     }
   }
 
   async function saveNotes() {
     if (!selectedOrder) return;
-    setSaving(true);
+    setSavingNotes(true);
     setError("");
     setNotice("");
     try {
-      await updateStoreOrderInternalNotes(selectedOrder.id, notes);
+      const updatedOrder = await updateStoreOrderInternalNotes(selectedOrder.id, notes);
+      mergeUpdatedOrder(updatedOrder || { id: selectedOrder.id, pickup_notes: String(notes || "").trim() });
       setNotice("Observacoes internas salvas.");
-      await load();
     } catch (notesError) {
       console.error(notesError);
       setError(notesError.message || "Nao foi possivel salvar as observacoes.");
     } finally {
-      setSaving(false);
+      setSavingNotes(false);
     }
   }
 
@@ -365,9 +434,9 @@ export function StoreOrdersPage() {
                   <td>{paymentLabel(order)}</td>
                   <td className="font-black text-nt-cyan">{formatStoreMoney(order.total_amount)}</td>
                   <td>{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}</td>
-                  <td>{statusBadge(order.operational_status, storeOperationalLabels, operationalTones)}</td>
+                  <td><OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></td>
                   <td>{orderItemCount(order)}</td>
-                  <td><button type="button" onClick={() => setSelectedId(order.id)} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan"><Eye size={15} /> Abrir</button></td>
+                  <td><button type="button" onClick={() => openOrder(order.id)} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan"><Eye size={15} /> Abrir</button></td>
                 </tr>
               ))}
             </tbody>
@@ -381,17 +450,28 @@ export function StoreOrdersPage() {
             <article key={order.id} className="rounded-lg border border-white/10 bg-white/5 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div><p className="font-black text-white">{order.order_number}</p><p className="mt-1 text-sm text-slate-400">{formatStoreDateTime(order.created_at)}</p></div>
-                <button type="button" onClick={() => setSelectedId(order.id)} className="rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan">Abrir</button>
+                <button type="button" onClick={() => openOrder(order.id)} className="rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan">Abrir</button>
               </div>
               <p className="mt-3 text-sm text-slate-300">{order.customer_name} - {order.customer_phone}</p>
-              <div className="mt-3 flex flex-wrap gap-2">{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}{statusBadge(order.operational_status, storeOperationalLabels, operationalTones)}</div>
+              <div className="mt-3 flex flex-wrap gap-2">{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}<OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></div>
               <p className="mt-3 text-sm font-black text-nt-cyan">{formatStoreMoney(order.total_amount)} - {paymentLabel(order)} - {orderItemCount(order)} itens</p>
             </article>
           ))}
         </div>
       </section>
 
-      {selectedOrder ? <OrderDetails order={selectedOrder} notes={notes} setNotes={setNotes} saving={saving} onStatus={changeStatus} onSaveNotes={saveNotes} /> : null}
+      {selectedOrder ? (
+        <div ref={detailsRef} className="scroll-mt-24">
+          <OrderDetails
+            order={selectedOrder}
+            notes={notes}
+            setNotes={setNotes}
+            saving={savingNotes || savingStatusId === selectedOrder.id}
+            onStatus={(status) => changeStatus(selectedOrder, status)}
+            onSaveNotes={saveNotes}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
