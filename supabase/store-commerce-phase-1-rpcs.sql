@@ -15,6 +15,83 @@ create unique index if not exists store_payments_one_approved_per_order_uidx
   on public.store_payments(order_id)
   where status = 'approved';
 
+create or replace function public.list_store_inventory_availability()
+returns table (
+  item_type text,
+  product_id uuid,
+  variation_id uuid,
+  assembled_pc_id uuid,
+  physical_stock integer,
+  reserved_stock integer,
+  available_stock integer
+)
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select
+    'product'::text as item_type,
+    product.id as product_id,
+    null::uuid as variation_id,
+    null::uuid as assembled_pc_id,
+    greatest(coalesce(product.stock, 0), 0)::integer as physical_stock,
+    greatest(coalesce(reserved.quantity, 0), 0)::integer as reserved_stock,
+    greatest(coalesce(product.stock, 0) - coalesce(reserved.quantity, 0), 0)::integer as available_stock
+  from public.products product
+  left join (
+    select reservation.product_id, sum(reservation.quantity)::integer as quantity
+    from public.store_stock_reservations reservation
+    where reservation.status = 'active'
+      and reservation.product_id is not null
+      and reservation.expires_at > now()
+    group by reservation.product_id
+  ) reserved on reserved.product_id = product.id
+
+  union all
+
+  select
+    'variation'::text as item_type,
+    variation.product_id,
+    variation.id as variation_id,
+    null::uuid as assembled_pc_id,
+    greatest(coalesce(variation.stock, 0), 0)::integer as physical_stock,
+    greatest(coalesce(reserved.quantity, 0), 0)::integer as reserved_stock,
+    greatest(coalesce(variation.stock, 0) - coalesce(reserved.quantity, 0), 0)::integer as available_stock
+  from public.product_variations variation
+  left join (
+    select reservation.variation_id, sum(reservation.quantity)::integer as quantity
+    from public.store_stock_reservations reservation
+    where reservation.status = 'active'
+      and reservation.variation_id is not null
+      and reservation.expires_at > now()
+    group by reservation.variation_id
+  ) reserved on reserved.variation_id = variation.id
+
+  union all
+
+  select
+    'assembled_pc'::text as item_type,
+    null::uuid as product_id,
+    null::uuid as variation_id,
+    pc.id as assembled_pc_id,
+    greatest(coalesce(pc.stock, 0), 0)::integer as physical_stock,
+    greatest(coalesce(reserved.quantity, 0), 0)::integer as reserved_stock,
+    greatest(coalesce(pc.stock, 0) - coalesce(reserved.quantity, 0), 0)::integer as available_stock
+  from public.assembled_pcs pc
+  left join (
+    select reservation.assembled_pc_id, sum(reservation.quantity)::integer as quantity
+    from public.store_stock_reservations reservation
+    where reservation.status = 'active'
+      and reservation.assembled_pc_id is not null
+      and reservation.expires_at > now()
+    group by reservation.assembled_pc_id
+  ) reserved on reserved.assembled_pc_id = pc.id;
+$$;
+
+revoke all on function public.list_store_inventory_availability() from public;
+grant execute on function public.list_store_inventory_availability() to anon, authenticated, service_role;
+
 alter table public.stock_movements
   alter column product_id drop not null,
   add column if not exists assembled_pc_id uuid references public.assembled_pcs(id) on delete set null;
@@ -371,10 +448,7 @@ begin
         raise exception 'Produto sem preco valido.';
       end if;
 
-      v_final_unit_price := coalesce(
-        case when v_unit_promo_price is not null and v_unit_promo_price > 0 then v_unit_promo_price end,
-        v_unit_price
-      );
+      v_final_unit_price := v_unit_price;
 
       v_available_stock := v_stock_physical - v_stock_reserved;
 
@@ -496,10 +570,7 @@ begin
 
       v_unit_price := v_pc.price;
       v_unit_promo_price := v_pc.promo_price;
-      v_final_unit_price := coalesce(
-        case when v_unit_promo_price is not null and v_unit_promo_price > 0 then v_unit_promo_price end,
-        v_unit_price
-      );
+      v_final_unit_price := v_unit_price;
       v_line_subtotal := round(v_final_unit_price * v_quantity, 2);
       v_subtotal := round(v_subtotal + v_line_subtotal, 2);
       v_config_snapshot := jsonb_build_object(
@@ -701,6 +772,8 @@ declare
   v_order record;
   v_reservations_expired integer := 0;
   v_total_reservations_expired integer := 0;
+  v_payments_expired integer := 0;
+  v_total_payments_expired integer := 0;
   v_orders_expired integer := 0;
   v_processed_orders jsonb := '[]'::jsonb;
 begin
@@ -744,6 +817,25 @@ begin
     get diagnostics v_reservations_expired = row_count;
 
     if v_reservations_expired > 0 then
+      update public.store_payments payment
+      set
+        status = 'expired',
+        status_detail = case
+          when coalesce(payment.status_detail, '') = '' then 'order_expired'
+          else payment.status_detail
+        end,
+        metadata = payment.metadata || jsonb_build_object('expired_by', 'expire_store_orders')
+      where payment.order_id = v_order.id
+        and payment.status in ('created', 'pending', 'processing')
+        and payment.status <> 'approved'
+        and (
+          payment.expires_at is null
+          or payment.expires_at <= p_now
+          or v_order.expires_at <= p_now
+        );
+
+      get diagnostics v_payments_expired = row_count;
+
       update public.store_orders
       set
         financial_status = 'expired',
@@ -774,11 +866,15 @@ begin
         'Pedido expirado e reservas vencidas liberadas.',
         'system',
         'expiration_job',
-        jsonb_build_object('reservations_expired', v_reservations_expired)
+        jsonb_build_object(
+          'reservations_expired', v_reservations_expired,
+          'payments_expired', v_payments_expired
+        )
       );
 
       v_orders_expired := v_orders_expired + 1;
       v_total_reservations_expired := v_total_reservations_expired + v_reservations_expired;
+      v_total_payments_expired := v_total_payments_expired + v_payments_expired;
       v_processed_orders := v_processed_orders || jsonb_build_array(
         jsonb_build_object('order_id', v_order.id, 'order_number', v_order.order_number)
       );
@@ -787,6 +883,7 @@ begin
 
   return jsonb_build_object(
     'orders_expired', v_orders_expired,
+    'payments_expired', v_total_payments_expired,
     'reservations_expired', v_total_reservations_expired,
     'processed_orders', v_processed_orders
   );

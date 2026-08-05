@@ -59,12 +59,15 @@
     return `${baseUrl}/rest/v1${path}`;
   }
 
-  async function supabaseRequest(baseUrl, anonKey, path) {
+  async function supabaseRequest(baseUrl, anonKey, path, options = {}) {
+    const { headers: customHeaders = {}, ...requestOptions } = options;
     const response = await fetch(buildUrl(baseUrl, path), {
+      ...requestOptions,
       headers: {
         apikey: anonKey,
         Authorization: `Bearer ${anonKey}`,
         Accept: "application/json",
+        ...customHeaders,
       },
     });
 
@@ -74,6 +77,40 @@
     }
 
     return response.json();
+  }
+
+  async function supabaseRpc(baseUrl, anonKey, name, args = {}) {
+    return supabaseRequest(baseUrl, anonKey, `/rpc/${name}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+    });
+  }
+
+  function availabilityKey(row) {
+    if (row.item_type === "variation" && row.variation_id) return `variation:${row.variation_id}`;
+    if (row.item_type === "assembled_pc" && row.assembled_pc_id) return `assembled_pc:${row.assembled_pc_id}`;
+    if (row.item_type === "product" && row.product_id) return `product:${row.product_id}`;
+    return "";
+  }
+
+  function availabilityMap(rows) {
+    return rows.reduce((map, row) => {
+      const key = availabilityKey(row);
+      if (key) map.set(key, row);
+      return map;
+    }, new Map());
+  }
+
+  function applyAvailability(row, availability) {
+    if (!availability) return row;
+    return {
+      ...row,
+      physical_stock: availability.physical_stock ?? row.stock ?? 0,
+      reserved_stock: availability.reserved_stock ?? 0,
+      available_stock: availability.available_stock ?? row.stock ?? 0,
+      stock: availability.available_stock ?? row.stock ?? 0,
+    };
   }
 
   function categoryTuple(category) {
@@ -102,7 +139,10 @@
       cashLabel: "à vista com 15% OFF",
       installmentText: variation.price ? `${formatCurrency(variation.price)} em 10x sem juros` : "Consulte condições",
       images,
-      stock: variation.stock ?? 0,
+      physicalStock: variation.physical_stock ?? variation.stock ?? 0,
+      reservedStock: variation.reserved_stock ?? 0,
+      availableStock: variation.available_stock ?? variation.stock ?? 0,
+      stock: variation.available_stock ?? variation.stock ?? 0,
       status: variation.status || (variation.active === false ? "inativo" : "ativo"),
     };
   }
@@ -130,7 +170,10 @@
       images,
       specs: [product.brand, product.model, product.warranty].filter(Boolean),
       variants: variations,
-      stock: product.stock ?? 0,
+      physicalStock: product.physical_stock ?? product.stock ?? 0,
+      reservedStock: product.reserved_stock ?? 0,
+      availableStock: product.available_stock ?? product.stock ?? 0,
+      stock: product.available_stock ?? product.stock ?? 0,
       status: product.status || "",
       featured: Boolean(product.featured),
       whatsappMessage: `Olá, NT Informática. Tenho interesse em ${product.name}.`,
@@ -146,22 +189,29 @@
       throw new Error("Supabase publico nao configurado.");
     }
 
-    const [categoryRows, productRows, variationRows] = await Promise.all([
+    const [categoryRows, productRows, variationRows, inventoryRows] = await Promise.all([
       supabaseRequest(supabaseUrl, anonKey, "/categories?select=*&order=sort_order.asc,name.asc"),
       supabaseRequest(supabaseUrl, anonKey, "/products?select=*&order=featured.desc,updated_at.desc"),
       supabaseRequest(supabaseUrl, anonKey, "/product_variations?select=*&order=created_at.asc"),
+      supabaseRpc(supabaseUrl, anonKey, "list_store_inventory_availability").catch((error) => {
+        console.warn("Nao foi possivel carregar disponibilidade reservada:", error);
+        return [];
+      }),
     ]);
 
+    const inventoryByKey = availabilityMap(inventoryRows);
+    const productsWithAvailability = productRows.map((product) => applyAvailability(product, inventoryByKey.get(`product:${product.id}`)));
+    const variationsWithAvailability = variationRows.map((variation) => applyAvailability(variation, inventoryByKey.get(`variation:${variation.id}`)));
     const publicCategories = categoryRows.filter((category) => category.active !== false);
     const categoriesById = new Map(publicCategories.map((category) => [category.id, category]));
-    const variationsByProduct = variationRows.reduce((map, variation) => {
+    const variationsByProduct = variationsWithAvailability.reduce((map, variation) => {
       const list = map.get(variation.product_id) || [];
       list.push(variation);
       map.set(variation.product_id, list);
       return map;
     }, new Map());
 
-    const publicProducts = productRows
+    const publicProducts = productsWithAvailability
       .filter((product) => publicStatus(product.status))
       .map((product) => mapProduct(product, categoriesById, variationsByProduct));
 

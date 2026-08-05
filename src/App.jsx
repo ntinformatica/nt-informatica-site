@@ -36,7 +36,7 @@ import { Header } from "./components/Header";
 import { TechPlaceholder } from "./components/Placeholder";
 import { Section } from "./components/Section";
 import { AdminApp } from "./admin/AdminApp";
-import { isSupabaseConfigured } from "./lib/supabase";
+import { isSupabaseConfigured, supabaseRequest } from "./lib/supabase";
 import { CustomerAuthProvider } from "./customer/CustomerAuthContext";
 import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from "./customer/CustomerAuthPages";
 import { CustomerAccountPage } from "./customer/CustomerAccountPages";
@@ -382,6 +382,35 @@ const howItWorksSteps = [
   "Receba seu equipamento pronto.",
 ];
 
+async function listStoreInventoryAvailability() {
+  if (!isSupabaseConfigured) return [];
+  return supabaseRequest("/rpc/list_store_inventory_availability", {
+    method: "POST",
+    body: JSON.stringify({}),
+    forceAnon: true,
+  });
+}
+
+function availabilityByAssembledPc(rows) {
+  return rows.reduce((map, row) => {
+    if (row.item_type === "assembled_pc" && row.assembled_pc_id) {
+      map.set(row.assembled_pc_id, row);
+    }
+    return map;
+  }, new Map());
+}
+
+function applyPcAvailability(pc, availability) {
+  if (!availability) return pc;
+  return {
+    ...pc,
+    physicalStock: Number(availability.physical_stock ?? pc.stock ?? 0),
+    reservedStock: Number(availability.reserved_stock || 0),
+    availableStock: Number(availability.available_stock ?? pc.stock ?? 0),
+    stock: Number(availability.available_stock ?? pc.stock ?? 0),
+  };
+}
+
 function usePublicPcs() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -394,17 +423,23 @@ function usePublicPcs() {
       setLoading(true);
       setError("");
       try {
-        const [pcsList, gamesList] = await Promise.all([
+        const [pcsList, gamesList, inventoryRows] = await Promise.all([
           listPublicAssembledPcs(),
           listPublicGames().catch((libraryError) => {
             console.warn("Nao foi possivel carregar a biblioteca de jogos publica:", libraryError);
             return [];
           }),
+          listStoreInventoryAvailability().catch((inventoryError) => {
+            console.warn("Nao foi possivel carregar disponibilidade publica dos PCs:", inventoryError);
+            return [];
+          }),
         ]);
+        const inventoryByPc = availabilityByAssembledPc(inventoryRows);
         const enrichedPcs = pcsList.map((pc) => {
+          const pcWithAvailability = applyPcAvailability(pc, inventoryByPc.get(pc.id));
           const benchmark = normalizeProductBenchmark(pc);
           return {
-            ...pc,
+            ...pcWithAvailability,
             benchmarkGames: resolveBenchmarkGamesWithLibrary(benchmark.benchmarkGames, gamesList),
           };
         });
