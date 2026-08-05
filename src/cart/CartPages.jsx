@@ -272,6 +272,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [attemptKey, setAttemptKey] = useState("");
+  const checkoutOrderCreatedRef = useRef(false);
   const missing = missingCheckoutProfileFields(auth.user, auth.profile);
   const totals = cartTotals(cart.items);
 
@@ -306,7 +307,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
   }, [auth.authenticated, auth.user]);
 
   useEffect(() => {
-    if (!cart.items.length) navigateTo("/carrinho");
+    if (!cart.items.length && !checkoutOrderCreatedRef.current) navigateTo("/carrinho");
   }, [cart.items.length]);
 
   const finishCheckout = useCallback(async (cardData = null) => {
@@ -369,9 +370,8 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
         setAttemptKey("");
         return;
       }
-      if (["approved", "paid"].includes(paymentStatus)) {
-        cart.clearCart();
-      }
+      checkoutOrderCreatedRef.current = true;
+      cart.clearCart();
       navigateTo(`/pedido/${orderId}/pagamento`);
     } catch (checkoutError) {
       console.error("Falha ao finalizar checkout:", {
@@ -388,6 +388,8 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
         setError(checkoutRejectionMessage(checkoutError));
         setAttemptKey("");
       } else if (rejectedOrderId && ["processing", "in_process", "pending"].includes(rejectedStatus)) {
+        checkoutOrderCreatedRef.current = true;
+        cart.clearCart();
         navigateTo(`/pedido/${rejectedOrderId}/pagamento`);
       } else {
         setError(checkoutError.message || "Não foi possível finalizar a compra.");
@@ -440,7 +442,6 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
 }
 
 export function OrderPaymentPage({ orderId, onNavigate, getNavHref }) {
-  const cart = useCart();
   const [order, setOrder] = useState(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -455,7 +456,6 @@ export function OrderPaymentPage({ orderId, onNavigate, getNavHref }) {
         setOrder(data);
         const payment = data?.store_payments?.[0];
         const resolvedStatus = payment?.status || data?.financial_status || "";
-        if (["approved"].includes(data?.financial_status) || ["approved"].includes(payment?.status)) cart.clearCart();
         if (["approved", "paid", "cancelled", "expired", "failed", "rejected", "refunded", "charged_back"].includes(resolvedStatus)) {
           window.clearInterval(timer);
         }
