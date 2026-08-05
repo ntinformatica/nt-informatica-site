@@ -129,6 +129,19 @@ function orderItemImage(item) {
   return item?.main_image || item?.image_url || item?.configuration_snapshot?.main_image || "";
 }
 
+function orderItemCatalogHref(item) {
+  const itemType = String(item?.item_type || "").trim();
+  const slug = String(item?.slug || item?.configuration_snapshot?.slug || item?.metadata?.slug || "").trim();
+  if (itemType === "assembled_pc") {
+    return slug ? "/computadores/" + encodeURIComponent(slug) : "";
+  }
+  if (itemType === "product") {
+    const productId = String(item?.product_id || "").trim();
+    return productId ? "/produtos?produto=" + encodeURIComponent(productId) : "";
+  }
+  return "";
+}
+
 function paymentLabel(value) {
   if (value === "card") return "Cartao";
   if (value === "pix") return "Pix";
@@ -495,14 +508,30 @@ function OrdersPanel({ path = "", navigateTo }) {
           <div className="mt-3 grid gap-3">
             {items.map((item) => {
               const configEntries = itemConfigEntries(item);
+              const catalogHref = orderItemCatalogHref(item);
+              const productName = item.product_name || "Item do pedido";
+              const productImage = orderItemImage(item);
               return (
                 <div key={item.id} className="rounded-md border border-white/10 bg-white/5 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="flex min-w-0 items-center gap-3">
-                      {orderItemImage(item) ? <img src={orderItemImage(item)} alt={item.product_name} className="h-16 w-16 rounded-md object-cover" /> : <div className="h-16 w-16 rounded-md bg-slate-800" />}
+                      {productImage && catalogHref ? (
+                        <a href={catalogHref} aria-label={"Abrir produto " + productName} className="block rounded-md outline-none transition hover:scale-[1.02] focus-visible:ring-2 focus-visible:ring-nt-cyan">
+                          <img src={productImage} alt={productName} className="h-16 w-16 rounded-md object-cover transition hover:brightness-110" />
+                        </a>
+                      ) : productImage ? (
+                        <img src={productImage} alt={productName} className="h-16 w-16 rounded-md object-cover" />
+                      ) : (
+                        <div className="h-16 w-16 rounded-md bg-slate-800" />
+                      )}
                       <div className="min-w-0">
-                        <p className="font-bold text-white">{item.product_name}</p>
+                        {catalogHref ? (
+                          <a href={catalogHref} aria-label={"Abrir produto " + productName} className="font-bold text-white outline-none transition hover:text-nt-cyan focus-visible:ring-2 focus-visible:ring-nt-cyan">{productName}</a>
+                        ) : (
+                          <p className="font-bold text-white">{productName}</p>
+                        )}
                         <p className="text-sm text-slate-400">{item.variation_name || item.sku || item.internal_code || "Item do pedido"}</p>
+                        {!catalogHref ? <p className="mt-1 text-xs text-slate-500">Produto nao disponivel no catalogo</p> : null}
                       </div>
                     </div>
                     <div className="text-right text-sm text-slate-300">
