@@ -90,6 +90,20 @@ const sortableColumns = {
   customerAsc: "customer_name.asc",
 };
 
+const serviceOrderStatusPriority = {
+  recebido: 1,
+  "em analise": 2,
+  "aguardando aprovacao": 3,
+  "aguardando autorizacao": 3,
+  "aguardando peca": 4,
+  "em manutencao": 5,
+  "em reparo": 5,
+  "pronto para retirada": 6,
+  pronto: 6,
+  entregue: 7,
+  arquivado: 8,
+};
+
 function assertSupabaseReady() {
   if (!isSupabaseConfigured) {
     throw new Error("Supabase não configurado. O módulo de Ordem de Serviço exige banco real.");
@@ -108,6 +122,29 @@ function trimOrNull(value) {
 
 function trimOrEmpty(value) {
   return String(value ?? "").trim();
+}
+
+function normalizedStatusKey(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function serviceOrderPriority(order) {
+  if (order?.deletedAt) return serviceOrderStatusPriority.arquivado;
+  return serviceOrderStatusPriority[normalizedStatusKey(order?.status)] || 99;
+}
+
+function sortServiceOrdersByStatusPriority(items) {
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((first, second) => {
+      const priorityDifference = serviceOrderPriority(first.item) - serviceOrderPriority(second.item);
+      return priorityDifference || first.index - second.index;
+    })
+    .map(({ item }) => item);
 }
 
 export function parseServiceOrderMoney(value) {
@@ -291,7 +328,7 @@ export async function listServiceOrders(options = {}) {
   });
 
   return {
-    items: response.data.map(fromSupabase),
+    items: sortServiceOrdersByStatusPriority(response.data.map(fromSupabase)),
     total: response.total ?? response.data.length,
     page,
     pageSize,
