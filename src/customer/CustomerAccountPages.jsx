@@ -45,6 +45,76 @@ const operationalLabels = {
   manual_review: "Revisão manual",
 };
 
+const customerFinancialLabels = {
+  pending: "Aguardando pagamento",
+  processing: "Pagamento em processamento",
+  approved: "Pago",
+  rejected: "Pagamento recusado",
+  cancelled: "Pagamento cancelado",
+  expired: "Pagamento expirado",
+  refunded: "Pagamento reembolsado",
+  charged_back: "Pagamento estornado",
+};
+
+const customerOperationalLabels = {
+  awaiting_payment: "Aguardando pagamento",
+  paid: "Pagamento confirmado",
+  separating: "Pedido em separacao",
+  ready_for_pickup: "Pronto para retirada",
+  delivered: "Retirado / Entregue",
+  cancelled: "Pedido cancelado",
+  manual_review: "Em revisao pela loja",
+};
+
+const paymentDetailLabels = {
+  accredited: "Pagamento aprovado.",
+  approved: "Pagamento aprovado.",
+  paid: "Pagamento aprovado.",
+  processed: "Pagamento processado.",
+  waiting_transfer: "Aguardando pagamento Pix.",
+  aguardando_transferencia: "Aguardando pagamento Pix.",
+  pending: "Pagamento aguardando confirmacao.",
+  processing: "Pagamento em processamento.",
+  in_process: "Pagamento em processamento.",
+  pending_review_manual: "Pagamento em analise.",
+  insufficient_amount: "Pagamento recusado por saldo ou limite insuficiente.",
+  cc_rejected_insufficient_amount: "Pagamento recusado por saldo ou limite insuficiente.",
+  invalid_installments: "A quantidade de parcelas selecionada nao foi aceita.",
+  high_risk: "Pagamento nao autorizado.",
+  rejected: "Pagamento recusado.",
+  failed: "Pagamento recusado.",
+  cancelled: "Pagamento cancelado.",
+  expired: "Pagamento expirado.",
+  refunded: "Pagamento reembolsado.",
+  charged_back: "Pagamento estornado.",
+};
+
+const orderEventLabels = {
+  order_created: "Pedido criado",
+  pedido_criado: "Pedido criado",
+  payment_approved: "Pagamento recebido",
+  payment_rejected: "Pagamento recusado",
+  payment_cancelled: "Pagamento cancelado",
+  payment_expired: "Pagamento expirado",
+  payment_refunded: "Pagamento reembolsado",
+  status_operacional_alterado: "Status do pedido atualizado",
+  operational_status_changed: "Status do pedido atualizado",
+  stock_committed: "Produtos reservados para retirada",
+  manual_review_required: "Pedido em revisao pela loja",
+};
+
+const pcConfigLabels = {
+  processor: "Processador",
+  motherboard: "Placa-mae",
+  memory: "Memoria",
+  storage: "Armazenamento",
+  graphics_card: "Placa de video",
+  power_supply: "Fonte",
+  case_model: "Gabinete",
+  cooling: "Refrigeracao",
+  operating_system: "Sistema",
+};
+
 function formatCurrency(value) {
   const amount = Number(value || 0);
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number.isFinite(amount) ? amount : 0);
@@ -57,6 +127,43 @@ function formatDate(value) {
 
 function orderItemImage(item) {
   return item?.main_image || item?.image_url || item?.configuration_snapshot?.main_image || "";
+}
+
+function paymentLabel(value) {
+  if (value === "card") return "Cartao";
+  if (value === "pix") return "Pix";
+  return "-";
+}
+
+function latestPayment(order) {
+  return Array.isArray(order?.store_payments) ? order.store_payments[0] || null : null;
+}
+
+function paymentStatusLabel(payment, order) {
+  return customerFinancialLabels[payment?.status] || customerFinancialLabels[order?.financial_status] || payment?.status || order?.financial_status || "-";
+}
+
+function paymentDetailMessage(detail) {
+  const normalized = String(detail || "").trim().toLowerCase();
+  return paymentDetailLabels[normalized] || (normalized ? "Acompanhe a atualizacao do pagamento em Meus Pedidos." : "Status atualizado automaticamente pela NT Informatica.");
+}
+
+function isPixActive(payment) {
+  if (!payment || payment.payment_method !== "pix" || !payment.qr_code) return false;
+  if (["approved", "cancelled", "expired", "rejected", "refunded", "charged_back"].includes(payment.status)) return false;
+  if (payment.expires_at && new Date(payment.expires_at).getTime() <= Date.now()) return false;
+  return true;
+}
+
+function itemConfigEntries(item) {
+  const snapshot = item?.configuration_snapshot && typeof item.configuration_snapshot === "object" ? item.configuration_snapshot : {};
+  return Object.entries(pcConfigLabels)
+    .map(([key, label]) => [label, snapshot[key]])
+    .filter(([, value]) => value);
+}
+
+function publicOrderEventLabel(log) {
+  return orderEventLabels[log?.event_type] || "Atualizacao do pedido";
 }
 
 function routeKey(path) {
@@ -231,15 +338,19 @@ function ProfilePanel() {
   );
 }
 
-function OrdersPanel({ path = "" }) {
+function OrdersPanel({ path = "", navigateTo }) {
   const auth = useCustomerAuth();
   const [orders, setOrders] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [copiedPix, setCopiedPix] = useState(false);
   const routeOrderId = path.match(/^\/minha-conta\/pedidos\/([^/]+)/)?.[1] || "";
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
     listCustomerOrders(auth.user?.email).then((rows) => {
       if (mounted) setOrders(rows || []);
     }).finally(() => mounted && setLoading(false));
@@ -250,21 +361,208 @@ function OrdersPanel({ path = "" }) {
 
   useEffect(() => {
     if (routeOrderId) openOrder(decodeURIComponent(routeOrderId));
+    else {
+      setSelected(null);
+      setDetailError("");
+      setCopiedPix(false);
+    }
   }, [routeOrderId, auth.user?.email]);
 
   async function openOrder(orderId) {
-    const details = await getCustomerOrderDetails(auth.user?.email, orderId);
-    setSelected(details);
+    setDetailLoading(true);
+    setDetailError("");
+    setCopiedPix(false);
+    try {
+      const details = await getCustomerOrderDetails(auth.user?.email, orderId);
+      setSelected(details);
+      if (!details) setDetailError("Pedido nao encontrado ou voce nao possui acesso a ele.");
+    } catch (error) {
+      console.error("Erro ao carregar detalhe do pedido:", {
+        orderId,
+        message: error?.message || "",
+      });
+      setSelected(null);
+      setDetailError(error?.message || "Nao foi possivel carregar os detalhes do pedido.");
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  function openOrderRoute(orderId) {
+    navigateTo("/minha-conta/pedidos/" + encodeURIComponent(orderId));
+  }
+
+  function closeOrderDetails() {
+    navigateTo("/minha-conta/pedidos");
+  }
+
+  async function copyPixCode(code) {
+    if (!code) return;
+    await navigator.clipboard.writeText(code);
+    setCopiedPix(true);
+  }
+
+  function renderOrderDetails() {
+    if (!selected) return null;
+    const payment = latestPayment(selected);
+    const paymentMethod = payment?.payment_method || selected.payment_method;
+    const items = Array.isArray(selected.store_order_items) ? selected.store_order_items : [];
+    const logs = Array.isArray(selected.store_order_logs) ? selected.store_order_logs : [];
+    const pixActive = isPixActive(payment);
+    const pixExpired = paymentMethod === "pix" && payment?.expires_at && new Date(payment.expires_at).getTime() <= Date.now();
+    const cardRejected = paymentMethod === "card" && ["rejected", "failed"].includes(payment?.status);
+    const installments = Number(payment?.installments || selected.installments || 1);
+    const installmentAmount = Number(payment?.installment_amount || (installments > 1 ? Number(selected.total_amount || 0) / installments : 0));
+
+    return (
+      <div className="rounded-lg border border-white/10 bg-slate-950 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">Pedido</p>
+            <h3 className="mt-1 text-2xl font-black text-white">{selected.order_number}</h3>
+            <p className="mt-2 text-sm text-slate-400">Criado em {formatDate(selected.created_at)}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <span className="rounded-full border border-lime-300/30 bg-lime-300/10 px-3 py-1 text-xs font-black text-lime-100">{paymentStatusLabel(payment, selected)}</span>
+            <span className="rounded-full border border-nt-cyan/30 bg-nt-cyan/10 px-3 py-1 text-xs font-black text-nt-cyan">{customerOperationalLabels[selected.operational_status] || selected.operational_status || "-"}</span>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button type="button" onClick={closeOrderDetails} className="rounded-md border border-white/10 px-4 py-2 text-sm font-bold text-slate-200 transition hover:bg-white/10">Voltar para Meus Pedidos</button>
+          <Button href="/produtos" variant="secondary">Continuar comprando</Button>
+        </div>
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-3">
+          <div className="rounded-md border border-white/10 bg-white/5 p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Resumo</p>
+            <dl className="mt-3 grid gap-2 text-sm">
+              <div className="flex justify-between gap-4"><dt className="text-slate-400">Subtotal</dt><dd className="font-bold text-white">{formatCurrency(selected.subtotal_amount)}</dd></div>
+              <div className="flex justify-between gap-4"><dt className="text-slate-400">Desconto</dt><dd className="font-bold text-white">{formatCurrency(selected.discount_amount)}</dd></div>
+              <div className="flex justify-between gap-4 border-t border-white/10 pt-2"><dt className="text-slate-200">Total</dt><dd className="text-lg font-black text-nt-cyan">{formatCurrency(selected.total_amount)}</dd></div>
+            </dl>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Pagamento</p>
+            <dl className="mt-3 grid gap-2 text-sm text-slate-300">
+              <div><dt className="text-slate-500">Forma</dt><dd className="font-bold text-white">{paymentLabel(paymentMethod)}</dd></div>
+              <div><dt className="text-slate-500">Status</dt><dd className="font-bold text-white">{paymentStatusLabel(payment, selected)}</dd></div>
+              {payment?.status_detail ? <div><dt className="text-slate-500">Detalhe</dt><dd className="font-bold text-white">{paymentDetailMessage(payment.status_detail)}</dd></div> : null}
+              {paymentMethod === "card" ? <div><dt className="text-slate-500">Parcelas</dt><dd className="font-bold text-white">{installments > 1 ? installments + "x de " + formatCurrency(installmentAmount) : "A vista"}</dd></div> : null}
+              {payment?.approved_at || payment?.paid_at ? <div><dt className="text-slate-500">Confirmado em</dt><dd className="font-bold text-white">{formatDate(payment.approved_at || payment.paid_at)}</dd></div> : null}
+              {payment?.expires_at ? <div><dt className="text-slate-500">Vencimento</dt><dd className="font-bold text-white">{formatDate(payment.expires_at)}</dd></div> : null}
+            </dl>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Retirada</p>
+            <div className="mt-3 text-sm leading-6 text-slate-300">
+              <p className="font-black text-white">NT Informatica, Celulares e Games</p>
+              <p>Rua Johann Sachse, 2891</p>
+              <p>Sala 1 - Badenfurt</p>
+              <p>Blumenau - SC</p>
+              <p className="mt-3 text-slate-400">Aguarde o status "Pronto para retirada" antes de buscar o pedido.</p>
+            </div>
+          </div>
+        </div>
+
+        {pixActive ? (
+          <div className="mt-6 rounded-md border border-lime-300/20 bg-lime-300/10 p-4">
+            <p className="font-black text-lime-100">Pix aguardando pagamento</p>
+            <p className="mt-2 text-sm text-lime-50/80">Use o QR Code ou copie o codigo Pix abaixo. Esta tela nao gera uma nova cobranca.</p>
+            {payment.qr_code_base64 ? <img src={"data:image/png;base64," + payment.qr_code_base64} alt="QR Code Pix do pedido" className="mt-4 w-48 rounded-md bg-white p-2" /> : null}
+            <textarea readOnly value={payment.qr_code} className="mt-4 min-h-24 w-full rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-100" />
+            <button type="button" onClick={() => copyPixCode(payment.qr_code)} className="mt-3 rounded-md bg-lime-400 px-4 py-2 text-sm font-black text-slate-950 transition hover:bg-lime-300">{copiedPix ? "Codigo copiado" : "Copiar codigo Pix"}</button>
+          </div>
+        ) : null}
+
+        {!pixActive && pixExpired ? (
+          <div className="mt-6"><Alert type="error">Pagamento expirado. Refaca a compra para gerar uma nova cobranca.</Alert></div>
+        ) : null}
+
+        {cardRejected ? (
+          <div className="mt-6 rounded-md border border-red-300/30 bg-red-400/10 p-4">
+            <p className="font-black text-red-100">Pagamento recusado</p>
+            <p className="mt-2 text-sm text-red-50/80">{paymentDetailMessage(payment?.status_detail)} Tente outro cartao ou outra forma de pagamento.</p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Button href="/carrinho">Voltar ao carrinho</Button>
+              <Button href="/produtos" variant="secondary">Continuar comprando</Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-6">
+          <p className="text-lg font-black text-white">Itens do pedido</p>
+          <div className="mt-3 grid gap-3">
+            {items.map((item) => {
+              const configEntries = itemConfigEntries(item);
+              return (
+                <div key={item.id} className="rounded-md border border-white/10 bg-white/5 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {orderItemImage(item) ? <img src={orderItemImage(item)} alt={item.product_name} className="h-16 w-16 rounded-md object-cover" /> : <div className="h-16 w-16 rounded-md bg-slate-800" />}
+                      <div className="min-w-0">
+                        <p className="font-bold text-white">{item.product_name}</p>
+                        <p className="text-sm text-slate-400">{item.variation_name || item.sku || item.internal_code || "Item do pedido"}</p>
+                      </div>
+                    </div>
+                    <div className="text-right text-sm text-slate-300">
+                      <p>{item.quantity} x {formatCurrency(item.final_unit_price)}</p>
+                      <p className="font-black text-white">{formatCurrency(item.total_price || Number(item.final_unit_price || 0) * Number(item.quantity || 0))}</p>
+                    </div>
+                  </div>
+                  {configEntries.length ? (
+                    <dl className="mt-4 grid gap-2 text-sm md:grid-cols-2">
+                      {configEntries.map(([label, value]) => (
+                        <div key={label} className="flex gap-2"><dt className="text-slate-500">{label}:</dt><dd className="font-bold text-slate-200">{value}</dd></div>
+                      ))}
+                    </dl>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-6 rounded-md border border-white/10 bg-white/5 p-4">
+          <p className="font-black text-white">Historico publico</p>
+          {selected.logsUnavailable ? <p className="mt-3 text-sm text-slate-400">Historico detalhado indisponivel para visualizacao do cliente nesta etapa.</p> : null}
+          {!selected.logsUnavailable && logs.length ? (
+            <div className="mt-3 grid gap-2 text-sm text-slate-300">
+              {logs.map((log) => (
+                <p key={log.id}><span className="text-slate-500">{formatDate(log.created_at)}</span> - {publicOrderEventLabel(log)}</p>
+              ))}
+            </div>
+          ) : null}
+          {!selected.logsUnavailable && !logs.length ? <p className="mt-3 text-sm text-slate-400">Nenhum evento publico disponivel.</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (routeOrderId) {
+    return (
+      <Card>
+        <h2 className="text-2xl font-black text-white">Detalhes do pedido</h2>
+        {detailLoading ? <div className="mt-6 rounded-lg border border-white/10 bg-slate-950 p-5 text-sm font-bold text-slate-200">Carregando detalhes do pedido...</div> : null}
+        {!detailLoading && detailError ? (
+          <div className="mt-6 rounded-lg border border-red-300/30 bg-red-400/10 p-5">
+            <Alert type="error">{detailError}</Alert>
+            <button type="button" onClick={closeOrderDetails} className="mt-4 rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Voltar para Meus Pedidos</button>
+          </div>
+        ) : null}
+        {!detailLoading && !detailError ? <div className="mt-6">{renderOrderDetails()}</div> : null}
+      </Card>
+    );
   }
 
   return (
     <Card>
       <h2 className="text-2xl font-black text-white">Meus Pedidos</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-300">Estrutura preparada para pedidos de retirada na loja. Nenhum status de envio será usado nesta operação.</p>
+      <p className="mt-2 text-sm leading-6 text-slate-300">Acompanhe seus pedidos de retirada na loja e veja detalhes do pagamento.</p>
       <div className="mt-5 overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="text-xs uppercase tracking-[0.16em] text-slate-400">
-            <tr><th className="py-3">Número</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Status financeiro</th><th>Status operacional</th><th></th></tr>
+            <tr><th className="py-3">Numero</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Status financeiro</th><th>Status operacional</th><th></th></tr>
           </thead>
           <tbody className="divide-y divide-white/10">
             {loading ? <tr><td colSpan={7} className="py-5 text-slate-300">Carregando pedidos...</td></tr> : null}
@@ -274,70 +572,18 @@ function OrdersPanel({ path = "" }) {
                 <td className="py-4 font-black text-white">{order.order_number}</td>
                 <td>{formatDate(order.created_at)}</td>
                 <td>{formatCurrency(order.total_amount)}</td>
-                <td>{order.payment_method === "card" ? "Cartão" : order.payment_method === "pix" ? "Pix" : "-"}</td>
-                <td>{financialLabels[order.financial_status] || order.financial_status}</td>
-                <td>{operationalLabels[order.operational_status] || order.operational_status}</td>
-                <td><a href={`/minha-conta/pedidos/${encodeURIComponent(order.id)}`} onClick={(event) => { event.preventDefault(); window.history.pushState({}, "", `/minha-conta/pedidos/${encodeURIComponent(order.id)}`); openOrder(order.id); }} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan hover:bg-nt-cyan/10">Ver detalhes</a></td>
+                <td>{paymentLabel(order.payment_method)}</td>
+                <td>{customerFinancialLabels[order.financial_status] || financialLabels[order.financial_status] || order.financial_status}</td>
+                <td>{customerOperationalLabels[order.operational_status] || operationalLabels[order.operational_status] || order.operational_status}</td>
+                <td><a href={"/minha-conta/pedidos/" + encodeURIComponent(order.id)} onClick={(event) => { event.preventDefault(); openOrderRoute(order.id); }} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan hover:bg-nt-cyan/10">Ver detalhes</a></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      {selected ? (
-        <div className="mt-6 rounded-lg border border-white/10 bg-slate-950 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">Pedido</p><h3 className="mt-1 text-xl font-black text-white">{selected.order_number}</h3></div>
-            <button type="button" onClick={() => setSelected(null)} className="rounded-md border border-white/10 px-3 py-2 text-sm text-slate-200 hover:bg-white/10">Fechar</button>
-          </div>
-          {(() => {
-            const payment = selected.store_payments?.[0];
-            const pixPending = payment?.payment_method === "pix" && payment?.qr_code && !["approved", "cancelled", "expired", "rejected", "refunded", "charged_back"].includes(payment.status);
-            return pixPending ? (
-              <div className="mt-5 rounded-md border border-lime-300/20 bg-lime-300/10 p-4">
-                <p className="font-black text-lime-100">Pix aguardando pagamento</p>
-                {payment.qr_code_base64 ? <img src={`data:image/png;base64,${payment.qr_code_base64}`} alt="QR Code Pix do pedido" className="mt-4 w-48 rounded-md bg-white p-2" /> : null}
-                <textarea readOnly value={payment.qr_code} className="mt-4 min-h-24 w-full rounded-md border border-white/10 bg-slate-950 p-3 text-sm text-slate-100" />
-              </div>
-            ) : null;
-          })()}
-          <dl className="mt-5 grid gap-3 md:grid-cols-3">
-            <div><dt className="text-xs text-slate-400">Pagamento</dt><dd className="font-bold text-white">{selected.payment_method === "card" ? "Cartão" : selected.payment_method === "pix" ? "Pix" : "-"}</dd></div>
-            <div><dt className="text-xs text-slate-400">Financeiro</dt><dd className="font-bold text-white">{financialLabels[selected.financial_status] || selected.financial_status}</dd></div>
-            <div><dt className="text-xs text-slate-400">Operação</dt><dd className="font-bold text-white">{operationalLabels[selected.operational_status] || selected.operational_status}</dd></div>
-          </dl>
-          <div className="mt-5 rounded-md border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
-            <p className="font-black text-white">Local de retirada</p>
-            <p className="mt-2">Rua Johann Sachse, 2891, Sala 1 - Badenfurt, Blumenau - SC.</p>
-            <p>Aguarde a confirmacao de que o pedido esta pronto antes de retirar.</p>
-          </div>
-          <div className="mt-5 grid gap-3">
-            {(selected.store_order_items || []).map((item) => (
-              <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-white/5 p-4">
-                <div className="flex min-w-0 items-center gap-3">
-                  {orderItemImage(item) ? <img src={orderItemImage(item)} alt={item.product_name} className="h-14 w-14 rounded-md object-cover" /> : null}
-                  <div><p className="font-bold text-white">{item.product_name}</p><p className="text-sm text-slate-400">{item.variation_name || item.sku || item.internal_code}</p></div>
-                </div>
-                <p className="text-sm text-slate-300">{item.quantity} x {formatCurrency(item.final_unit_price)}</p>
-              </div>
-            ))}
-          </div>
-          {selected.store_order_logs?.length ? (
-            <div className="mt-5 rounded-md border border-white/10 bg-white/5 p-4">
-              <p className="font-black text-white">Historico</p>
-              <div className="mt-3 grid gap-2 text-sm text-slate-300">
-                {selected.store_order_logs.map((log) => (
-                  <p key={log.id}><span className="text-slate-500">{formatDate(log.created_at)}</span> - {log.message || log.action}</p>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          <p className="mt-5 text-right text-xl font-black text-nt-cyan">Total: {formatCurrency(selected.total_amount)}</p>
-        </div>
-      ) : null}
     </Card>
   );
 }
-
 function AddressesPanel() {
   const auth = useCustomerAuth();
   const emptyAddress = useMemo(() => ({ label: "Principal", cep: "", street: "", number: "", complement: "", neighborhood: "", city: "", state: "", country: "Brasil", isDefault: true }), []);
@@ -457,7 +703,7 @@ export function CustomerAccountPage({ path, onNavigate, getNavHref, navigateTo }
   const active = routeKey(path);
   return (
     <AccountShell path={path} onNavigate={onNavigate} getNavHref={getNavHref} navigateTo={navigateTo}>
-      {active === "pedidos" ? <OrdersPanel path={path} /> : null}
+      {active === "pedidos" ? <OrdersPanel path={path} navigateTo={navigateTo} /> : null}
       {active === "enderecos" ? <AddressesPanel /> : null}
       {active === "seguranca" ? <SecurityPanel /> : null}
       {active === "perfil" ? <ProfilePanel /> : null}

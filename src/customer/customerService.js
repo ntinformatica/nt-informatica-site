@@ -80,12 +80,39 @@ export async function listCustomerOrders(email) {
 
 export async function getCustomerOrderDetails(email, orderId) {
   if (!email || !orderId) return null;
-  const rows = await supabaseRequest(
+  const orderRows = await supabaseRequest(
     `/store_orders?id=eq.${encodeURIComponent(orderId)}&customer_email=eq.${encodeURIComponent(email)}`
-    + "&select=*,store_order_items(*),store_payments(id,payment_method,payment_type,status,status_detail,amount,installments,installment_amount,qr_code,qr_code_base64,ticket_url,expires_at,created_at,updated_at),store_order_logs(id,action,message,created_at,metadata)&limit=1",
-  ).catch((error) => {
-    console.warn("Nao foi possivel carregar detalhe do pedido:", error);
-    return [];
-  });
-  return firstRow(rows);
+    + "&select=*,store_order_items(*)&limit=1",
+  );
+  const order = firstRow(orderRows);
+  if (!order) return null;
+
+  const payments = await supabaseRequest(
+    `/store_payments?order_id=eq.${encodeURIComponent(order.id)}`
+    + "&select=id,payment_method,payment_type,status,status_detail,amount,installments,installment_amount,qr_code,qr_code_base64,ticket_url,expires_at,approved_at,paid_at,created_at,updated_at"
+    + "&order=created_at.desc",
+  );
+
+  let logs = [];
+  let logsUnavailable = false;
+  try {
+    logs = await supabaseRequest(
+      `/store_order_logs?order_id=eq.${encodeURIComponent(order.id)}`
+      + "&select=id,event_type,message,created_at,actor_type,source"
+      + "&order=created_at.asc",
+    );
+  } catch (error) {
+    logsUnavailable = true;
+    console.warn("Historico do pedido indisponivel para o cliente:", {
+      orderId: order.id,
+      message: error?.message || "",
+    });
+  }
+
+  return {
+    ...order,
+    store_payments: Array.isArray(payments) ? payments : [],
+    store_order_logs: Array.isArray(logs) ? logs : [],
+    logsUnavailable,
+  };
 }
