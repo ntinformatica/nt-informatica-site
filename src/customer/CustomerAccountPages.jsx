@@ -49,7 +49,11 @@ const operationalLabels = {
 const customerFinancialLabels = {
   pending: "Aguardando pagamento",
   processing: "Pagamento em processamento",
+  in_process: "Pagamento em processamento",
   approved: "Pago",
+  paid: "Pago",
+  accredited: "Pago",
+  processed: "Pago",
   rejected: "Pagamento recusado",
   cancelled: "Pagamento cancelado",
   expired: "Pagamento expirado",
@@ -162,8 +166,29 @@ function latestPayment(order) {
   return Array.isArray(order?.store_payments) ? order.store_payments[0] || null : null;
 }
 
+function normalizePaymentStatus(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function consolidatedFinancialStatus(order, payment) {
+  const orderStatus = normalizePaymentStatus(order?.financial_status);
+  const paymentStatus = normalizePaymentStatus(payment?.status);
+  const approvedStatuses = ["approved", "paid", "accredited", "processed"];
+  const processingStatuses = ["processing", "in_process"];
+  const finalStatuses = ["rejected", "cancelled", "expired", "refunded", "charged_back"];
+
+  if (approvedStatuses.includes(orderStatus)) return "approved";
+  if (processingStatuses.includes(orderStatus)) return "processing";
+  if (finalStatuses.includes(orderStatus) || orderStatus === "pending") return orderStatus;
+  if (approvedStatuses.includes(paymentStatus)) return "approved";
+  if (processingStatuses.includes(paymentStatus)) return "processing";
+  if (finalStatuses.includes(paymentStatus) || paymentStatus === "pending") return paymentStatus;
+  return orderStatus || paymentStatus || "";
+}
+
 function paymentStatusLabel(payment, order) {
-  return customerFinancialLabels[payment?.status] || customerFinancialLabels[order?.financial_status] || payment?.status || order?.financial_status || "-";
+  const status = consolidatedFinancialStatus(order, payment);
+  return customerFinancialLabels[status] || financialLabels[status] || status || "-";
 }
 
 function displayFiscalStatus(order, invoice = null) {
@@ -180,11 +205,21 @@ function paymentDetailMessage(detail) {
   return paymentDetailLabels[normalized] || (normalized ? "Acompanhe a atualizacao do pagamento em Meus Pedidos." : "Status atualizado automaticamente pela NT Informatica.");
 }
 
-function isPixActive(payment) {
+function isPixActive(payment, order) {
+  const financialStatus = consolidatedFinancialStatus(order, payment);
   if (!payment || payment.payment_method !== "pix" || !payment.qr_code) return false;
-  if (["approved", "cancelled", "expired", "rejected", "refunded", "charged_back"].includes(payment.status)) return false;
+  if (!["pending", "processing"].includes(financialStatus)) return false;
   if (payment.expires_at && new Date(payment.expires_at).getTime() <= Date.now()) return false;
   return true;
+}
+
+function isPendingPixExpired(payment, order) {
+  const financialStatus = consolidatedFinancialStatus(order, payment);
+  const paymentStatus = normalizePaymentStatus(payment?.status);
+  if (financialStatus !== "pending") return false;
+  if (paymentStatus && paymentStatus !== "pending") return false;
+  if (!payment || payment.payment_method !== "pix" || !payment.expires_at) return false;
+  return new Date(payment.expires_at).getTime() <= Date.now();
 }
 
 function itemConfigEntries(item) {
@@ -454,9 +489,10 @@ function OrdersPanel({ path = "", navigateTo }) {
     const paymentMethod = payment?.payment_method || selected.payment_method;
     const items = Array.isArray(selected.store_order_items) ? selected.store_order_items : [];
     const logs = Array.isArray(selected.store_order_logs) ? selected.store_order_logs : [];
-    const pixActive = isPixActive(payment);
-    const pixExpired = paymentMethod === "pix" && payment?.expires_at && new Date(payment.expires_at).getTime() <= Date.now();
-    const cardRejected = paymentMethod === "card" && ["rejected", "failed"].includes(payment?.status);
+    const financialStatus = consolidatedFinancialStatus(selected, payment);
+    const pixActive = isPixActive(payment, selected);
+    const pixExpired = isPendingPixExpired(payment, selected);
+    const cardRejected = paymentMethod === "card" && ["rejected", "cancelled", "expired", "refunded", "charged_back"].includes(financialStatus);
     const installments = Number(payment?.installments || selected.installments || 1);
     const installmentAmount = Number(payment?.installment_amount || (installments > 1 ? Number(selected.total_amount || 0) / installments : 0));
     const invoice = Array.isArray(selected.order_invoices) ? selected.order_invoices[0] || null : null;
@@ -649,22 +685,19 @@ function OrdersPanel({ path = "", navigateTo }) {
       <h2 className="text-2xl font-black text-white">Meus Pedidos</h2>
       <p className="mt-2 text-sm leading-6 text-slate-300">Acompanhe seus pedidos de retirada na loja e veja detalhes do pagamento.</p>
       <div className="mt-5 overflow-x-auto">
-        <table className="w-full min-w-[720px] text-left text-sm">
+        <table className="w-full min-w-[620px] text-left text-sm">
           <thead className="text-xs uppercase tracking-[0.16em] text-slate-400">
-              <tr><th className="py-3">Numero</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Status financeiro</th><th>Status operacional</th><th>Fiscal</th><th></th></tr>
+              <tr><th className="py-3">Numero</th><th>Data</th><th>Valor</th><th>Status operacional</th><th></th></tr>
           </thead>
           <tbody className="divide-y divide-white/10">
-            {loading ? <tr><td colSpan={8} className="py-5 text-slate-300">Carregando pedidos...</td></tr> : null}
-            {!loading && !orders.length ? <tr><td colSpan={8} className="py-5 text-slate-300">Nenhum pedido encontrado para este e-mail.</td></tr> : null}
+            {loading ? <tr><td colSpan={5} className="py-5 text-slate-300">Carregando pedidos...</td></tr> : null}
+            {!loading && !orders.length ? <tr><td colSpan={5} className="py-5 text-slate-300">Nenhum pedido encontrado para este e-mail.</td></tr> : null}
             {orders.map((order) => (
               <tr key={order.id} className="text-slate-200">
                 <td className="py-4 font-black text-white">{order.order_number}</td>
                 <td>{formatDate(order.created_at)}</td>
                 <td>{formatCurrency(order.total_amount)}</td>
-                <td>{paymentLabel(order.payment_method)}</td>
-                <td>{customerFinancialLabels[order.financial_status] || financialLabels[order.financial_status] || order.financial_status}</td>
                 <td>{customerOperationalLabels[order.operational_status] || operationalLabels[order.operational_status] || order.operational_status}</td>
-                <td>{fiscalLabels[displayFiscalStatus(order)] || order.fiscal_status || "Aguardando emissão"}</td>
                 <td><a href={"/minha-conta/pedidos/" + encodeURIComponent(order.id)} onClick={(event) => { event.preventDefault(); openOrderRoute(order.id); }} className="inline-flex min-h-9 min-w-[104px] items-center justify-center whitespace-nowrap rounded-md border border-nt-cyan/40 px-3 py-2 text-center text-xs font-black leading-none text-nt-cyan transition hover:bg-nt-cyan/10">Ver detalhes</a></td>
               </tr>
             ))}
