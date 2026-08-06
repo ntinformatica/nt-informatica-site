@@ -1,6 +1,7 @@
 ﻿import {
   Cpu,
   Camera,
+  CirclePlay,
   Gamepad2,
   HardDrive,
   Headphones,
