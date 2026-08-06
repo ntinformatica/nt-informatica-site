@@ -25,6 +25,10 @@ function serviceErrorMessage(action, error) {
   return `${action}${detail}`;
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
+}
+
 function moneyOrNull(value) {
   if (value === "" || value === null || value === undefined) return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -207,18 +211,60 @@ function writeLocalProducts(products, categories = []) {
   writeJson(adminStorageKey, products.map((product) => normalizeLocalProduct(product, categories)));
 }
 
+async function hasVariationReferences(table, variationId) {
+  const rows = await supabaseRequest(`/${table}?select=id&variation_id=eq.${encodeURIComponent(variationId)}&limit=1`);
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function ensureVariationCanBeDeleted(variation) {
+  const checks = [
+    ["store_stock_reservations", "reserva de estoque"],
+    ["store_order_items", "pedido"],
+    ["stock_movements", "movimentacao de estoque"],
+  ];
+
+  for (const [table, label] of checks) {
+    if (await hasVariationReferences(table, variation.id)) {
+      const name = variation.name || variation.value || variation.color || variation.sku || "esta variacao";
+      throw new Error(`Nao foi possivel excluir ${name}: a variacao possui ${label} vinculada. Desative a variacao em vez de remove-la.`);
+    }
+  }
+}
+
 async function saveVariations(productId, variations) {
-  await supabaseRequest(`/product_variations?product_id=eq.${encodeURIComponent(productId)}`, {
-    method: "DELETE",
-  });
+  const existing = await supabaseRequest(`/product_variations?select=*&product_id=eq.${encodeURIComponent(productId)}&order=created_at.asc`);
+  const existingById = new Map(existing.map((variation) => [variation.id, variation]));
+  const desired = parseVariations(variations);
+  const keptIds = new Set();
 
-  const payload = parseVariations(variations).map((variation) => toSupabaseVariation(variation, productId));
-  if (!payload.length) return [];
+  for (const variation of desired) {
+    const payload = toSupabaseVariation(variation, productId);
+    const existingId = isUuid(variation.id) && existingById.has(variation.id) ? variation.id : "";
 
-  return supabaseRequest("/product_variations", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+    if (existingId) {
+      keptIds.add(existingId);
+      await supabaseRequest(`/product_variations?id=eq.${encodeURIComponent(existingId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      const [created] = await supabaseRequest("/product_variations", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      if (created?.id) keptIds.add(created.id);
+    }
+  }
+
+  for (const current of existing) {
+    if (keptIds.has(current.id)) continue;
+    await ensureVariationCanBeDeleted(current);
+    await supabaseRequest(`/product_variations?id=eq.${encodeURIComponent(current.id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  return supabaseRequest(`/product_variations?select=*&product_id=eq.${encodeURIComponent(productId)}&order=created_at.asc`);
 }
 
 export async function listProducts(categories = []) {
