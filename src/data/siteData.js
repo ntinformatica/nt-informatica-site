@@ -1,7 +1,6 @@
 ﻿import {
   Cpu,
   Camera,
-  CirclePlay,
   Gamepad2,
   HardDrive,
   Headphones,
@@ -200,7 +199,7 @@ export const pcs = [
 ];
 
 export const contentCards = [
-  { title: "YouTube NT Informática e Celulares", icon: CirclePlay, href: socialLinks.youtubeInfo, buttonLabel: "Acessar canal" },
+  { title: "YouTube NT Informática e Celulares", icon: Monitor, href: socialLinks.youtubeInfo, buttonLabel: "Acessar canal" },
   { title: "YouTube NT Gaming", icon: Play, href: socialLinks.youtubeGaming, buttonLabel: "Acessar canal" },
   { title: "Instagram", icon: Camera, href: socialLinks.instagram, buttonLabel: "Ver perfil" },
   { title: "TikTok", icon: Music2, href: socialLinks.tiktok, buttonLabel: "Ver perfil" },
