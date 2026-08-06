@@ -35,8 +35,10 @@
   }
 
   function normalizeImages(value, mainImage = "") {
-    const images = Array.isArray(value) ? value.filter(Boolean) : [];
-    return [...new Set([mainImage, ...images].filter(Boolean))];
+    const images = Array.isArray(value) ? value : [];
+    return [...new Set([mainImage, ...images]
+      .map((image) => String(image || "").trim())
+      .filter((image) => /^https?:\/\//i.test(image)))];
   }
 
   function publicStatus(status) {

@@ -943,6 +943,8 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
     setForm((current) => {
       const next = { ...current, [field]: value };
       if (field === "name" && !isEdit) next.slug = slugify(value);
+      if (field === "mainImage") next.images = listToText([value, ...textToList(current.gallery)]);
+      if (field === "gallery") next.images = listToText([current.mainImage, ...textToList(value)]);
       if (field === "categoryId") {
         const category = categories.find((item) => item.id === value);
         next.category = category?.name || "";
@@ -1018,7 +1020,7 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
         <TextareaField label="Descrição curta" value={form.shortDescription} onChange={(value) => updateField("shortDescription", value)} rows={3} />
         <TextareaField label="Descrição completa" value={form.fullDescription} onChange={(value) => updateField("fullDescription", value)} rows={6} />
         <TextField label="Imagem principal" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="URL da imagem principal" />
-        <TextareaField label="Galeria de imagens por URL" value={form.gallery || form.images} onChange={(value) => updateField("gallery", value)} placeholder="Uma URL por linha" />
+        <TextareaField label="Galeria de imagens por URL" value={form.gallery} onChange={(value) => updateField("gallery", value)} placeholder="Uma URL por linha" />
         <TextareaField label="Observações internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
       </section>
 

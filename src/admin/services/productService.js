@@ -3,12 +3,16 @@ import { adminStorageKey, initialAdminProducts } from "../adminData";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
 
 function arrayFromText(value) {
-  if (Array.isArray(value)) return value.filter(Boolean);
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
   if (!value) return [];
   return String(value)
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeImageList(value) {
+  return [...new Set(arrayFromText(value).filter((image) => /^https?:\/\//i.test(image)))];
 }
 
 function textFromArray(value) {
@@ -121,7 +125,9 @@ function fromSupabase(row, categories = [], variations = []) {
 
 function toSupabase(product, categories = []) {
   const category = categories.find((item) => item.id === product.categoryId || item.name === product.category);
-  const images = [...new Set([product.mainImage, ...arrayFromText(product.images), ...arrayFromText(product.gallery)].filter(Boolean))];
+  const [mainImage = ""] = normalizeImageList([product.mainImage]);
+  const galleryImages = product.gallery !== undefined ? normalizeImageList(product.gallery) : normalizeImageList(product.images);
+  const images = normalizeImageList([mainImage, ...galleryImages]);
 
   return {
     name: product.name,
@@ -138,7 +144,7 @@ function toSupabase(product, categories = []) {
     featured: Boolean(product.featured),
     sku: product.sku || "",
     warranty: product.warranty || "",
-    main_image: product.mainImage || images[0] || "",
+    main_image: mainImage || images[0] || "",
     images,
     internal_notes: product.internalNotes || "",
     updated_at: new Date().toISOString(),
@@ -166,7 +172,9 @@ function toSupabaseVariation(variation, productId) {
 
 function normalizeLocalProduct(product, categories = []) {
   const category = categories.find((item) => item.id === product.categoryId || item.name === product.category);
-  const images = [...new Set([product.mainImage, ...arrayFromText(product.images), ...arrayFromText(product.gallery)].filter(Boolean))];
+  const [mainImage = ""] = normalizeImageList([product.mainImage]);
+  const galleryImages = product.gallery !== undefined ? normalizeImageList(product.gallery) : normalizeImageList(product.images);
+  const images = normalizeImageList([mainImage, ...galleryImages]);
 
   return {
     ...product,
@@ -176,7 +184,7 @@ function normalizeLocalProduct(product, categories = []) {
     category: category?.name || product.category || "Sem categoria",
     price: product.price ?? "",
     promoPrice: product.promoPrice ?? "",
-    mainImage: product.mainImage || images[0] || "",
+    mainImage: mainImage || images[0] || "",
     images: textFromArray(images),
     gallery: textFromArray(images.slice(1)),
     variations: parseVariations(product.variations),
