@@ -199,10 +199,10 @@ export const pcs = [
 ];
 
 export const contentCards = [
-  { title: "YouTube NT Informática e Celulares", icon: CirclePlay, href: socialLinks.youtubeInfo },
-  { title: "YouTube NT Gaming", icon: Play, href: socialLinks.youtubeGaming },
-  { title: "Instagram", icon: Camera, href: socialLinks.instagram },
-  { title: "TikTok", icon: Star, href: socialLinks.tiktok },
+  { title: "YouTube NT Informática e Celulares", icon: CirclePlay, href: socialLinks.youtubeInfo, buttonLabel: "Acessar canal" },
+  { title: "YouTube NT Gaming", icon: Play, href: socialLinks.youtubeGaming, buttonLabel: "Acessar canal" },
+  { title: "Instagram", icon: Camera, href: socialLinks.instagram, buttonLabel: "Ver perfil" },
+  { title: "TikTok", icon: Star, href: socialLinks.tiktok, buttonLabel: "Ver perfil" },
 ];
 
 export const videos = [

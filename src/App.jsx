@@ -940,13 +940,13 @@ function Content() {
   return (
     <Section id="conteudo" eyebrow="Conteúdo" title="Acompanhe a NT Informática e a NT Gaming nas redes sociais.">
       <div className="grid gap-5 md:grid-cols-4">
-        {contentCards.map(({ title, icon: Icon, href }) => (
+        {contentCards.map(({ title, icon: Icon, href, buttonLabel }) => (
           <Card key={title} className="text-center">
             <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-md bg-nt-cyan/10 text-nt-cyan">
               <Icon />
             </div>
             <h3 className="min-h-12 text-base font-black text-white">{title}</h3>
-            <Button href={href} variant="secondary" className="mt-5 w-full">Abrir canal</Button>
+            <Button href={href} variant="secondary" className="mt-5 w-full">{buttonLabel}</Button>
           </Card>
         ))}
       </div>
