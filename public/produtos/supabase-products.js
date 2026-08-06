@@ -34,11 +34,20 @@
     }).format(parsed);
   }
 
+  function normalizeImagePath(value) {
+    const image = String(value || "").trim();
+    if (!image) return "";
+    if (/^https?:\/\//i.test(image)) return image;
+    if (/^\/produtos\/assets\//i.test(image)) return image;
+    if (/^assets\//i.test(image)) return `/produtos/${image}`;
+    return "";
+  }
+
   function normalizeImages(value, mainImage = "") {
     const images = Array.isArray(value) ? value : [];
     return [...new Set([mainImage, ...images]
-      .map((image) => String(image || "").trim())
-      .filter((image) => /^https?:\/\//i.test(image)))];
+      .map(normalizeImagePath)
+      .filter(Boolean))];
   }
 
   function publicStatus(status) {
