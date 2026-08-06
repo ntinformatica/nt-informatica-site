@@ -50,3 +50,145 @@ section {
   border-color: rgba(56, 189, 248, 0.55);
   box-shadow: 0 24px 60px rgba(14, 165, 233, 0.14);
 }
+
+.stock-sheet-document {
+  overflow-x: auto;
+}
+
+.stock-sheet-header {
+  margin-bottom: 1.25rem;
+}
+
+.stock-sheet-header h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 900;
+}
+
+.stock-sheet-header p {
+  margin: 0.25rem 0 0;
+  color: #334155;
+  font-weight: 700;
+}
+
+.stock-sheet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.stock-sheet-table th,
+.stock-sheet-table td {
+  border: 1px solid #cbd5e1;
+  padding: 0.5rem 0.6rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.stock-sheet-table th {
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.stock-sheet-table th:nth-child(2),
+.stock-sheet-table td:nth-child(2) {
+  width: 7.5rem;
+  text-align: center;
+}
+
+.stock-sheet-table th:nth-child(3),
+.stock-sheet-table td:nth-child(3) {
+  width: 12rem;
+}
+
+.stock-count-cell {
+  height: 2.15rem;
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 10mm;
+  }
+
+  body:has(.stock-sheet-page) {
+    background: #fff !important;
+    color: #111827 !important;
+  }
+
+  body:has(.stock-sheet-page) aside,
+  body:has(.stock-sheet-page) .admin-shell-header,
+  body:has(.stock-sheet-page) .stock-sheet-controls,
+  body:has(.stock-sheet-page) .admin-shell-notice {
+    display: none !important;
+  }
+
+  body:has(.stock-sheet-page) .lg\:pl-72 {
+    padding-left: 0 !important;
+  }
+
+  body:has(.stock-sheet-page) main {
+    padding: 0 !important;
+  }
+
+  .stock-sheet-page {
+    display: block !important;
+  }
+
+  .stock-sheet-document {
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  .stock-sheet-header {
+    margin-bottom: 8mm;
+  }
+
+  .stock-sheet-header h2 {
+    font-size: 14pt;
+  }
+
+  .stock-sheet-header p {
+    color: #111827 !important;
+    font-size: 10pt;
+  }
+
+  .stock-sheet-table {
+    font-size: 9pt;
+  }
+
+  .stock-sheet-table thead {
+    display: table-header-group;
+  }
+
+  .stock-sheet-table tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .stock-sheet-table th,
+  .stock-sheet-table td {
+    border-color: #111827;
+    padding: 5px 7px;
+  }
+
+  .stock-sheet-table th:nth-child(2),
+  .stock-sheet-table td:nth-child(2) {
+    width: 28mm;
+  }
+
+  .stock-sheet-table th:nth-child(3),
+  .stock-sheet-table td:nth-child(3) {
+    width: 42mm;
+  }
+
+  .stock-count-cell {
+    height: 8mm;
+  }
+}

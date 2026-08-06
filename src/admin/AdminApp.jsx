@@ -113,6 +113,7 @@ const menuItems = [
   ["Dashboard", "/admin", Home],
   ["Pedidos", "/admin/pedidos", ShoppingBag],
   ["Produtos", "/admin/produtos", Boxes],
+  ["Folha de Estoque", "/admin/folha-estoque", ClipboardList],
   ["PCs Montados", "/admin/pcs", Monitor],
   ["Biblioteca de Jogos", "/admin/jogos", Gamepad2],
   ["Ordens de Serviço", "/admin/os", ClipboardList],
@@ -346,6 +347,7 @@ function routeInfo(pathname) {
   if (cleanPath.startsWith("/admin/produtos/editar/")) {
     return { page: "productForm", mode: "edit", id: decodeURIComponent(cleanPath.replace("/admin/produtos/editar/", "")) };
   }
+  if (cleanPath === "/admin/folha-estoque") return { page: "stockSheet" };
   if (cleanPath === "/admin/produtos") return { page: "products" };
   if (cleanPath === "/admin/categorias") return { page: "categories" };
   if (cleanPath === "/admin/assistente-codex") return { page: "codexAssistant" };
@@ -506,7 +508,7 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode
       </aside>
       {mobileOpen ? <button className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Fechar navegação" /> : null}
       <div className="lg:pl-72">
-        <header className="sticky top-0 z-30 border-b border-white/10 bg-[#070b12]/88 backdrop-blur">
+        <header className="admin-shell-header sticky top-0 z-30 border-b border-white/10 bg-[#070b12]/88 backdrop-blur">
           <div className="flex min-h-20 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-nt-cyan">Painel administrativo</p>
@@ -561,7 +563,7 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode
           </div>
         </header>
         <main className="px-4 py-6 sm:px-6 lg:px-8">
-          {notice ? <div className="mb-5 rounded-md border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">{notice}</div> : null}
+          {notice ? <div className="admin-shell-notice mb-5 rounded-md border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">{notice}</div> : null}
           {children}
         </main>
       </div>
@@ -896,6 +898,117 @@ function ProductsPage({ products, categories, onDelete, onDuplicate, onStatus, o
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
       <StockMovementModal product={stockProduct} open={Boolean(stockProduct)} onClose={() => setStockProduct(null)} onMove={onStockMove} />
     </>
+  );
+}
+
+function productIsActiveForStockSheet(product) {
+  const status = String(product?.status || "").toLowerCase();
+  return !["rascunho", "despublicado", "inativo", "draft", "unpublished"].includes(status);
+}
+
+function stockSheetVariationName(product, variation) {
+  const variationName = variation.name || variation.color || variation.value || variation.sku || "Variação";
+  return `${product.name} — ${variationName}`;
+}
+
+function buildStockSheetRows(products) {
+  return products.flatMap((product) => {
+    const variations = Array.isArray(product.variations) ? product.variations : [];
+    if (variations.length) {
+      return variations.map((variation) => ({
+        id: `variation-${variation.id || product.id}-${variation.name || variation.color || variation.sku}`,
+        category: product.category || "Sem categoria",
+        categoryId: product.categoryId || "",
+        name: stockSheetVariationName(product, variation),
+        productName: product.name || "",
+        variationName: variation.name || variation.color || variation.value || "",
+        stock: Number(variation.stock || 0),
+        active: productIsActiveForStockSheet(product) && variation.active !== false,
+      }));
+    }
+
+    return [{
+      id: `product-${product.id}`,
+      category: product.category || "Sem categoria",
+      categoryId: product.categoryId || "",
+      name: product.name || "Produto sem nome",
+      productName: product.name || "",
+      variationName: "",
+      stock: Number(product.stock || 0),
+      active: productIsActiveForStockSheet(product),
+    }];
+  });
+}
+
+function StockSheetPage({ products, categories }) {
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("Todas");
+  const [onlyActive, setOnlyActive] = useState(true);
+  const [stockFilter, setStockFilter] = useState("todos");
+
+  const rows = useMemo(() => buildStockSheetRows(products)
+    .filter((row) => {
+      const matchSearch = row.name.toLowerCase().includes(search.toLowerCase());
+      const matchCategory = category === "Todas" || row.categoryId === category || row.category === category;
+      const matchActive = !onlyActive || row.active;
+      const matchStock = stockFilter === "todos" || row.stock > 0;
+      return matchSearch && matchCategory && matchActive && matchStock;
+    })
+    .sort((first, second) => {
+      const byCategory = first.category.localeCompare(second.category, "pt-BR", { sensitivity: "base" });
+      if (byCategory) return byCategory;
+      const byProduct = first.productName.localeCompare(second.productName, "pt-BR", { sensitivity: "base" });
+      if (byProduct) return byProduct;
+      return first.variationName.localeCompare(second.variationName, "pt-BR", { sensitivity: "base" });
+    }), [products, search, category, onlyActive, stockFilter]);
+
+  return (
+    <div className="stock-sheet-page grid gap-5">
+      <section className="stock-sheet-controls rounded-lg border border-white/10 bg-white/5 p-4">
+        <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr_0.7fr_auto_auto] lg:items-end">
+          <label className="relative">
+            <Search className="pointer-events-none absolute left-3 top-10 text-slate-500" size={18} />
+            <span className="text-sm font-bold text-slate-200">Buscar por nome</span>
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Produto ou variação" className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
+          </label>
+          <SelectField label="Categoria" value={category} onChange={setCategory} options={[["Todas", "Todas categorias"], ...categories.map((item) => [item.id, item.name])]} />
+          <SelectField label="Estoque" value={stockFilter} onChange={setStockFilter} options={[["todos", "Todos"], ["com-estoque", "Com estoque"]]} />
+          <label className="flex min-h-12 items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
+            <input type="checkbox" checked={onlyActive} onChange={(event) => setOnlyActive(event.target.checked)} />
+            Somente ativos
+          </label>
+          <AdminButton type="button" icon={ClipboardList} onClick={() => window.print()}>Imprimir</AdminButton>
+        </div>
+      </section>
+
+      <section className="stock-sheet-document rounded-lg border border-white/10 bg-white p-6 text-slate-950 shadow-card">
+        <header className="stock-sheet-header">
+          <h2>NT Informática, Celulares e Games</h2>
+          <p>Conferência de Estoque</p>
+          <p>Data: ____/____/____</p>
+        </header>
+
+        <table className="stock-sheet-table">
+          <thead>
+            <tr>
+              <th>Produto / Variação</th>
+              <th>Estoque sistema</th>
+              <th>Estoque contado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>{row.name}</td>
+                <td>{row.stock}</td>
+                <td className="stock-count-cell" aria-label="Estoque contado" />
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!rows.length ? <p className="mt-5 text-sm text-slate-700">Nenhum item encontrado com os filtros atuais.</p> : null}
+      </section>
+    </div>
   );
 }
 
@@ -4284,6 +4397,7 @@ export function AdminApp() {
     storeOrders: ["Pedidos", "Acompanhamento financeiro e operacional dos pedidos do e-commerce."],
     dashboard: ["Dashboard", "Resumo rápido do catálogo e da operação."],
     products: ["Produtos", "Busca, filtros, estoque, publicação e ações rápidas."],
+    stockSheet: ["Folha de Estoque", "Lista A4 compacta para conferência física dos produtos da loja."],
     productForm: [info.mode === "edit" ? "Editar Produto" : "Novo Produto", "Cadastro completo preparado para Supabase."],
     serviceOrders: ["Ordens de Serviço", "Base técnica para controle de atendimentos e manutenção."],
     serviceOrderForm: [info.mode === "edit" ? "Editar Ordem de Serviço" : "Nova Ordem de Serviço", "Estrutura inicial do módulo de OS."],
@@ -4331,6 +4445,7 @@ export function AdminApp() {
           onStockMove={moveProductStock}
         />
       ) : null}
+      {!loading && info.page === "stockSheet" ? <StockSheetPage products={products} categories={categories} /> : null}
       {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} error={error} /> : null}
       {!loading && info.page === "serviceOrders" ? <ServiceOrdersManagerPage /> : null}
       {!loading && info.page === "serviceOrderView" ? <ServiceOrderViewPage serviceOrderId={info.id} /> : null}
