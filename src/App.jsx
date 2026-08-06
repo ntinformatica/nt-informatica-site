@@ -42,6 +42,7 @@ import { ForgotPasswordPage, LoginPage, RegisterPage, ResetPasswordPage } from "
 import { CustomerAccountPage } from "./customer/CustomerAccountPages";
 import { CartProvider, useCart } from "./cart/CartContext";
 import { CartPage, CheckoutPage, OrderPaymentPage } from "./cart/CartPages";
+import { listSiteContentCards } from "./services/siteContentCardService";
 import { listPublicGames } from "./admin/services/gameLibraryService";
 import { listPublicAssembledPcs, pcCategories, pcTypeLabel, pcTypeOptions } from "./admin/services/assembledPcService";
 import { classifyFps, formatBenchmarkResolution, formatFps, getGameImage, isValidHttpUrl, normalizeProductBenchmark, resolveBenchmarkGamesWithLibrary } from "./utils/pcBenchmark";
@@ -57,7 +58,6 @@ import {
   services,
   socialLinks,
   testimonials,
-  videos,
 } from "./data/siteData";
 
 const messages = {
@@ -212,6 +212,58 @@ function pcGallery(pc) {
     ? pc.gallery.split("\n").map((image) => image.trim()).filter(Boolean)
     : Array.isArray(pc.gallery) ? pc.gallery : [];
   return [...new Set([pc.mainImage, pc.main_image, pc.image, pc.imageUrl, pc.image_url, ...fromText, ...fromGallery].filter(Boolean))];
+}
+
+function isSafeHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    return parsed.protocol === "https:" || parsed.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function youtubeVideoId(url) {
+  if (!url) return "";
+
+  try {
+    const parsed = new URL(String(url).trim());
+    const hostname = parsed.hostname.replace(/^www\./, "").toLowerCase();
+
+    if (hostname === "youtube.com" || hostname === "m.youtube.com") {
+      if (parsed.pathname === "/watch") return parsed.searchParams.get("v") || "";
+      const [, type, id] = parsed.pathname.split("/");
+      if (["shorts", "live", "embed"].includes(type)) return id || "";
+    }
+
+    if (hostname === "youtu.be") {
+      return parsed.pathname.split("/").filter(Boolean)[0] || "";
+    }
+  } catch {
+    return "";
+  }
+
+  return "";
+}
+
+function youtubeThumbnail(url) {
+  const id = youtubeVideoId(url);
+  return id ? `https://img.youtube.com/vi/${encodeURIComponent(id)}/hqdefault.jpg` : "";
+}
+
+function youtubeEmbedUrl(url) {
+  const id = youtubeVideoId(url);
+  return id ? `https://www.youtube.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0` : "";
+}
+
+function contentCardThumbnail(card) {
+  const customImage = String(card?.imageUrl || "").trim();
+  if (isSafeHttpUrl(customImage)) return customImage;
+  return youtubeThumbnail(card?.targetUrl) || "";
+}
+
+function isYoutubeContent(card) {
+  return Boolean(youtubeVideoId(card?.targetUrl));
 }
 
 function PcPriceBlock({ pc, detail = false }) {
@@ -960,6 +1012,61 @@ function PcShowcase() {
 }
 
 function Content() {
+  const [cards, setCards] = useState([]);
+  const [activeVideo, setActiveVideo] = useState(null);
+  const returnFocusRef = useRef(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCards() {
+      try {
+        const rows = await listSiteContentCards({ publicOnly: true });
+        if (active) setCards(rows);
+      } catch (error) {
+        console.warn("Nao foi possivel carregar os cards de conteudo:", error);
+      }
+    }
+
+    loadCards();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeVideo) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event) {
+      if (event.key === "Escape") closeVideoModal();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [activeVideo]);
+
+  function closeVideoModal() {
+    setActiveVideo(null);
+    requestAnimationFrame(() => returnFocusRef.current?.focus?.());
+  }
+
+  function openCard(card, event) {
+    if (isYoutubeContent(card)) {
+      returnFocusRef.current = event?.currentTarget || null;
+      setActiveVideo(card);
+      return;
+    }
+
+    if (isSafeHttpUrl(card.targetUrl)) {
+      window.open(card.targetUrl, "_blank", "noopener,noreferrer");
+    }
+  }
+
   return (
     <Section id="conteudo" eyebrow="Conteúdo" title="Acompanhe a NT Informática e a NT Gaming nas redes sociais.">
       <div className="grid gap-5 md:grid-cols-4">
@@ -978,14 +1085,76 @@ function Content() {
         })}
       </div>
       <div className="mt-8 grid gap-5 md:grid-cols-4">
-        {videos.map((video) => (
-          <Card key={video} className="p-4">
-            <TechPlaceholder label="Vídeo recente" icon={PlayCircle} />
-            <h3 className="mt-4 text-base font-black text-white">{video}</h3>
+        {cards.map((card) => {
+          const thumbnail = contentCardThumbnail(card);
+          const canOpen = isYoutubeContent(card) || isSafeHttpUrl(card.targetUrl);
+
+          return (
+          <Card key={card.slotKey} className="group overflow-hidden p-4 transition duration-300 hover:-translate-y-1 hover:border-nt-cyan/45 hover:shadow-[0_22px_48px_rgba(14,165,233,0.16)]">
+            <button
+              type="button"
+              disabled={!canOpen}
+              onClick={(event) => openCard(card, event)}
+              className="block w-full text-left disabled:cursor-not-allowed"
+              aria-label={`${card.buttonLabel || "Assistir"} ${card.title}`}
+            >
+              <div className="relative aspect-video overflow-hidden rounded-md border border-white/10 bg-slate-950">
+                {thumbnail ? (
+                  <img src={thumbnail} alt="" loading="lazy" className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+                ) : (
+                  <div className="h-full w-full">
+                    <TechPlaceholder label="Conteúdo NT" icon={PlayCircle} />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-950/20 to-transparent" />
+                <span className="absolute left-1/2 top-1/2 grid h-14 w-14 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/25 bg-slate-950/70 text-white shadow-[0_0_24px_rgba(56,189,248,0.22)] transition group-hover:border-nt-cyan group-hover:text-nt-cyan">
+                  <PlayCircle size={28} />
+                </span>
+              </div>
+              <h3 className="mt-4 text-base font-black text-white">{card.title}</h3>
+              {card.description ? <p className="mt-2 min-h-10 text-sm leading-5 text-slate-300">{card.description}</p> : null}
+              <span className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md border border-slate-600 bg-white/5 px-4 py-2 text-sm font-bold text-white transition group-hover:border-nt-cyan group-hover:bg-nt-cyan/10">
+                {card.buttonLabel || "Assistir"}
+              </span>
+            </button>
           </Card>
-        ))}
+          );
+        })}
       </div>
+      {activeVideo ? <ContentVideoModal card={activeVideo} onClose={closeVideoModal} /> : null}
     </Section>
+  );
+}
+
+function ContentVideoModal({ card, onClose }) {
+  const embedUrl = youtubeEmbedUrl(card.targetUrl);
+
+  return (
+    <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-950/88 px-4 py-8 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={card.title}>
+      <button type="button" className="absolute inset-0 cursor-default" aria-label="Fechar vídeo" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-5xl overflow-hidden rounded-lg border border-white/10 bg-slate-950 shadow-[0_30px_90px_rgba(0,0,0,0.55)]">
+        <div className="flex items-center justify-between gap-4 border-b border-white/10 px-4 py-3 sm:px-5">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">Conteúdo NT</p>
+            <h2 className="mt-1 text-base font-black text-white sm:text-lg">{card.title}</h2>
+          </div>
+          <button type="button" onClick={onClose} className="grid h-10 w-10 shrink-0 place-items-center rounded-md border border-white/10 bg-white/5 text-slate-100 transition hover:border-nt-cyan focus:outline-none focus:ring-2 focus:ring-nt-cyan">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="aspect-video bg-black">
+          {embedUrl ? (
+            <iframe
+              title={card.title}
+              src={embedUrl}
+              className="h-full w-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          ) : null}
+        </div>
+      </div>
+    </div>
   );
 }
 

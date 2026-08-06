@@ -32,6 +32,7 @@ import {
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { businessName } from "../data/siteData";
 import { createBenchmarkGameId, duplicateBenchmarkGames, getGameImage, normalizeGameLibraryName, normalizeProductBenchmark } from "../utils/pcBenchmark";
+import { contentTypes, listSiteContentCards, saveSiteContentCard } from "../services/siteContentCardService";
 import {
   deleteStorageFile,
   isSupabaseConfigured,
@@ -360,7 +361,7 @@ function routeInfo(pathname) {
   if (cleanPath === "/admin/arena") return { page: "arena" };
   if (cleanPath === "/admin/configuracoes") return { page: "settings" };
   if (cleanPath === "/admin/avaliacoes") return { page: "placeholder", title: "Avaliações" };
-  if (cleanPath === "/admin/conteudo") return { page: "placeholder", title: "Conteúdo" };
+  if (cleanPath === "/admin/conteudo") return { page: "siteContent" };
   return { page: "dashboard" };
 }
 
@@ -3922,6 +3923,57 @@ function SettingsPage() {
   );
 }
 
+function SiteContentPage({ cards, onSave }) {
+  const [forms, setForms] = useState(cards);
+
+  useEffect(() => {
+    setForms(cards);
+  }, [cards]);
+
+  function updateCard(slotKey, field, value) {
+    setForms((current) => current.map((card) => (
+      card.slotKey === slotKey ? { ...card, [field]: value } : card
+    )));
+  }
+
+  async function submitCard(event, card) {
+    event.preventDefault();
+    await onSave(card);
+  }
+
+  return (
+    <section className="grid gap-5 xl:grid-cols-2">
+      {forms.map((card) => (
+        <form key={card.slotKey} onSubmit={(event) => submitCard(event, card)} className="glass rounded-lg p-5 shadow-card">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">{card.slotKey}</p>
+              <h2 className="mt-1 text-xl font-black text-white">{card.title}</h2>
+            </div>
+            <label className="flex items-center gap-2 text-sm font-bold text-slate-200">
+              <input type="checkbox" checked={card.active} onChange={(event) => updateCard(card.slotKey, "active", event.target.checked)} />
+              Ativo
+            </label>
+          </div>
+
+          <div className="mt-5 grid gap-4">
+            <TextField label="Título" value={card.title} onChange={(value) => updateCard(card.slotKey, "title", value)} required />
+            <TextareaField label="Descrição curta" value={card.description} onChange={(value) => updateCard(card.slotKey, "description", value)} rows={3} placeholder="Opcional" />
+            <TextField label="Link do conteúdo" value={card.targetUrl} onChange={(value) => updateCard(card.slotKey, "targetUrl", value.trim())} placeholder="https://www.youtube.com/watch?v=..." />
+            <TextField label="Thumbnail personalizada" value={card.imageUrl} onChange={(value) => updateCard(card.slotKey, "imageUrl", value.trim())} placeholder="https://..." />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField label="Texto do botão" value={card.buttonLabel} onChange={(value) => updateCard(card.slotKey, "buttonLabel", value)} />
+              <TextField label="Ordem" type="number" value={card.sortOrder} onChange={(value) => updateCard(card.slotKey, "sortOrder", Number(value))} />
+            </div>
+            <SelectField label="Tipo do conteúdo" value={card.contentType} onChange={(value) => updateCard(card.slotKey, "contentType", value)} options={contentTypes} />
+            <AdminButton type="submit" icon={CheckCircle2}>Salvar card</AdminButton>
+          </div>
+        </form>
+      ))}
+    </section>
+  );
+}
+
 function PlaceholderPage({ title }) {
   return (
     <section className="glass rounded-lg p-6">
@@ -3938,6 +3990,7 @@ export function AdminApp() {
   const [categories, setCategories] = useState([]);
   const [pcs, setPcs] = useState([]);
   const [gameLibrary, setGameLibrary] = useState([]);
+  const [siteContentCards, setSiteContentCards] = useState([]);
   const [arenaData, setArenaData] = useState({ stations: [], reservations: [], settings: {}, localMode: !isSupabaseConfigured });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -3998,11 +4051,13 @@ export function AdminApp() {
       const loadedProducts = await listProducts(loadedCategories);
       const loadedPcs = await listAssembledPcs();
       const loadedGameLibrary = await listGames();
+      const loadedSiteContentCards = await listSiteContentCards();
       const loadedArenaData = await listArenaData();
       setCategories(loadedCategories);
       setProducts(loadedProducts);
       setPcs(loadedPcs);
       setGameLibrary(loadedGameLibrary);
+      setSiteContentCards(loadedSiteContentCards);
       setArenaData(loadedArenaData);
       setNotice(isSupabaseConfigured ? "" : "Supabase não configurado. O painel está usando localStorage como fallback.");
     } catch (loadError) {
@@ -4366,6 +4421,10 @@ export function AdminApp() {
     return runAction(async () => updateArenaSubscriptionStatus(id, status), message);
   }
 
+  async function saveSiteContentCardAction(card) {
+    return runAction(async () => saveSiteContentCard(card), "Card de conteúdo salvo.");
+  }
+
   async function loginAdmin(email, password) {
     const { data, error: loginError } = await supabase.auth.signInWithPassword({ email, password });
     if (loginError) {
@@ -4384,6 +4443,7 @@ export function AdminApp() {
     setCategories([]);
     setPcs([]);
     setGameLibrary([]);
+    setSiteContentCards([]);
     setArenaData({ stations: [], reservations: [], settings: {}, localMode: !isSupabaseConfigured });
     setNotice("");
     setError("");
@@ -4405,6 +4465,7 @@ export function AdminApp() {
     pcs: ["PCs Montados", "Computadores prontos da loja para Home e página pública."],
     pcForm: [info.mode === "edit" ? "Editar PC" : "Novo PC", "Cadastro completo de computadores montados."],
     gameLibrary: ["Biblioteca de Jogos", "Capas e nomes centralizados para o Benchmark NT."],
+    siteContent: ["Conteúdo", "Gerenciamento dos cards de vídeos e redes sociais da Home."],
     categories: ["Categorias", "Cadastro de categorias com ordem, status e ícone."],
     codexAssistant: ["Assistente Codex", "Gere prompts para importacao segura de produtos via SQL."],
     arena: ["Arena Gamer", "Reservas, equipamentos e configurações da Arena."],
@@ -4455,6 +4516,7 @@ export function AdminApp() {
       {!loading && info.page === "pcs" ? <PcsPage pcs={pcs} onDelete={removePc} onDuplicate={duplicatePc} onPublished={changePcPublished} onFeatured={changePcFeatured} /> : null}
       {!loading && info.page === "pcForm" ? <PcFormPage mode={info.mode} pcId={info.id} pcs={pcs} gameLibrary={gameLibrary} onSave={savePc} onSaveGameToLibrary={saveBenchmarkGameToLibrary} error={error} /> : null}
       {!loading && info.page === "gameLibrary" ? <GameLibraryPage games={gameLibrary} pcs={pcs} onCreate={addGameLibraryItem} onUpdate={editGameLibraryItem} onDelete={removeGameLibraryItem} onMigrate={migrateBenchmarkGamesToLibrary} /> : null}
+      {!loading && info.page === "siteContent" ? <SiteContentPage cards={siteContentCards} onSave={saveSiteContentCardAction} /> : null}
       {!loading && info.page === "categories" ? <CategoriesPage categories={categories} products={products} onCreate={addCategory} onUpdate={editCategory} onDelete={removeCategory} error={error} /> : null}
       {!loading && info.page === "codexAssistant" ? <CodexAssistantPage categories={categories} /> : null}
       {!loading && info.page === "arenaCustomers" ? <ArenaCustomersPage arenaData={arenaData} /> : null}
