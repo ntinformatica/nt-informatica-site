@@ -1809,6 +1809,103 @@ function Contact() {
   );
 }
 
+function FloatingWhatsAppRobot() {
+  const [showBubble, setShowBubble] = useState(false);
+
+  useEffect(() => {
+    const showTimer = window.setTimeout(() => setShowBubble(true), 2400);
+    const hideTimer = window.setTimeout(() => setShowBubble(false), 8200);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(hideTimer);
+    };
+  }, []);
+
+  return (
+    <>
+      <style>{`
+        .nt-whatsapp-robot-hand {
+          transform-box: fill-box;
+          transform-origin: 8px 34px;
+        }
+
+        .nt-whatsapp-robot:hover .nt-whatsapp-robot-hand,
+        .nt-whatsapp-robot:focus-visible .nt-whatsapp-robot-hand {
+          animation: ntRobotWave 0.72s ease-in-out 1;
+        }
+
+        .nt-whatsapp-robot:hover .nt-whatsapp-robot-body,
+        .nt-whatsapp-robot:focus-visible .nt-whatsapp-robot-body {
+          filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.42));
+        }
+
+        @keyframes ntRobotWave {
+          0%, 100% { transform: rotate(0deg); }
+          25% { transform: rotate(-11deg); }
+          55% { transform: rotate(9deg); }
+          78% { transform: rotate(-5deg); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .nt-whatsapp-robot,
+          .nt-whatsapp-robot *,
+          .nt-whatsapp-robot-bubble {
+            animation: none !important;
+            transition: none !important;
+          }
+        }
+      `}</style>
+      <div className="fixed bottom-[calc(0.8rem+env(safe-area-inset-bottom))] right-[calc(0.75rem+env(safe-area-inset-right))] z-40 sm:bottom-5 sm:right-5">
+        <div className={`nt-whatsapp-robot-bubble pointer-events-none absolute bottom-[78%] right-16 hidden w-max max-w-[190px] rounded-md border border-nt-cyan/30 bg-slate-950/92 px-3 py-2 text-sm font-bold text-white shadow-[0_10px_28px_rgba(14,165,233,0.18)] transition duration-300 sm:block ${showBubble ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"}`}>
+          Precisa de ajuda?
+        </div>
+        <a
+          href={whatsappLink(messages.contact)}
+          className="nt-whatsapp-robot group relative block h-[86px] w-[74px] cursor-pointer rounded-full outline-none transition duration-300 hover:-translate-y-1.5 focus-visible:-translate-y-1.5 focus-visible:ring-2 focus-visible:ring-nt-cyan focus-visible:ring-offset-4 focus-visible:ring-offset-nt-ink sm:h-[112px] sm:w-[96px] lg:h-[132px] lg:w-[112px]"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Chamar no WhatsApp"
+        >
+          <span className="absolute inset-x-2 bottom-0 h-8 rounded-full bg-nt-cyan/18 blur-xl transition duration-300 group-hover:bg-nt-cyan/28" aria-hidden="true" />
+          <svg className="nt-whatsapp-robot-body relative h-full w-full drop-shadow-[0_12px_24px_rgba(14,165,233,0.28)] transition duration-300" viewBox="0 0 116 140" role="img" aria-hidden="true">
+            <defs>
+              <linearGradient id="robotBodyGradient" x1="22" x2="94" y1="32" y2="128" gradientUnits="userSpaceOnUse">
+                <stop stopColor="#F8FAFC" />
+                <stop offset="0.42" stopColor="#BFD8F2" />
+                <stop offset="1" stopColor="#0F172A" />
+              </linearGradient>
+              <linearGradient id="robotBlueGradient" x1="31" x2="89" y1="31" y2="94" gradientUnits="userSpaceOnUse">
+                <stop stopColor="#7DD3FC" />
+                <stop offset="1" stopColor="#0284C7" />
+              </linearGradient>
+            </defs>
+            <ellipse cx="58" cy="130" rx="35" ry="7" fill="#020617" opacity="0.55" />
+            <path className="nt-whatsapp-robot-hand" d="M24 74C12 66 8 56 11 48c2-5 8-6 12-2 3 3 3 9 9 14l4 4-7 13-5-3Z" fill="#E2F2FF" stroke="#38BDF8" strokeWidth="3" />
+            <path d="M83 72c10 6 15 15 13 23-2 6-8 8-13 4-3-2-5-7-10-11l-4-3 8-14 6 1Z" fill="#DCEBFA" stroke="#0EA5E9" strokeWidth="3" />
+            <rect x="23" y="54" width="70" height="73" rx="24" fill="url(#robotBodyGradient)" stroke="#38BDF8" strokeWidth="3" />
+            <rect x="32" y="64" width="52" height="35" rx="16" fill="#07111F" stroke="#38BDF8" strokeWidth="2.5" />
+            <circle cx="47" cy="81" r="6" fill="#67E8F9" />
+            <circle cx="69" cy="81" r="6" fill="#67E8F9" />
+            <path d="M48 94c6 4 14 4 20 0" fill="none" stroke="#7DD3FC" strokeLinecap="round" strokeWidth="3" />
+            <rect x="39" y="104" width="38" height="16" rx="8" fill="#0F172A" stroke="#38BDF8" strokeWidth="2" />
+            <text x="58" y="116" textAnchor="middle" fontSize="13" fontWeight="900" fontFamily="Arial, sans-serif" fill="#E0F2FE">NT</text>
+            <rect x="31" y="24" width="54" height="38" rx="17" fill="#EAF6FF" stroke="#38BDF8" strokeWidth="3" />
+            <path d="M45 24c2-9 7-13 13-13s11 4 13 13" fill="none" stroke="url(#robotBlueGradient)" strokeLinecap="round" strokeWidth="4" />
+            <circle cx="58" cy="8" r="5" fill="#38BDF8" />
+            <path d="M43 45h30" stroke="#0F172A" strokeLinecap="round" strokeWidth="3" opacity="0.25" />
+            <circle cx="45" cy="42" r="4" fill="#0EA5E9" />
+            <circle cx="71" cy="42" r="4" fill="#0EA5E9" />
+          </svg>
+          <span className="sr-only">Chamar no WhatsApp</span>
+          <span className="absolute bottom-1 right-1 grid h-7 w-7 place-items-center rounded-full bg-green-500 text-white shadow-lg sm:h-8 sm:w-8" aria-hidden="true">
+            <MessageCircle size={17} />
+          </span>
+        </a>
+      </div>
+    </>
+  );
+}
+
 function AppRoutes() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [pendingSection, setPendingSection] = useState(null);
@@ -1912,15 +2009,7 @@ function AppRoutes() {
       <Testimonials />
       <Contact />
       <Footer />
-      <a
-        href={whatsappLink(messages.contact)}
-        className="fixed bottom-5 right-5 z-40 grid h-14 w-14 place-items-center rounded-full bg-nt-blue text-white shadow-glow transition hover:-translate-y-1 hover:bg-nt-cyan"
-        target="_blank"
-        rel="noreferrer"
-        aria-label="Chamar no WhatsApp"
-      >
-        <MessageCircle />
-      </a>
+      <FloatingWhatsAppRobot />
     </div>
   );
 }
