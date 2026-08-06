@@ -654,11 +654,11 @@ function ImportModal({ open, onClose }) {
           <input className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan" placeholder="Cole o link da Kabum, Pichau, Mercado Livre..." />
         </label>
         <div className="mt-5 rounded-md border border-amber-300/30 bg-amber-300/10 p-4 text-sm leading-6 text-amber-100">
-          Nesta primeira fase, a importação automática ainda não está ativa. Esta função será integrada depois.
+          A importação automática por link ainda não possui integração ativa neste painel. Use o Assistente Codex para gerar o SQL ou cadastre manualmente em Novo produto.
         </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
           <AdminButton variant="secondary" onClick={onClose}>Cancelar</AdminButton>
-          <AdminButton icon={UploadCloud} onClick={onClose}>Gerar rascunho</AdminButton>
+          <AdminButton icon={UploadCloud} disabled title="Importação automática por link ainda não integrada">Gerar rascunho</AdminButton>
         </div>
       </div>
     </div>
@@ -2152,6 +2152,12 @@ Tabelas permitidas:
 - products
 - product_variations
 
+Contrato obrigatorio do schema:
+- Usar exatamente os nomes reais acima. Nao usar nomes traduzidos como categorias, produtos ou variacoes_do_produto.
+- products.images e product_variations.images sao text[]. Usar ARRAY['url1','url2']::text[] ou equivalente text[], nunca jsonb.
+- products.status publicado deve ser exatamente 'disponível' com acento. Nao usar 'disponivel' sem acento.
+- product_variations.status deve ser 'ativo' ou 'inativo'.
+
 Links e dados fornecidos pela loja:
 - Link principal do produto: ${form.mainLink || "Nao informado"}
 - Observacoes opcionais: ${form.notes || "Sem observacoes."}
@@ -2192,17 +2198,21 @@ Tarefas para o Codex:
    - evitar URLs temporarias que dependam de sessao;
    - preferir URLs que terminem ou entreguem JPG, JPEG, PNG, WEBP ou AVIF.
 4. Preencher obrigatoriamente no SQL:
-   - products.main_image com a melhor imagem principal encontrada;
-   - products.images com a galeria completa de imagens;
+   - products.main_image com a melhor imagem principal encontrada, ou null se nenhuma imagem valida for encontrada;
+   - products.images com a galeria completa de imagens validas, ou ARRAY[]::text[] se nenhuma imagem valida for encontrada;
    - product_variations.image com a imagem correspondente de cada variacao;
    - product_variations.images com a galeria especifica da variacao, quando houver;
    - descriptions, slug, categoria, preco, estoque, garantia e demais campos disponiveis.
 5. Regras para products.main_image:
    - deve receber a melhor imagem principal encontrada;
    - nao pode ficar vazio quando houver imagem acessivel no link;
+   - se nenhuma imagem valida for encontrada, usar null em products.main_image;
    - nao deve usar miniatura de baixa qualidade quando existir imagem maior.
 6. Regras para products.images:
    - deve receber todas as imagens uteis da galeria;
+   - se nenhuma imagem valida for encontrada, usar ARRAY[]::text[];
+   - se uma imagem valida for encontrada, usar ARRAY['URL']::text[];
+   - se multiplas imagens validas forem encontradas, usar todas as URLs validas e unicas em ARRAY[...]::text[];
    - se o anuncio tiver ${minimumImages} ou mais imagens validas, products.images deve conter no minimo ${minimumImages} imagens;
    - se o anuncio tiver 5 imagens validas, incluir as 5;
    - se o anuncio tiver 8 imagens validas, incluir as 8, desde que sejam realmente do produto;
@@ -2219,8 +2229,8 @@ Tarefas para o Codex:
    - nao misturar imagens de cores/modelos diferentes;
    - nao usar imagem de outra cor/modelo.
 8. Antes de devolver o SQL, conferir obrigatoriamente:
-   - products.main_image esta preenchida;
-   - products.images contem a galeria completa encontrada;
+   - products.main_image esta preenchida quando houver imagem valida, ou esta null quando nenhuma imagem valida foi encontrada;
+   - products.images contem a galeria completa encontrada, ou ARRAY[]::text[] quando nenhuma imagem valida foi encontrada;
    - products.images contem pelo menos ${minimumImages} imagens validas quando o anuncio disponibilizar essa quantidade;
    - imagens das variacoes estao relacionadas corretamente;
    - nao existem URLs duplicadas;
@@ -2231,19 +2241,28 @@ Tarefas para o Codex:
    - nao usar imagens inventadas;
    - nao usar imagens de outro produto;
    - nao deixar o usuario acreditar que as fotos foram incluidas;
-   - devolver SQL apenas com comentario claro indicando onde inserir as imagens manualmente, se a regra abaixo permitir.
-10. Regra de bloqueio por imagem:
+   - cadastrar o produto mesmo assim com products.main_image = null e products.images = ARRAY[]::text[];
+   - adicionar em products.internal_notes: "Produto cadastrado sem imagens. Adicionar imagens manualmente no Admin.";
+   - nunca gerar placeholders como COLE_AQUI_A_URL_DA_IMAGEM.
+10. Regra de imagem:
    - Quantidade minima de imagens exigida pela loja: ${minimumImages}.
-   ${requireValidImages ? `- Se forem encontradas menos de ${minimumImages} imagens validas, NAO gerar INSERT/UPDATE final. Informar exatamente: "Foram encontradas apenas X imagens validas. O minimo exigido e ${minimumImages}." e solicitar outro link ou URLs adicionais de imagem.` : `- Se forem encontradas menos de ${minimumImages} imagens validas, informar claramente no resumo e gerar o SQL com comentario indicando onde inserir imagens adicionais manualmente.`}
+   ${requireValidImages ? `- Se forem encontradas menos de ${minimumImages} imagens validas, informar no resumo que a quantidade minima nao foi atingida, mas ainda assim gerar o INSERT/UPDATE final ativo.` : `- Se forem encontradas menos de ${minimumImages} imagens validas, informar claramente no resumo, mas ainda assim gerar o INSERT/UPDATE final ativo.`}
    - Se o anuncio realmente tiver menos imagens que o minimo, nao inventar imagens, nao duplicar a mesma imagem e nao usar imagem de outro produto.
+   - Nunca comentar o WITH, INSERT, UPSERT ou SELECT final por ausencia ou quantidade insuficiente de imagens.
 11. Gerar SQL seguro usando apenas categories, products e product_variations.
 12. Nao duplicar produtos por slug.
 13. Nao duplicar categorias por slug.
 14. Nao duplicar variacoes pela combinacao produto + SKU + nome + cor.
 15. Atualizar produto existente quando necessario.
-16. Criar o produto como disponivel.
+16. Criar o produto como 'disponível' exatamente com acento.
 17. Usar upsert/on conflict quando fizer sentido.
 18. O SQL precisa ser seguro para executar mais de uma vez.
+19. Nao usar ON CONFLICT DO NOTHING no produto principal. Se o slug ja existir, usar DO UPDATE para atualizar os campos atuais.
+20. Todo SQL gerado para execucao deve conter o INSERT/UPSERT ativo, sem prefixo --.
+21. O SQL deve terminar com um SELECT de verificacao retornando exatamente:
+   id, name, sku, slug, status, featured, main_image, images, created_at, updated_at
+   da linha em products correspondente ao slug importado.
+22. Se usar INSERT ... RETURNING em CTE, tambem devolver no final a linha final de products para confirmar que o Admin conseguira carregar o registro.
 
 Resultado esperado:
 - Primeiro retorne este resumo curto:
@@ -2324,7 +2343,7 @@ function CodexAssistantPage() {
               O Codex tentará extrair as imagens diretamente dos links. Alguns fornecedores bloqueiam ou utilizam URLs temporárias. Confira sempre se o resumo informa que as imagens foram encontradas antes de executar o SQL.
             </p>
             <p className="mt-3 max-w-3xl rounded-md border border-cyan-300/30 bg-cyan-300/10 p-3 text-sm leading-6 text-cyan-100">
-              O Assistente Codex tentara extrair toda a galeria do anuncio. Por padrao, o SQL so sera gerado quando forem encontradas pelo menos 4 imagens validas.
+              O Assistente Codex tentara extrair toda a galeria do anuncio. Mesmo sem imagens suficientes, o SQL deve cadastrar o produto e registrar a pendencia nas observacoes internas.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -2369,9 +2388,9 @@ function CodexAssistantPage() {
             className="mt-1"
           />
           <span>
-            Nao gerar SQL se houver menos imagens validas do que o minimo exigido
+            Alertar quando houver menos imagens validas do que o minimo desejado
             <small className="mt-1 block font-normal leading-5 text-slate-400">
-              Quando marcado, o prompt instrui o Codex a bloquear o INSERT/UPDATE final caso encontre menos imagens validas do que a quantidade minima definida acima.
+              Quando marcado, o prompt instrui o Codex a destacar a pendencia, mas o INSERT/UPDATE final deve continuar ativo.
             </small>
           </span>
         </label>

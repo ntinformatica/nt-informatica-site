@@ -20,6 +20,11 @@ function textFromArray(value) {
   return value || "";
 }
 
+function serviceErrorMessage(action, error) {
+  const detail = error?.message ? ` Detalhe: ${error.message}` : "";
+  return `${action}${detail}`;
+}
+
 function moneyOrNull(value) {
   if (value === "" || value === null || value === undefined) return null;
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -250,11 +255,12 @@ export async function createProduct(product, categories = []) {
         method: "POST",
         body: JSON.stringify(toSupabase(product, categories)),
       });
+      if (!row?.id) throw new Error("O Supabase nao retornou o produto criado.");
       const variations = await saveVariations(row.id, product.variations);
       return fromSupabase(row, categories, variations);
     } catch (error) {
       console.error("Erro ao criar produto no Supabase:", error);
-      throw new Error("Nao foi possivel criar o produto no Supabase.");
+      throw new Error(serviceErrorMessage("Nao foi possivel criar o produto no Supabase.", error));
     }
   }
 
@@ -278,11 +284,12 @@ export async function updateProduct(id, product, categories = []) {
         method: "PATCH",
         body: JSON.stringify(toSupabase(product, categories)),
       });
+      if (!row?.id) throw new Error("O Supabase nao retornou o produto atualizado.");
       const variations = await saveVariations(id, product.variations);
       return fromSupabase(row, categories, variations);
     } catch (error) {
       console.error("Erro ao atualizar produto no Supabase:", error);
-      throw new Error("Nao foi possivel atualizar o produto no Supabase.");
+      throw new Error(serviceErrorMessage("Nao foi possivel atualizar o produto no Supabase.", error));
     }
   }
 
