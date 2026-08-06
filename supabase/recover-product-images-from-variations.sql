@@ -103,4 +103,66 @@ from public.products as product
 join affected_products as affected on affected.slug = product.slug
 order by product.name;
 
+select
+  count(*) as products_with_legacy_asset_paths
+from public.products as product
+where product.main_image like 'assets/%'
+  or exists (
+    select 1
+    from unnest(coalesce(product.images, array[]::text[])) as image_item(image_url)
+    where image_item.image_url like 'assets/%'
+  );
+
+with products_to_normalize as (
+  select
+    product.id,
+    product.slug,
+    product.name,
+    product.main_image as old_main_image,
+    product.images as old_images,
+    case
+      when product.main_image like 'assets/%' then '/produtos/' || product.main_image
+      else product.main_image
+    end as normalized_main_image,
+    coalesce(
+      array_agg(
+        case
+          when image_item.image_url like 'assets/%' then '/produtos/' || image_item.image_url
+          else image_item.image_url
+        end
+        order by image_item.ordinality
+      ) filter (where image_item.image_url is not null),
+      array[]::text[]
+    ) as normalized_images
+  from public.products as product
+  left join lateral unnest(coalesce(product.images, array[]::text[])) with ordinality as image_item(image_url, ordinality) on true
+  where product.main_image like 'assets/%'
+    or exists (
+      select 1
+      from unnest(coalesce(product.images, array[]::text[])) as legacy_image(image_url)
+      where legacy_image.image_url like 'assets/%'
+    )
+  group by product.id, product.slug, product.name, product.main_image, product.images
+),
+updated_products as (
+  update public.products as product
+  set
+    main_image = products_to_normalize.normalized_main_image,
+    images = products_to_normalize.normalized_images,
+    updated_at = now()
+  from products_to_normalize
+  where product.id = products_to_normalize.id
+  returning
+    product.slug,
+    product.name,
+    products_to_normalize.old_main_image,
+    product.main_image as new_main_image,
+    products_to_normalize.old_images,
+    product.images as new_images,
+    coalesce(array_length(product.images, 1), 0) as images_count
+)
+select *
+from updated_products
+order by name;
+
 commit;
