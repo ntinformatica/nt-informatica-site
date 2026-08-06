@@ -1827,12 +1827,12 @@ function FloatingWhatsAppRobot() {
     <>
       <style>{`
         .nt-whatsapp-robot-image {
-          transform-origin: 42% 44%;
+          transform-origin: 50% 82%;
         }
 
         .nt-whatsapp-robot:hover .nt-whatsapp-robot-image,
         .nt-whatsapp-robot:focus-visible .nt-whatsapp-robot-image {
-          animation: ntRobotWave 0.72s ease-in-out 1;
+          animation: ntRobotWave 0.8s ease-in-out 1;
         }
 
         .nt-whatsapp-robot:hover .nt-whatsapp-robot-body,
@@ -1841,10 +1841,10 @@ function FloatingWhatsAppRobot() {
         }
 
         @keyframes ntRobotWave {
-          0%, 100% { transform: rotate(0deg); }
-          25% { transform: rotate(-11deg); }
-          55% { transform: rotate(9deg); }
-          78% { transform: rotate(-5deg); }
+          0%, 100% { transform: translateY(0) rotate(0deg); }
+          24% { transform: translateY(-2px) rotate(-4deg); }
+          52% { transform: translateY(-4px) rotate(3deg); }
+          76% { transform: translateY(-2px) rotate(-2deg); }
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -1862,7 +1862,7 @@ function FloatingWhatsAppRobot() {
         </div>
         <a
           href={whatsappLink(messages.contact)}
-          className="nt-whatsapp-robot group relative block h-[86px] w-[74px] cursor-pointer rounded-full outline-none transition duration-300 hover:-translate-y-1.5 focus-visible:-translate-y-1.5 focus-visible:ring-2 focus-visible:ring-nt-cyan focus-visible:ring-offset-4 focus-visible:ring-offset-nt-ink sm:h-[112px] sm:w-[96px] lg:h-[132px] lg:w-[112px]"
+          className="nt-whatsapp-robot group relative block h-[98px] w-[74px] cursor-pointer rounded-full outline-none transition duration-300 hover:-translate-y-1.5 focus-visible:-translate-y-1.5 focus-visible:ring-2 focus-visible:ring-nt-cyan focus-visible:ring-offset-4 focus-visible:ring-offset-nt-ink sm:h-[132px] sm:w-[96px] lg:h-[158px] lg:w-[116px]"
           target="_blank"
           rel="noreferrer"
           aria-label="Chamar no WhatsApp"
@@ -1882,9 +1882,6 @@ function FloatingWhatsAppRobot() {
             />
           )}
           <span className="sr-only">Chamar no WhatsApp</span>
-          <span className="absolute bottom-1 right-1 grid h-7 w-7 place-items-center rounded-full bg-green-500 text-white shadow-lg sm:h-8 sm:w-8" aria-hidden="true">
-            <MessageCircle size={17} />
-          </span>
         </a>
       </div>
     </>
