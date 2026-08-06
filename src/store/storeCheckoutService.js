@@ -19,6 +19,31 @@ export function customerPayload(user, profile) {
   };
 }
 
+export function billingAddressPayload(address) {
+  return {
+    postal_code: onlyDigits(address?.cep || address?.postal_code || ""),
+    street: String(address?.street || "").trim(),
+    number: String(address?.number || "").trim(),
+    complement: String(address?.complement || "").trim(),
+    district: String(address?.neighborhood || address?.district || "").trim(),
+    city: String(address?.city || "").trim(),
+    state: String(address?.state || "").trim().toUpperCase().slice(0, 2),
+    country: String(address?.country || "Brasil").trim() || "Brasil",
+  };
+}
+
+export function missingBillingAddressFields(address) {
+  const payload = billingAddressPayload(address);
+  const missing = [];
+  if (payload.postal_code.length !== 8) missing.push("CEP");
+  if (!payload.street) missing.push("logradouro");
+  if (!payload.number) missing.push("numero");
+  if (!payload.district) missing.push("bairro");
+  if (!payload.city) missing.push("cidade");
+  if (!/^[A-Z]{2}$/.test(payload.state)) missing.push("estado");
+  return missing;
+}
+
 export function missingCheckoutProfileFields(user, profile) {
   const missing = [];
   const cpf = onlyDigits(profile?.cpf || "");
@@ -47,7 +72,7 @@ export function createCheckoutAttemptKey(items, paymentMethod) {
   return `store-checkout-${paymentMethod}-${Date.now()}-${Math.abs(hash)}`;
 }
 
-export async function createStoreCheckout({ user, profile, items, paymentMethod, installments = 1, card = null, idempotencyKey }) {
+export async function createStoreCheckout({ user, profile, billingAddress, items, paymentMethod, installments = 1, card = null, idempotencyKey }) {
   const itemErrors = checkoutItemErrors(items);
   if (itemErrors.length) {
     throw new Error(`Nao foi possivel finalizar: ${itemErrors.join("; ")}.`);
@@ -58,6 +83,7 @@ export async function createStoreCheckout({ user, profile, items, paymentMethod,
       method: "POST",
       body: JSON.stringify({
         customer: customerPayload(user, profile),
+        billing_address: billingAddressPayload(billingAddress),
         items: checkoutItems(items),
         payment_method: paymentMethod,
         installments: paymentMethod === "pix" ? 1 : installments,

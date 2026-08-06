@@ -7,6 +7,7 @@ import { Header } from "../components/Header";
 import { Section } from "../components/Section";
 import { useCustomerAuth } from "./CustomerAuthContext";
 import {
+  createCustomerInvoiceSignedUrl,
   deleteCustomerAddress,
   getCustomerOrderDetails,
   listCustomerAddresses,
@@ -20,7 +21,7 @@ import { Alert, Field, inputClass } from "./CustomerAuthPages";
 const accountLinks = [
   ["/minha-conta/perfil", "Meu Perfil", UserRound],
   ["/minha-conta/pedidos", "Meus Pedidos", PackageCheck],
-  ["/minha-conta/enderecos", "Endereço", Home],
+  ["/minha-conta/enderecos", "Endereço de faturamento", Home],
   ["/minha-conta/seguranca", "Segurança", ShieldCheck],
 ];
 
@@ -64,6 +65,13 @@ const customerOperationalLabels = {
   delivered: "Retirado / Entregue",
   cancelled: "Pedido cancelado",
   manual_review: "Em revisao pela loja",
+};
+
+const fiscalLabels = {
+  pending: "Aguardando emissão",
+  issued: "Emitida",
+  cancelled: "Cancelada",
+  error: "Problema fiscal",
 };
 
 const paymentDetailLabels = {
@@ -416,6 +424,20 @@ function OrdersPanel({ path = "", navigateTo }) {
     setCopiedPix(true);
   }
 
+  async function openInvoiceDocument(invoice, kind) {
+    try {
+      const url = await createCustomerInvoiceSignedUrl(invoice, kind);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setDetailError(error?.message || "Nao foi possivel abrir o documento fiscal.");
+    }
+  }
+
+  async function copyInvoiceAccessKey(accessKey) {
+    if (!accessKey) return;
+    await navigator.clipboard.writeText(accessKey);
+  }
+
   function renderOrderDetails() {
     if (!selected) return null;
     const payment = latestPayment(selected);
@@ -427,6 +449,8 @@ function OrdersPanel({ path = "", navigateTo }) {
     const cardRejected = paymentMethod === "card" && ["rejected", "failed"].includes(payment?.status);
     const installments = Number(payment?.installments || selected.installments || 1);
     const installmentAmount = Number(payment?.installment_amount || (installments > 1 ? Number(selected.total_amount || 0) / installments : 0));
+    const invoice = Array.isArray(selected.order_invoices) ? selected.order_invoices[0] || null : null;
+    const fiscalStatus = invoice?.status === "issued" ? "issued" : selected.fiscal_status || "pending";
 
     return (
       <div className="rounded-lg border border-white/10 bg-slate-950 p-5">
@@ -503,6 +527,29 @@ function OrdersPanel({ path = "", navigateTo }) {
             </div>
           </div>
         ) : null}
+
+        <div className="mt-6 rounded-md border border-white/10 bg-white/5 p-4">
+          <p className="text-lg font-black text-white">Nota fiscal</p>
+          <div className="mt-3 grid gap-2 text-sm text-slate-300">
+            <p>Status: <strong className="text-white">{fiscalLabels[fiscalStatus] || fiscalStatus}</strong></p>
+            {invoice ? (
+              <>
+                <p>Numero: <strong className="text-white">{invoice.invoice_number || "-"}</strong></p>
+                <p>Serie: <strong className="text-white">{invoice.invoice_series || "-"}</strong></p>
+                <p>Data de emissao: <strong className="text-white">{formatDate(invoice.issued_at)}</strong></p>
+                <p>Chave de acesso: <strong className="break-all text-white">{invoice.access_key}</strong></p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {invoice.pdf_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "pdf")} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan transition hover:bg-nt-cyan/10">Visualizar DANFE</button> : null}
+                  {invoice.pdf_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "pdf")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Baixar DANFE PDF</button> : null}
+                  {invoice.xml_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "xml")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Baixar XML</button> : null}
+                  <button type="button" onClick={() => copyInvoiceAccessKey(invoice.access_key)} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Copiar chave de acesso</button>
+                </div>
+              </>
+            ) : (
+              <p className="text-slate-400">A nota fiscal sera disponibilizada aqui apos emissao pela NT Informatica.</p>
+            )}
+          </div>
+        </div>
 
         <div className="mt-6">
           <p className="text-lg font-black text-white">Itens do pedido</p>
@@ -592,11 +639,11 @@ function OrdersPanel({ path = "", navigateTo }) {
       <div className="mt-5 overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="text-xs uppercase tracking-[0.16em] text-slate-400">
-            <tr><th className="py-3">Numero</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Status financeiro</th><th>Status operacional</th><th></th></tr>
+              <tr><th className="py-3">Numero</th><th>Data</th><th>Valor</th><th>Pagamento</th><th>Status financeiro</th><th>Status operacional</th><th>Fiscal</th><th></th></tr>
           </thead>
           <tbody className="divide-y divide-white/10">
-            {loading ? <tr><td colSpan={7} className="py-5 text-slate-300">Carregando pedidos...</td></tr> : null}
-            {!loading && !orders.length ? <tr><td colSpan={7} className="py-5 text-slate-300">Nenhum pedido encontrado para este e-mail.</td></tr> : null}
+            {loading ? <tr><td colSpan={8} className="py-5 text-slate-300">Carregando pedidos...</td></tr> : null}
+            {!loading && !orders.length ? <tr><td colSpan={8} className="py-5 text-slate-300">Nenhum pedido encontrado para este e-mail.</td></tr> : null}
             {orders.map((order) => (
               <tr key={order.id} className="text-slate-200">
                 <td className="py-4 font-black text-white">{order.order_number}</td>
@@ -605,6 +652,7 @@ function OrdersPanel({ path = "", navigateTo }) {
                 <td>{paymentLabel(order.payment_method)}</td>
                 <td>{customerFinancialLabels[order.financial_status] || financialLabels[order.financial_status] || order.financial_status}</td>
                 <td>{customerOperationalLabels[order.operational_status] || operationalLabels[order.operational_status] || order.operational_status}</td>
+                <td>{fiscalLabels[order.fiscal_status] || order.fiscal_status || "Aguardando emissão"}</td>
                 <td><a href={"/minha-conta/pedidos/" + encodeURIComponent(order.id)} onClick={(event) => { event.preventDefault(); openOrderRoute(order.id); }} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan hover:bg-nt-cyan/10">Ver detalhes</a></td>
               </tr>
             ))}
@@ -650,9 +698,9 @@ function AddressesPanel() {
 
   return (
     <div className="grid gap-5">
-      <Alert>Pedidos atualmente são somente para retirada na loja. O endereço fica cadastrado para futuras entregas.</Alert>
+      <Alert>Pedidos atualmente são somente para retirada na loja. Este endereço será usado para faturamento e emissão fiscal.</Alert>
       <Card>
-        <h2 className="text-2xl font-black text-white">Endereços</h2>
+        <h2 className="text-2xl font-black text-white">Endereço de faturamento</h2>
         {message ? <div className="mt-5"><Alert type="success">{message}</Alert></div> : null}
         <form className="mt-6 grid gap-5 md:grid-cols-2" onSubmit={save}>
           <Field id="address-label" label="Identificação"><input id="address-label" value={editing.label} onChange={(event) => setField("label", event.target.value)} className={inputClass()} /></Field>

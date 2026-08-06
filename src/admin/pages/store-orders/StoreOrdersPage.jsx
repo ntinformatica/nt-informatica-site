@@ -2,12 +2,15 @@ import { CalendarDays, CheckCircle2, ClipboardList, CreditCard, Eye, PackageChec
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   allowedStoreOperationalStatuses,
+  createAdminInvoiceSignedUrl,
   formatStoreDateTime,
   formatStoreMoney,
   listStoreOrders,
   orderItemCount,
   orderMatchesSearch,
   paymentLabel,
+  saveStoreOrderInvoice,
+  storeFiscalLabels,
   storeFinancialLabels,
   storeOperationalFlow,
   storeOperationalLabels,
@@ -24,6 +27,10 @@ const quickFilters = [
   ["operational:ready_for_pickup", "Pronto para retirada"],
   ["operational:delivered", "Retirado"],
   ["operational:cancelled", "Cancelado"],
+  ["fiscal:paid_pending", "Pagos sem nota fiscal"],
+  ["fiscal:issued", "Nota emitida"],
+  ["fiscal:cancelled", "Nota cancelada"],
+  ["fiscal:error", "Erro fiscal"],
 ];
 
 const financialTones = {
@@ -119,9 +126,113 @@ function orderImage(item) {
   return item.main_image || item.configuration_snapshot?.main_image || "";
 }
 
-function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes }) {
+function orderBilling(order) {
+  return order.order_billing_snapshots?.[0] || {
+    customer_name: order.customer_name || "",
+    customer_document: order.customer_document || "",
+    customer_email: order.customer_email || "",
+    customer_phone: order.customer_phone || "",
+    postal_code: "",
+    street: "",
+    number: "",
+    complement: "",
+    district: "",
+    city: "",
+    state: "",
+  };
+}
+
+function formatBillingAddress(billing) {
+  return [
+    `${billing.street || ""}, ${billing.number || ""}${billing.complement ? " - " + billing.complement : ""}`.trim(),
+    `${billing.district || ""} - ${billing.city || ""}/${billing.state || ""}`.trim(),
+    billing.postal_code ? `CEP ${billing.postal_code}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function invoiceSummary(order) {
+  const billing = orderBilling(order);
+  const payment = orderPayment(order);
+  const items = (order.store_order_items || []).map((item, index) => (
+    `${index + 1}. ${item.quantity}x ${item.product_name}\nSKU: ${item.sku || item.internal_code || "-"}\nValor unitario: ${formatStoreMoney(item.final_unit_price)}\nValor total: ${formatStoreMoney(item.subtotal_amount)}`
+  )).join("\n\n");
+
+  return `PEDIDO ${order.order_number}
+
+CLIENTE
+Nome: ${billing.customer_name || order.customer_name || "-"}
+CPF: ${billing.customer_document || order.customer_document || "-"}
+E-mail: ${billing.customer_email || order.customer_email || "-"}
+Telefone: ${billing.customer_phone || order.customer_phone || "-"}
+
+ENDERECO
+CEP: ${billing.postal_code || "-"}
+Logradouro: ${billing.street || "-"}
+Numero: ${billing.number || "-"}
+Complemento: ${billing.complement || "-"}
+Bairro: ${billing.district || "-"}
+Cidade: ${billing.city || "-"}
+Estado: ${billing.state || "-"}
+
+ITENS
+${items || "-"}
+
+PAGAMENTO
+Forma: ${paymentLabel(order)}
+Valor total: ${formatStoreMoney(order.total_amount)}
+Data da aprovacao: ${formatStoreDateTime(orderApprovalDate(order))}
+Transacao: ${payment?.mercado_pago_payment_id || payment?.mercado_pago_order_id || "-"}`;
+}
+
+async function copyText(value) {
+  await navigator.clipboard?.writeText(String(value || ""));
+}
+
+function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, onInvoiceSaved }) {
   const payment = orderPayment(order);
   const allowedStatuses = allowedStoreOperationalStatuses(order);
+  const billing = orderBilling(order);
+  const invoice = order.order_invoices?.[0] || null;
+  const [invoiceForm, setInvoiceForm] = useState({ invoiceNumber: "", invoiceSeries: "1", accessKey: "", issuedAt: "", xmlFile: null, pdfFile: null });
+  const [invoiceMessage, setInvoiceMessage] = useState("");
+  const [invoiceSaving, setInvoiceSaving] = useState(false);
+
+  function setInvoiceField(field, value) {
+    setInvoiceForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function attachInvoice(event) {
+    event.preventDefault();
+    setInvoiceSaving(true);
+    setInvoiceMessage("");
+    try {
+      const saved = await saveStoreOrderInvoice(order, invoiceForm);
+      setInvoiceMessage("Nota fiscal anexada com sucesso.");
+      onInvoiceSaved(order.id, saved);
+    } catch (error) {
+      setInvoiceMessage(error?.message || "Nao foi possivel anexar a nota fiscal.");
+    } finally {
+      setInvoiceSaving(false);
+    }
+  }
+
+  async function openInvoice(kind) {
+    try {
+      const url = await createAdminInvoiceSignedUrl(invoice, kind);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      setInvoiceMessage(error?.message || "Nao foi possivel abrir o documento.");
+    }
+  }
+
+  function printBillingOrder() {
+    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!printWindow) return;
+    printWindow.document.write(`<pre style="font-family: Arial, sans-serif; white-space: pre-wrap;">${invoiceSummary(order).replace(/[<>&]/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[char]))}</pre>`);
+    printWindow.document.close();
+    printWindow.print();
+  }
+
   return (
     <section className="glass rounded-lg p-5 shadow-card">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -188,6 +299,61 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes })
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="mt-6 rounded-lg border border-white/10 bg-white/5 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Dados para emissao fiscal</p>
+            <p className="mt-2 text-sm text-slate-300">Status fiscal: <strong className="text-white">{storeFiscalLabels[invoice?.status === "issued" ? "issued" : order.fiscal_status || "pending"] || order.fiscal_status || "Aguardando emissao"}</strong></p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => copyText(billing.customer_document || order.customer_document)} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Copiar CPF</button>
+            <button type="button" onClick={() => copyText(`Nome: ${billing.customer_name || order.customer_name}\nCPF: ${billing.customer_document || order.customer_document}\nE-mail: ${billing.customer_email || order.customer_email}\nTelefone: ${billing.customer_phone || order.customer_phone}`)} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Copiar dados do cliente</button>
+            <button type="button" onClick={() => copyText(formatBillingAddress(billing))} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Copiar endereco completo</button>
+            <button type="button" onClick={() => copyText(invoiceSummary(order))} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan hover:bg-nt-cyan/10">Copiar resumo para faturamento</button>
+            <button type="button" onClick={printBillingOrder} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Imprimir ordem de faturamento</button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-md border border-white/10 bg-slate-950 p-4 text-sm leading-6 text-slate-300">
+            <p className="font-black text-white">{billing.customer_name || order.customer_name}</p>
+            <p>CPF: {billing.customer_document || order.customer_document || "-"}</p>
+            <p>E-mail: {billing.customer_email || order.customer_email || "-"}</p>
+            <p>Telefone: {billing.customer_phone || order.customer_phone || "-"}</p>
+            <p className="mt-3 whitespace-pre-line">{formatBillingAddress(billing) || "Endereco de faturamento nao registrado."}</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-slate-950 p-4 text-sm leading-6 text-slate-300">
+            {invoice ? (
+              <>
+                <p className="font-black text-white">NF-e {invoice.invoice_number || "-"}</p>
+                <p>Serie: {invoice.invoice_series || "-"}</p>
+                <p>Chave: <span className="break-all">{invoice.access_key}</span></p>
+                <p>Emissao: {formatStoreDateTime(invoice.issued_at)}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => openInvoice("pdf")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Abrir DANFE</button>
+                  <button type="button" onClick={() => openInvoice("xml")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Baixar XML</button>
+                </div>
+              </>
+            ) : (
+              <p>Nenhuma nota fiscal anexada ainda.</p>
+            )}
+          </div>
+        </div>
+
+        <form className="mt-4 grid gap-3 rounded-md border border-white/10 bg-slate-950 p-4 md:grid-cols-2" onSubmit={attachInvoice}>
+          <label className="text-sm font-bold text-slate-200">Numero da NF-e<input value={invoiceForm.invoiceNumber} onChange={(event) => setInvoiceField("invoiceNumber", event.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-nt-cyan" /></label>
+          <label className="text-sm font-bold text-slate-200">Serie<input value={invoiceForm.invoiceSeries} onChange={(event) => setInvoiceField("invoiceSeries", event.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-nt-cyan" /></label>
+          <label className="text-sm font-bold text-slate-200 md:col-span-2">Chave de acesso<input value={invoiceForm.accessKey} onChange={(event) => setInvoiceField("accessKey", event.target.value.replace(/\D/g, "").slice(0, 44))} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-nt-cyan" inputMode="numeric" /></label>
+          <label className="text-sm font-bold text-slate-200">Data de emissao<input type="datetime-local" value={invoiceForm.issuedAt} onChange={(event) => setInvoiceField("issuedAt", event.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-nt-cyan" /></label>
+          <label className="text-sm font-bold text-slate-200">XML autorizado<input type="file" accept=".xml,application/xml,text/xml" onChange={(event) => setInvoiceField("xmlFile", event.target.files?.[0] || null)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label>
+          <label className="text-sm font-bold text-slate-200">DANFE PDF<input type="file" accept="application/pdf,.pdf" onChange={(event) => setInvoiceField("pdfFile", event.target.files?.[0] || null)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label>
+          <div className="md:col-span-2 flex flex-wrap items-center gap-3">
+            <button type="submit" disabled={invoiceSaving || saving} className="min-h-10 rounded-md bg-nt-blue px-4 py-2 text-sm font-black text-white transition hover:bg-nt-cyan disabled:opacity-60">{invoiceSaving ? "Salvando..." : "Salvar nota fiscal"}</button>
+            {invoiceMessage ? <p className="text-sm text-slate-300">{invoiceMessage}</p> : null}
+          </div>
+        </form>
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -283,6 +449,18 @@ export function StoreOrdersPage() {
     )));
   }
 
+  function mergeInvoice(orderId, invoice) {
+    setOrders((currentOrders) => currentOrders.map((order) => (
+      order.id === orderId
+        ? {
+            ...order,
+            fiscal_status: invoice?.status === "issued" ? "issued" : order.fiscal_status,
+            order_invoices: invoice ? [invoice] : order.order_invoices,
+          }
+        : order
+    )));
+  }
+
   function openOrder(orderId) {
     pendingScrollOrderIdRef.current = orderId;
     if (selectedId === orderId) {
@@ -299,6 +477,8 @@ export function StoreOrdersPage() {
     return orders.filter((order) => {
       if (quickFilter.startsWith("financial:") && order.financial_status !== quickFilter.replace("financial:", "")) return false;
       if (quickFilter.startsWith("operational:") && order.operational_status !== quickFilter.replace("operational:", "")) return false;
+      if (quickFilter === "fiscal:paid_pending" && !(order.financial_status === "approved" && (order.fiscal_status || "pending") === "pending")) return false;
+      if (quickFilter.startsWith("fiscal:") && quickFilter !== "fiscal:paid_pending" && (order.fiscal_status || "pending") !== quickFilter.replace("fiscal:", "")) return false;
       if (filters.startDate && dateOnly(order.created_at) < filters.startDate) return false;
       if (filters.endDate && dateOnly(order.created_at) > filters.endDate) return false;
       if (filters.paymentMethod && order.payment_method !== filters.paymentMethod) return false;
@@ -319,6 +499,7 @@ export function StoreOrdersPage() {
       pending: orders.filter((order) => order.financial_status === "pending").length,
       paid: orders.filter((order) => order.financial_status === "approved").length,
       ready: orders.filter((order) => order.operational_status === "ready_for_pickup").length,
+      fiscalPending: orders.filter((order) => order.financial_status === "approved" && (order.fiscal_status || "pending") === "pending").length,
       soldToday: approvedToday.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
       soldMonth: approvedMonth.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
     };
@@ -373,11 +554,12 @@ export function StoreOrdersPage() {
       {error ? <div className="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
       {notice ? <div className="rounded-md border border-lime-300/30 bg-lime-300/10 p-4 text-sm text-lime-100">{notice}</div> : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
         <SummaryCard label="Pedidos hoje" value={summary.today} icon={CalendarDays} />
         <SummaryCard label="Aguardando pagamento" value={summary.pending} icon={WalletCards} tone="amber" />
         <SummaryCard label="Pedidos pagos" value={summary.paid} icon={CheckCircle2} tone="green" />
         <SummaryCard label="Prontos para retirada" value={summary.ready} icon={PackageCheck} tone="blue" />
+        <SummaryCard label="Pagos sem nota fiscal" value={summary.fiscalPending} icon={ClipboardList} tone="amber" />
         <SummaryCard label="Vendido hoje" value={formatStoreMoney(summary.soldToday)} icon={CreditCard} tone="green" />
         <SummaryCard label="Vendido no mes" value={formatStoreMoney(summary.soldMonth)} icon={ClipboardList} />
       </div>
@@ -420,11 +602,11 @@ export function StoreOrdersPage() {
         <div className="mt-6 hidden overflow-x-auto xl:block">
           <table className="w-full min-w-[1080px] text-left text-sm">
             <thead className="text-xs uppercase tracking-[0.16em] text-slate-400">
-              <tr><th className="py-3">Numero</th><th>Data</th><th>Cliente</th><th>Telefone</th><th>Pagamento</th><th>Valor</th><th>Financeiro</th><th>Operacional</th><th>Itens</th><th></th></tr>
+              <tr><th className="py-3">Numero</th><th>Data</th><th>Cliente</th><th>Telefone</th><th>Pagamento</th><th>Valor</th><th>Financeiro</th><th>Fiscal</th><th>Operacional</th><th>Itens</th><th></th></tr>
             </thead>
             <tbody className="divide-y divide-white/10">
-              {loading ? <tr><td colSpan={10} className="py-5 text-slate-300">Carregando pedidos...</td></tr> : null}
-              {!loading && !filteredOrders.length ? <tr><td colSpan={10} className="py-5 text-slate-300">Nenhum pedido encontrado.</td></tr> : null}
+              {loading ? <tr><td colSpan={11} className="py-5 text-slate-300">Carregando pedidos...</td></tr> : null}
+              {!loading && !filteredOrders.length ? <tr><td colSpan={11} className="py-5 text-slate-300">Nenhum pedido encontrado.</td></tr> : null}
               {filteredOrders.map((order) => (
                 <tr key={order.id} className="text-slate-200">
                   <td className="py-4 font-black text-white">{order.order_number}</td>
@@ -434,6 +616,7 @@ export function StoreOrdersPage() {
                   <td>{paymentLabel(order)}</td>
                   <td className="font-black text-nt-cyan">{formatStoreMoney(order.total_amount)}</td>
                   <td>{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}</td>
+                  <td>{statusBadge(order.fiscal_status || "pending", storeFiscalLabels, financialTones)}</td>
                   <td><OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></td>
                   <td>{orderItemCount(order)}</td>
                   <td><button type="button" onClick={() => openOrder(order.id)} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan"><Eye size={15} /> Abrir</button></td>
@@ -453,7 +636,7 @@ export function StoreOrdersPage() {
                 <button type="button" onClick={() => openOrder(order.id)} className="rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan">Abrir</button>
               </div>
               <p className="mt-3 text-sm text-slate-300">{order.customer_name} - {order.customer_phone}</p>
-              <div className="mt-3 flex flex-wrap gap-2">{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}<OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></div>
+              <div className="mt-3 flex flex-wrap gap-2">{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}{statusBadge(order.fiscal_status || "pending", storeFiscalLabels, financialTones)}<OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></div>
               <p className="mt-3 text-sm font-black text-nt-cyan">{formatStoreMoney(order.total_amount)} - {paymentLabel(order)} - {orderItemCount(order)} itens</p>
             </article>
           ))}
@@ -469,6 +652,7 @@ export function StoreOrdersPage() {
             saving={savingNotes || savingStatusId === selectedOrder.id}
             onStatus={(status) => changeStatus(selectedOrder, status)}
             onSaveNotes={saveNotes}
+            onInvoiceSaved={mergeInvoice}
           />
         </div>
       ) : null}

@@ -3,3 +3,6 @@ verify_jwt = false
 
 [functions.expire-arena-pending]
 verify_jwt = false
+
+[functions.expire-store-orders]
+verify_jwt = false

@@ -342,6 +342,28 @@ function constantTimeEqual(left: string, right: string) {
   return diff === 0;
 }
 
+function maskHash(value: string) {
+  if (!value) return "";
+  if (value.length <= 12) return "*".repeat(value.length);
+  return `${value.slice(0, 6)}...${value.slice(-6)}`;
+}
+
+function parseMercadoPagoSignature(signatureHeader: string) {
+  return signatureHeader.split(",").reduce((parsed, part) => {
+    const [rawKey, ...rawValue] = part.split("=");
+    const key = rawKey.trim();
+    const value = rawValue.join("=").trim();
+    if (key === "ts") parsed.timestamp = value;
+    if (key === "v1") parsed.signature = value;
+    return parsed;
+  }, { timestamp: "", signature: "" });
+}
+
+function normalizeMercadoPagoDataId(dataId: string) {
+  const cleanDataId = dataId.trim();
+  return /[a-z]/i.test(cleanDataId) ? cleanDataId.toLowerCase() : cleanDataId;
+}
+
 export async function verifyMercadoPagoSignature(params: {
   signatureHeader: string;
   requestId: string;
@@ -350,18 +372,33 @@ export async function verifyMercadoPagoSignature(params: {
   const secret = Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET") || "";
   if (!secret) throw new Error("MERCADO_PAGO_WEBHOOK_SECRET nao configurado.");
 
-  const parts = Object.fromEntries(
-    params.signatureHeader.split(",").map((part) => {
-      const [key, ...value] = part.trim().split("=");
-      return [key, value.join("=")];
-    }),
-  );
+  const { timestamp, signature } = parseMercadoPagoSignature(params.signatureHeader);
+  const received = signature.toLowerCase();
+  const dataId = normalizeMercadoPagoDataId(params.dataId);
+  if (!timestamp || !received || !params.requestId || !dataId) return false;
 
-  const timestamp = parts.ts || "";
-  const received = parts.v1 || "";
-  if (!timestamp || !received || !params.requestId || !params.dataId) return false;
-
-  const manifest = `id:${params.dataId};request-id:${params.requestId};ts:${timestamp};`;
+  const manifest = `id:${dataId};request-id:${params.requestId};ts:${timestamp};`;
   const expected = await hmacSha256Hex(secret, manifest);
-  return constantTimeEqual(expected, received);
+  console.log("[Mercado Pago webhook] manifesto HMAC", {
+    timestamp,
+    requestId: params.requestId,
+    receivedDataId: params.dataId,
+    normalizedDataId: dataId,
+    manifest,
+    manifestLength: manifest.length,
+    expectedMasked: maskHash(expected),
+    receivedMasked: maskHash(received),
+  });
+  const signatureOk = constantTimeEqual(expected.toLowerCase(), received);
+  if (!signatureOk) {
+    console.log("[Mercado Pago webhook] diagnostico HMAC", {
+      timestamp,
+      receivedSignatureLength: received.length,
+      manifestLength: manifest.length,
+      expectedMasked: maskHash(expected),
+      receivedMasked: maskHash(received),
+      signatureOk,
+    });
+  }
+  return signatureOk;
 }

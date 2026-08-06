@@ -482,6 +482,65 @@ export function uploadStorageFile(bucket, path, file, onProgress) {
   });
 }
 
+export function uploadPrivateStorageFile(bucket, path, file, onProgress) {
+  if (!isSupabaseConfigured) {
+    return Promise.reject(new Error("Supabase Storage nao configurado."));
+  }
+
+  return new Promise((resolve, reject) => {
+    const session = readAuthSession();
+    const request = new XMLHttpRequest();
+    request.open("POST", buildStorageUrl(`/object/${bucket}/${path}`));
+    request.setRequestHeader("apikey", supabaseAnonKey);
+    request.setRequestHeader("Authorization", `Bearer ${session?.access_token || supabaseAnonKey}`);
+    request.setRequestHeader("x-upsert", "false");
+    request.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+
+    request.upload.onprogress = (event) => {
+      if (!event.lengthComputable || !onProgress) return;
+      onProgress(Math.round((event.loaded / event.total) * 100));
+    };
+
+    request.onload = () => {
+      if (request.status >= 200 && request.status < 300) {
+        resolve({ path });
+        return;
+      }
+
+      reject(new Error(request.responseText || `Falha no envio do arquivo (${request.status}).`));
+    };
+
+    request.onerror = () => reject(new Error("Falha de conexao ao enviar arquivo."));
+    request.send(file);
+  });
+}
+
+export async function createStorageSignedUrl(bucket, path, expiresIn = 300) {
+  if (!isSupabaseConfigured || !path) {
+    throw new Error("Arquivo nao informado.");
+  }
+
+  const session = readAuthSession();
+  const response = await fetch(buildStorageUrl(`/object/sign/${bucket}/${path}`), {
+    method: "POST",
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${session?.access_token || supabaseAnonKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ expiresIn }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text() || "Falha ao gerar link temporario.");
+  }
+
+  const data = await response.json();
+  const signedUrl = data?.signedURL || data?.signedUrl || "";
+  if (!signedUrl) throw new Error("Link temporario nao retornado.");
+  return signedUrl.startsWith("http") ? signedUrl : `${supabaseUrl}/storage/v1${signedUrl}`;
+}
+
 export async function deleteStorageFile(bucket, path) {
   if (!isSupabaseConfigured || !path) return false;
 

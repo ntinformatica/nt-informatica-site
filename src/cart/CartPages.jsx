@@ -7,10 +7,11 @@ import { Header } from "../components/Header";
 import { Section } from "../components/Section";
 import { useCustomerAuth } from "../customer/CustomerAuthContext";
 import { Alert } from "../customer/CustomerAuthPages";
+import { listCustomerAddresses } from "../customer/customerService";
 import { onlyDigits } from "../customer/customerValidation";
 import { useCart } from "./CartContext";
 import { cartTotals, itemKey } from "./cartStorage";
-import { createCheckoutAttemptKey, createStoreCheckout, getOrderPaymentStatus, missingCheckoutProfileFields, pickupInfo } from "../store/storeCheckoutService";
+import { billingAddressPayload, createCheckoutAttemptKey, createStoreCheckout, getOrderPaymentStatus, missingBillingAddressFields, missingCheckoutProfileFields, pickupInfo } from "../store/storeCheckoutService";
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
@@ -272,9 +273,14 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [attemptKey, setAttemptKey] = useState("");
+  const [addresses, setAddresses] = useState([]);
+  const [addressesLoading, setAddressesLoading] = useState(false);
   const checkoutOrderCreatedRef = useRef(false);
   const missing = missingCheckoutProfileFields(auth.user, auth.profile);
   const totals = cartTotals(cart.items);
+  const billingAddress = addresses.find((address) => address.is_default) || addresses[0] || null;
+  const billingMissing = missingBillingAddressFields(billingAddress);
+  const billingPayload = billingAddressPayload(billingAddress);
 
   useEffect(() => {
     console.info("Checkout perfil carregado.", {
@@ -310,6 +316,29 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
     if (!cart.items.length && !checkoutOrderCreatedRef.current) navigateTo("/carrinho");
   }, [cart.items.length]);
 
+  useEffect(() => {
+    let mounted = true;
+    if (!auth.authenticated || !auth.user?.id) {
+      setAddresses([]);
+      return () => {
+        mounted = false;
+      };
+    }
+    setAddressesLoading(true);
+    listCustomerAddresses(auth.user.id)
+      .then((rows) => {
+        if (mounted) setAddresses(rows || []);
+      })
+      .catch((addressError) => {
+        console.warn("Nao foi possivel carregar endereco de faturamento:", addressError);
+        if (mounted) setAddresses([]);
+      })
+      .finally(() => mounted && setAddressesLoading(false));
+    return () => {
+      mounted = false;
+    };
+  }, [auth.authenticated, auth.user?.id]);
+
   const finishCheckout = useCallback(async (cardData = null) => {
     if (processing) return;
     const isPix = paymentMethod === "pix";
@@ -337,6 +366,13 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
       setProcessing(false);
       return;
     }
+    const currentBillingMissing = missingBillingAddressFields(billingAddress);
+    if (currentBillingMissing.length) {
+      setError(`Complete o endereco de faturamento antes de finalizar: ${currentBillingMissing.join(", ")}.`);
+      setProcessing(false);
+      navigateTo("/minha-conta/enderecos");
+      return;
+    }
     const key = attemptKey || createCheckoutAttemptKey(cart.items, paymentMethod);
     setAttemptKey(key);
     try {
@@ -348,6 +384,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
       const result = await createStoreCheckout({
         user: auth.user,
         profile: currentProfile,
+        billingAddress,
         items: cart.items,
         paymentMethod,
         installments: cardInstallments(cardData),
@@ -397,7 +434,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
     } finally {
       setProcessing(false);
     }
-  }, [processing, missing, cart, paymentMethod, attemptKey, auth.user, auth.profile, auth.refreshProfile, navigateTo]);
+  }, [processing, missing, cart, paymentMethod, attemptKey, auth.user, auth.profile, auth.refreshProfile, navigateTo, billingAddress]);
 
   const brickStatus = useMercadoPagoBrick({
     enabled: paymentMethod === "card" && auth.authenticated && Boolean(cart.items.length),
@@ -419,6 +456,25 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
                 <div className="mt-3 rounded-md border border-amber-300/30 bg-amber-300/10 p-3">
                   <p className="text-sm font-bold text-amber-100">Dados pendentes: {missing.join(", ")}.</p>
                   <a href="/minha-conta/perfil" className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md border border-amber-200/40 px-4 py-2 text-sm font-black text-amber-50 transition hover:bg-amber-200/10">Completar perfil</a>
+                </div>
+              ) : null}
+            </Card>
+            <Card>
+              <h2 className="text-xl font-black text-white">Dados de faturamento</h2>
+              {addressesLoading ? <p className="mt-3 text-sm text-slate-300">Carregando endereco...</p> : null}
+              {!addressesLoading && billingMissing.length ? (
+                <div className="mt-3 rounded-md border border-amber-300/30 bg-amber-300/10 p-3">
+                  <p className="text-sm font-bold text-amber-100">Endereco incompleto: {billingMissing.join(", ")}.</p>
+                  <a href="/minha-conta/enderecos" className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md border border-amber-200/40 px-4 py-2 text-sm font-black text-amber-50 transition hover:bg-amber-200/10">Alterar dados de faturamento</a>
+                </div>
+              ) : null}
+              {!addressesLoading && !billingMissing.length ? (
+                <div className="mt-3 text-sm leading-6 text-slate-300">
+                  <p>{auth.profile?.full_name} | CPF {auth.profile?.cpf || "-"}</p>
+                  <p>{auth.user?.email} | {auth.profile?.phone}</p>
+                  <p>{billingPayload.street}, {billingPayload.number}{billingPayload.complement ? ` - ${billingPayload.complement}` : ""}</p>
+                  <p>{billingPayload.district} - {billingPayload.city}/{billingPayload.state} | CEP {billingPayload.postal_code}</p>
+                  <a href="/minha-conta/enderecos" className="mt-3 inline-flex min-h-10 items-center justify-center rounded-md border border-nt-cyan/40 px-4 py-2 text-sm font-black text-nt-cyan transition hover:bg-nt-cyan/10">Alterar dados de faturamento</a>
                 </div>
               ) : null}
             </Card>

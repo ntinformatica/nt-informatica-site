@@ -20,6 +20,10 @@ function cleanText(value: unknown) {
   return String(value || "").trim();
 }
 
+function normalizeStatus(value: unknown) {
+  return cleanText(value).toLowerCase();
+}
+
 function fromRows(rows: unknown) {
   return Array.isArray(rows) ? rows[0] || null : rows;
 }
@@ -38,8 +42,27 @@ function extractDataId(url: URL, body: Record<string, unknown>) {
   );
 }
 
+function hasSignaturePart(signatureHeader: string, partName: string) {
+  return signatureHeader.split(",").some((part) => part.trim().startsWith(`${partName}=`));
+}
+
+function signatureRejectReason(params: {
+  signatureHeader: string;
+  requestId: string;
+  dataId: string;
+  hasSecret: boolean;
+}) {
+  if (!params.signatureHeader) return "missing_x_signature";
+  if (!hasSignaturePart(params.signatureHeader, "ts")) return "missing_signature_timestamp";
+  if (!hasSignaturePart(params.signatureHeader, "v1")) return "missing_signature_hash";
+  if (!params.requestId) return "missing_x_request_id";
+  if (!params.dataId) return "missing_data_id";
+  if (!params.hasSecret) return "missing_webhook_secret";
+  return "signature_mismatch";
+}
+
 function storeStatusFromMercadoPago(mappedStatus: string, rawStatus: unknown) {
-  const normalizedRawStatus = cleanText(rawStatus).toLowerCase();
+  const normalizedRawStatus = normalizeStatus(rawStatus);
   if (normalizedRawStatus === "charged_back") return "charged_back";
   if (mappedStatus === "paid") return "approved";
   if (mappedStatus === "failed") return "rejected";
@@ -48,6 +71,73 @@ function storeStatusFromMercadoPago(mappedStatus: string, rawStatus: unknown) {
   if (mappedStatus === "refunded") return "refunded";
   if (mappedStatus === "processing") return "processing";
   return "pending";
+}
+
+function resolveStorePaymentStatus(params: {
+  transactionStatus: string;
+  transactionStatusDetail: string;
+  orderStatus: string;
+  orderStatusDetail: string;
+  fallbackMappedStatus: string;
+}) {
+  const {
+    transactionStatus,
+    transactionStatusDetail,
+    orderStatus,
+    orderStatusDetail,
+    fallbackMappedStatus,
+  } = params;
+  const transactionValues = [transactionStatus, transactionStatusDetail].filter(Boolean);
+  const orderValues = [orderStatus, orderStatusDetail].filter(Boolean);
+  const allValues = [...transactionValues, ...orderValues];
+  const negativeStatusMap: Record<string, string> = {
+    rejected: "rejected",
+    failed: "rejected",
+    cancelled: "cancelled",
+    canceled: "cancelled",
+    expired: "expired",
+    refunded: "refunded",
+    charged_back: "charged_back",
+  };
+  const intermediateStatusMap: Record<string, string> = {
+    processing: "processing",
+    in_process: "processing",
+    in_mediation: "processing",
+    pending_review_manual: "processing",
+    action_required: "processing",
+    waiting_transfer: "processing",
+    pending: "pending",
+    created: "pending",
+  };
+  const approvedStatuses = ["approved", "paid", "accredited"];
+
+  for (const value of allValues) {
+    if (negativeStatusMap[value]) return negativeStatusMap[value];
+  }
+
+  for (const value of transactionValues) {
+    if (intermediateStatusMap[value]) return intermediateStatusMap[value];
+  }
+
+  if (transactionStatus === "processed") {
+    if (transactionStatusDetail === "accredited") return "approved";
+    return "processing";
+  }
+
+  if (transactionValues.some((value) => approvedStatuses.includes(value))) return "approved";
+
+  for (const value of orderValues) {
+    if (intermediateStatusMap[value]) return intermediateStatusMap[value];
+  }
+
+  if (orderStatus === "processed") {
+    if (transactionStatusDetail === "accredited") return "approved";
+    return "processing";
+  }
+
+  if (orderValues.some((value) => approvedStatuses.includes(value))) return "approved";
+
+  return storeStatusFromMercadoPago(fallbackMappedStatus, transactionStatus || transactionStatusDetail || orderStatus || orderStatusDetail);
 }
 
 function isApprovedStoreStatus(status: string) {
@@ -80,11 +170,12 @@ function stableStoreEventId(params: {
   providerOrderId: string;
   transactionId: string;
   status: string;
+  statusDetail: string;
 }) {
   const source = params.notificationId || params.dataId;
   const eventKind = params.action || params.type || "unknown";
   const paymentRef = params.transactionId || params.providerOrderId || params.dataId;
-  return `mp-store:${source}:${eventKind}:${paymentRef}:${params.status}`;
+  return `mp-store:${source}:${eventKind}:${paymentRef}:${params.status}:${params.statusDetail || "no-detail"}`;
 }
 
 function mercadoPagoOrderErrorResponse(request: Request, error: MercadoPagoHttpError) {
@@ -152,6 +243,14 @@ async function findStorePayment(params: {
     if (payment) return payment as JsonObject;
   }
 
+  if (transactionId) {
+    const payment = await getSingle(
+      `/store_payments?mercado_pago_transaction_id=eq.${encodeURIComponent(transactionId)}`
+      + "&select=id,order_id,provider,payment_method,payment_type,status,status_detail,amount,installments,installment_amount,external_reference,mercado_pago_order_id,mercado_pago_payment_id,mercado_pago_transaction_id,raw_response,metadata,expires_at&limit=1",
+    );
+    if (payment) return payment as JsonObject;
+  }
+
   return null;
 }
 
@@ -184,8 +283,18 @@ async function processStorePaymentWebhook(params: {
     mappedStatus,
   } = params;
 
-  const rawStatus = transaction.status || transaction.status_detail || order.status || order.status_detail;
-  const storeStatus = storeStatusFromMercadoPago(mappedStatus, rawStatus);
+  const transactionStatus = normalizeStatus(transaction.status);
+  const transactionStatusDetail = normalizeStatus(transaction.status_detail);
+  const orderStatus = normalizeStatus(order.status);
+  const orderStatusDetail = normalizeStatus(order.status_detail);
+  const rawStatus = transactionStatus || transactionStatusDetail || orderStatus || orderStatusDetail;
+  const storeStatus = resolveStorePaymentStatus({
+    transactionStatus,
+    transactionStatusDetail,
+    orderStatus,
+    orderStatusDetail,
+    fallbackMappedStatus: mappedStatus,
+  });
   const statusDetail = cleanText(transaction.status_detail || order.status_detail || rawStatus || mappedStatus);
   const eventId = stableStoreEventId({
     dataId,
@@ -195,6 +304,7 @@ async function processStorePaymentWebhook(params: {
     providerOrderId,
     transactionId,
     status: storeStatus,
+    statusDetail,
   });
   const metadata = {
     provider: "mercado_pago",
@@ -208,6 +318,20 @@ async function processStorePaymentWebhook(params: {
     externalReference,
     providerOrderId,
     transactionId,
+  });
+
+  console.log("[STORE WEBHOOK STATUS RESOLUTION]", {
+    dataId,
+    externalReference,
+    providerOrderId,
+    transactionId,
+    transactionStatus,
+    transactionStatusDetail,
+    orderStatus,
+    orderStatusDetail,
+    storeStatus,
+    paymentFound: Boolean(payment),
+    confirmStorePaymentCalled: false,
   });
 
   if (!payment) return null;
@@ -247,16 +371,56 @@ async function processStorePaymentWebhook(params: {
 
   let confirmation = null;
   if (isApprovedStoreStatus(storeStatus)) {
-    confirmation = await supabaseRpc("confirm_store_payment", {
-      p_payment_id: payment.id,
-      p_external_reference: externalReference || null,
-      p_mercado_pago_payment_id: transactionId || providerOrderId || "",
-      p_status: "approved",
-      p_status_detail: statusDetail,
-      p_provider_event_id: `${eventId}:confirm`,
-      p_raw_response: metadata,
-      p_idempotency_key: `${eventId}:confirm`,
+    console.log("[STORE WEBHOOK CONFIRM_STORE_PAYMENT]", {
+      dataId,
+      externalReference,
+      providerOrderId,
+      transactionId,
+      paymentId: payment.id,
+      orderId: payment.order_id,
+      storeStatus,
+      confirmStorePaymentCalled: true,
     });
+    try {
+      confirmation = await supabaseRpc("confirm_store_payment", {
+        p_payment_id: payment.id,
+        p_external_reference: externalReference || null,
+        p_mercado_pago_payment_id: transactionId || providerOrderId || "",
+        p_status: "approved",
+        p_status_detail: statusDetail,
+        p_provider_event_id: `${eventId}:confirm`,
+        p_raw_response: metadata,
+        p_idempotency_key: `${eventId}:confirm`,
+      });
+      const confirmationResult = fromRows(confirmation) as JsonObject | null;
+      console.log("[STORE WEBHOOK CONFIRM_STORE_PAYMENT RESULT]", {
+        dataId,
+        externalReference,
+        providerOrderId,
+        transactionId,
+        paymentId: payment.id,
+        orderId: payment.order_id,
+        storeStatus,
+        result: {
+          received: Boolean(confirmationResult),
+          idempotent: Boolean(confirmationResult?.idempotent),
+          manualReview: Boolean(confirmationResult?.manual_review),
+          paymentStatus: cleanText(confirmationResult?.payment_status),
+        },
+      });
+    } catch (error) {
+      console.error("[STORE WEBHOOK CONFIRM_STORE_PAYMENT ERROR]", {
+        dataId,
+        externalReference,
+        providerOrderId,
+        transactionId,
+        paymentId: payment.id,
+        orderId: payment.order_id,
+        storeStatus,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   } else if (isNonApprovedFinalStoreStatus(storeStatus)) {
     await patchStorePayment(String(payment.id), {
       status: storeStatus,
@@ -295,6 +459,8 @@ Deno.serve(async (request) => {
     const dataId = extractDataId(url, body);
     const requestId = request.headers.get("x-request-id") || "";
     const signature = request.headers.get("x-signature") || "";
+    const webhookSecret = Deno.env.get("MERCADO_PAGO_WEBHOOK_SECRET") || "";
+    const eventType = cleanText(body.type || body.action || "");
 
     if (!dataId) return ok(request, { ignored: true, reason: "Evento sem data id." });
 
@@ -304,7 +470,24 @@ Deno.serve(async (request) => {
       dataId,
     });
 
-    if (!signatureOk) return fail(request, "Assinatura invalida.", 401);
+    if (!signatureOk) {
+      console.log("[Mercado Pago webhook] assinatura rejeitada", {
+        hasSignatureHeader: Boolean(signature),
+        hasRequestIdHeader: Boolean(requestId),
+        hasWebhookSecret: Boolean(webhookSecret),
+        webhookSecretLength: webhookSecret.length,
+        dataId,
+        eventType,
+        signatureOk,
+        rejectReason: signatureRejectReason({
+          signatureHeader: signature,
+          requestId,
+          dataId,
+          hasSecret: Boolean(webhookSecret),
+        }),
+      });
+      return fail(request, "Assinatura invalida.", 401);
+    }
 
     let order: JsonObject;
     try {

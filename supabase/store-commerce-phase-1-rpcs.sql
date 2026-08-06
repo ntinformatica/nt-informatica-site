@@ -131,6 +131,7 @@ as $$
     'discount_amount', store_order.discount_amount,
     'total_amount', store_order.total_amount,
     'payment_method', store_order.payment_method,
+    'fiscal_status', store_order.fiscal_status,
     'installments', store_order.installments,
     'installment_amount', store_order.installment_amount,
     'expires_at', store_order.expires_at,
@@ -160,13 +161,16 @@ revoke all on function public.store_order_public_summary(uuid) from anon;
 revoke all on function public.store_order_public_summary(uuid) from authenticated;
 grant execute on function public.store_order_public_summary(uuid) to service_role;
 
+drop function if exists public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text);
+
 create or replace function public.create_store_order_from_cart(
   p_customer jsonb,
   p_items jsonb,
   p_payment_method text,
   p_installments integer default null,
   p_order_source text default 'site',
-  p_idempotency_key text default null
+  p_idempotency_key text default null,
+  p_billing_address jsonb default null
 )
 returns jsonb
 language plpgsql
@@ -215,6 +219,14 @@ declare
   v_config_snapshot jsonb;
   v_payment_type text;
   v_document_masked text;
+  v_billing_postal_code text;
+  v_billing_street text;
+  v_billing_number text;
+  v_billing_complement text;
+  v_billing_district text;
+  v_billing_city text;
+  v_billing_state text;
+  v_billing_country text;
 begin
   if coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'Operacao permitida somente via service_role.';
@@ -255,6 +267,27 @@ begin
 
   if v_payment_method not in ('pix', 'card') then
     raise exception 'Forma de pagamento invalida.';
+  end if;
+
+  if p_billing_address is null or jsonb_typeof(p_billing_address) <> 'object' then
+    raise exception 'Endereco de faturamento obrigatorio.';
+  end if;
+
+  v_billing_postal_code := regexp_replace(coalesce(p_billing_address->>'postal_code', p_billing_address->>'cep', ''), '\D', '', 'g');
+  v_billing_street := nullif(btrim(coalesce(p_billing_address->>'street', p_billing_address->>'logradouro', '')), '');
+  v_billing_number := nullif(btrim(coalesce(p_billing_address->>'number', p_billing_address->>'numero', '')), '');
+  v_billing_complement := btrim(coalesce(p_billing_address->>'complement', p_billing_address->>'complemento', ''));
+  v_billing_district := nullif(btrim(coalesce(p_billing_address->>'district', p_billing_address->>'neighborhood', p_billing_address->>'bairro', '')), '');
+  v_billing_city := nullif(btrim(coalesce(p_billing_address->>'city', p_billing_address->>'cidade', '')), '');
+  v_billing_state := upper(left(btrim(coalesce(p_billing_address->>'state', p_billing_address->>'estado', '')), 2));
+  v_billing_country := nullif(btrim(coalesce(p_billing_address->>'country', p_billing_address->>'pais', 'Brasil')), '');
+
+  if char_length(v_billing_postal_code) <> 8 then
+    raise exception 'CEP de faturamento obrigatorio.';
+  end if;
+
+  if v_billing_street is null or v_billing_number is null or v_billing_district is null or v_billing_city is null or v_billing_state !~ '^[A-Z]{2}$' then
+    raise exception 'Endereco de faturamento incompleto.';
   end if;
 
   if v_order_source not in ('site', 'admin', 'whatsapp', 'marketplace', 'api') then
@@ -335,6 +368,38 @@ begin
     jsonb_build_object('checkout_version', 'store_phase_1')
   )
   returning id into v_order_id;
+
+  insert into public.order_billing_snapshots (
+    order_id,
+    customer_name,
+    customer_document,
+    customer_email,
+    customer_phone,
+    postal_code,
+    street,
+    number,
+    complement,
+    district,
+    city,
+    state,
+    country
+  )
+  values (
+    v_order_id,
+    v_customer_name,
+    v_customer_document,
+    v_customer_email,
+    v_customer_phone,
+    v_billing_postal_code,
+    v_billing_street,
+    v_billing_number,
+    v_billing_complement,
+    v_billing_district,
+    v_billing_city,
+    v_billing_state,
+    coalesce(v_billing_country, 'Brasil')
+  )
+  on conflict (order_id) do nothing;
 
   for v_item, v_item_index in
     select item_value, item_index
@@ -753,10 +818,10 @@ begin
 end;
 $$;
 
-revoke all on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text) from public;
-revoke all on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text) from anon;
-revoke all on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text) from authenticated;
-grant execute on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text) to service_role;
+revoke all on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text, jsonb) from public;
+revoke all on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text, jsonb) from anon;
+revoke all on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text, jsonb) from authenticated;
+grant execute on function public.create_store_order_from_cart(jsonb, jsonb, text, integer, text, text, jsonb) to service_role;
 
 create or replace function public.expire_store_orders(
   p_limit integer default 100,

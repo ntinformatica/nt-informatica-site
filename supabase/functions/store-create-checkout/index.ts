@@ -12,6 +12,17 @@ type StoreCustomer = {
   customer_document: string;
 };
 
+type BillingAddress = {
+  postal_code: string;
+  street: string;
+  number: string;
+  complement: string;
+  district: string;
+  city: string;
+  state: string;
+  country: string;
+};
+
 type StoreItem = {
   item_type: "product" | "assembled_pc";
   product_id?: string;
@@ -28,6 +39,7 @@ type CardInput = {
 
 type CheckoutInput = {
   customer: StoreCustomer;
+  billing_address: BillingAddress;
   items: StoreItem[];
   payment_method: "pix" | "card";
   installments: number | null;
@@ -172,6 +184,34 @@ function validateCustomer(value: unknown, paymentMethod: "pix" | "card"): StoreC
   };
 }
 
+function validateBillingAddress(value: unknown): BillingAddress {
+  if (!isObject(value)) throw new Error("Endereco de faturamento obrigatorio.");
+  const postalCode = onlyDigits(value.postal_code || value.cep);
+  const street = cleanText(value.street || value.logradouro);
+  const number = cleanText(value.number || value.numero);
+  const complement = cleanText(value.complement || value.complemento);
+  const district = cleanText(value.district || value.neighborhood || value.bairro);
+  const city = cleanText(value.city || value.cidade);
+  const state = cleanText(value.state || value.estado).toUpperCase().slice(0, 2);
+  const country = cleanText(value.country || value.pais || "Brasil") || "Brasil";
+
+  if (postalCode.length !== 8) throw new Error("CEP de faturamento obrigatorio.");
+  if (!street || !number || !district || !city || !/^[A-Z]{2}$/.test(state)) {
+    throw new Error("Endereco de faturamento incompleto.");
+  }
+
+  return {
+    postal_code: postalCode,
+    street,
+    number,
+    complement,
+    district,
+    city,
+    state,
+    country,
+  };
+}
+
 function validateItems(value: unknown): StoreItem[] {
   if (!Array.isArray(value) || value.length === 0) throw new Error("Carrinho vazio.");
   if (value.length > MAX_ITEMS) throw new Error("Quantidade maxima de itens excedida.");
@@ -271,6 +311,7 @@ function validateCheckoutPayload(payload: JsonObject): CheckoutInput {
 
   return {
     customer: validateCustomer(payload.customer, paymentMethod),
+    billing_address: validateBillingAddress(payload.billing_address || payload.billingAddress),
     items: validateItems(payload.items),
     payment_method: paymentMethod,
     installments,
@@ -309,6 +350,10 @@ async function mercadoPagoRequest(body: JsonObject, idempotencyKey: string) {
     });
     const text = await response.text();
     let payload: unknown = null;
+    const relevantHeaders = {
+      "x-request-id": response.headers.get("x-request-id") || "",
+      "x-correlation-id": response.headers.get("x-correlation-id") || "",
+    };
 
     if (text) {
       try {
@@ -325,6 +370,7 @@ async function mercadoPagoRequest(body: JsonObject, idempotencyKey: string) {
         status: response.status,
         temporary,
         payload,
+        headers: relevantHeaders,
       };
     }
 
@@ -333,6 +379,7 @@ async function mercadoPagoRequest(body: JsonObject, idempotencyKey: string) {
       status: response.status,
       temporary: false,
       payload: payload as JsonObject,
+      headers: relevantHeaders,
     };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
@@ -634,6 +681,11 @@ function providerErrorMessage(status: number) {
   return "Falha ao criar pagamento no Mercado Pago.";
 }
 
+function isInsufficientAmountProviderError(payload: unknown) {
+  if (cleanText(payload).toLowerCase().includes("insufficient_amount")) return true;
+  return findDeepStrings(payload, (_key, value) => value.toLowerCase().includes("insufficient_amount")).length > 0;
+}
+
 function providerDetail(payload: unknown) {
   if (!isObject(payload)) return cleanText(payload);
   return firstString([
@@ -782,6 +834,7 @@ Deno.serve(async (request) => {
       p_installments: input.installments,
       p_order_source: "site",
       p_idempotency_key: input.idempotency_key,
+      p_billing_address: input.billing_address,
     }) as JsonObject;
     const order = fromRows(rpcResult) as JsonObject | null;
 
@@ -917,7 +970,19 @@ Deno.serve(async (request) => {
           lastProviderErrorStatus: mpResponse.status,
         },
       });
-      return fail(request, providerErrorMessage(mpResponse.status), mpResponse.temporary ? 503 : 422);
+      console.log("=========================================");
+      console.log("MERCADO PAGO - FAIL BRANCH");
+      console.log("=========================================");
+      console.log("HTTP Status:", mpResponse.status);
+      console.log("response.ok:", mpResponse.ok);
+      console.log("Body mascarado:", sanitizedPayload);
+      console.log("Headers relevantes:", mpResponse.headers || {});
+      console.log("Ramo:", "providerErrorMessage()");
+      console.log("=========================================");
+      const providerMessage = mpResponse.status === 402 && isInsufficientAmountProviderError(mpResponse.payload)
+        ? "Pagamento recusado por saldo ou limite insuficiente. Tente outro cartão ou escolha outra forma de pagamento."
+        : providerErrorMessage(mpResponse.status);
+      return fail(request, providerMessage, mpResponse.temporary ? 503 : 422);
     }
 
     const mercadoPagoOrder = mpResponse.payload as JsonObject;

@@ -1,4 +1,4 @@
-import { supabaseRequest } from "../lib/supabase";
+import { createStorageSignedUrl, supabaseRequest } from "../lib/supabase";
 import { normalizeAddressPayload, normalizeProfilePayload } from "./customerValidation";
 
 function firstRow(rows) {
@@ -71,7 +71,7 @@ export async function listCustomerOrders(email) {
   if (!email) return [];
   return supabaseRequest(
     `/store_orders?customer_email=eq.${encodeURIComponent(email)}`
-    + "&select=id,order_number,created_at,total_amount,payment_method,financial_status,operational_status,pickup_status&order=created_at.desc",
+    + "&select=id,order_number,created_at,total_amount,payment_method,financial_status,operational_status,pickup_status,fiscal_status&order=created_at.desc",
   ).catch((error) => {
     console.warn("Nao foi possivel carregar pedidos do cliente:", error);
     return [];
@@ -82,7 +82,7 @@ export async function getCustomerOrderDetails(email, orderId) {
   if (!email || !orderId) return null;
   const orderRows = await supabaseRequest(
     `/store_orders?id=eq.${encodeURIComponent(orderId)}&customer_email=eq.${encodeURIComponent(email)}`
-    + "&select=*,store_order_items(*)&limit=1",
+    + "&select=*,store_order_items(*),order_billing_snapshots(*),order_invoices(*)&limit=1",
   );
   const order = firstRow(orderRows);
   if (!order) return null;
@@ -115,4 +115,10 @@ export async function getCustomerOrderDetails(email, orderId) {
     store_order_logs: Array.isArray(logs) ? logs : [],
     logsUnavailable,
   };
+}
+
+export async function createCustomerInvoiceSignedUrl(invoice, kind) {
+  const path = kind === "xml" ? invoice?.xml_storage_path : invoice?.pdf_storage_path;
+  if (!path) throw new Error("Documento fiscal indisponivel.");
+  return createStorageSignedUrl("store-invoices", path, 300);
 }

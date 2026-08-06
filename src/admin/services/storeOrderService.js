@@ -1,10 +1,12 @@
-import { supabaseRequest } from "../../lib/supabase";
+import { createStorageSignedUrl, supabaseRequest, uploadPrivateStorageFile } from "../../lib/supabase";
 
 const orderSelect = [
   "*",
   "store_order_items(*)",
   "store_payments(id,payment_method,payment_type,status,status_detail,amount,installments,installment_amount,card_brand,card_last_four,mercado_pago_order_id,mercado_pago_payment_id,approved_at,paid_at,created_at,updated_at)",
   "store_order_logs(id,event_type,previous_financial_status,new_financial_status,previous_operational_status,new_operational_status,message,actor_type,source,created_at,metadata)",
+  "order_billing_snapshots(*)",
+  "order_invoices(*)",
 ].join(",");
 
 export const storeFinancialLabels = {
@@ -45,6 +47,13 @@ export const storeOperationalFlow = [
   "delivered",
   "cancelled",
 ];
+
+export const storeFiscalLabels = {
+  pending: "Aguardando emissao",
+  issued: "Nota emitida",
+  cancelled: "Nota cancelada",
+  error: "Problema fiscal",
+};
 
 export function formatStoreMoney(value) {
   const amount = Number(value || 0);
@@ -126,6 +135,8 @@ export async function listStoreOrders() {
     store_order_items: order.store_order_items || [],
     store_payments: (order.store_payments || []).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
     store_order_logs: (order.store_order_logs || []).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
+    order_billing_snapshots: order.order_billing_snapshots || [],
+    order_invoices: (order.order_invoices || []).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
   }));
 }
 
@@ -185,4 +196,80 @@ export async function updateStoreOrderInternalNotes(orderId, notes) {
     }),
   });
   return updated;
+}
+
+function invoiceFilePath(order, kind, file) {
+  const safeOrder = String(order?.order_number || order?.id || "pedido").replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
+  const extension = kind === "xml" ? "xml" : "pdf";
+  return `${safeOrder}/${kind}-${Date.now()}-${crypto.randomUUID()}.${extension}`;
+}
+
+export function validateInvoiceFiles({ xmlFile, pdfFile }) {
+  if (!xmlFile) throw new Error("Anexe o XML autorizado.");
+  if (!pdfFile) throw new Error("Anexe o DANFE em PDF.");
+  if (!xmlFile.name.toLowerCase().endsWith(".xml")) throw new Error("O arquivo XML precisa ter extensao .xml.");
+  if (!["application/xml", "text/xml", ""].includes(xmlFile.type)) throw new Error("O arquivo XML possui MIME type invalido.");
+  if (!pdfFile.name.toLowerCase().endsWith(".pdf") || pdfFile.type !== "application/pdf") throw new Error("O DANFE precisa ser um PDF valido.");
+  if (xmlFile.size <= 0 || pdfFile.size <= 0) throw new Error("Arquivo fiscal vazio.");
+  if (xmlFile.size > 10 * 1024 * 1024 || pdfFile.size > 10 * 1024 * 1024) throw new Error("Arquivos fiscais devem ter no maximo 10 MB.");
+}
+
+export async function saveStoreOrderInvoice(order, values) {
+  if (!order?.id) throw new Error("Pedido invalido.");
+  const accessKey = normalizeDigits(values.accessKey);
+  if (accessKey.length !== 44) throw new Error("Chave de acesso deve ter exatamente 44 digitos.");
+  validateInvoiceFiles(values);
+
+  const xmlPath = invoiceFilePath(order, "xml", values.xmlFile);
+  const pdfPath = invoiceFilePath(order, "danfe", values.pdfFile);
+  await uploadPrivateStorageFile("store-invoices", xmlPath, values.xmlFile);
+  await uploadPrivateStorageFile("store-invoices", pdfPath, values.pdfFile);
+
+  const payload = {
+    order_id: order.id,
+    status: "issued",
+    invoice_number: String(values.invoiceNumber || "").trim(),
+    invoice_series: String(values.invoiceSeries || "").trim(),
+    access_key: accessKey,
+    issued_at: values.issuedAt ? new Date(values.issuedAt).toISOString() : null,
+    xml_storage_path: xmlPath,
+    pdf_storage_path: pdfPath,
+    xml_original_name: values.xmlFile.name,
+    pdf_original_name: values.pdfFile.name,
+    xml_mime_type: values.xmlFile.type || "application/xml",
+    pdf_mime_type: values.pdfFile.type || "application/pdf",
+  };
+
+  const rows = await supabaseRequest("/order_invoices?on_conflict=order_id", {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify(payload),
+  });
+
+  await supabaseRequest(`/store_orders?id=eq.${encodeURIComponent(order.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ fiscal_status: "issued" }),
+  });
+
+  await supabaseRequest("/store_order_logs", {
+    method: "POST",
+    body: JSON.stringify({
+      order_id: order.id,
+      event_type: "invoice_attached",
+      message: `NF-e ${payload.invoice_number || accessKey} anexada pelo administrador.`,
+      actor_type: "admin",
+      source: "admin",
+      metadata: { access_key: accessKey.replace(/^(\d{4}).+(\d{4})$/, "$1***$2") },
+    }),
+  }).catch((error) => {
+    console.warn("Nao foi possivel registrar log da nota fiscal:", error);
+  });
+
+  return Array.isArray(rows) ? rows[0] || null : rows;
+}
+
+export async function createAdminInvoiceSignedUrl(invoice, kind) {
+  const path = kind === "xml" ? invoice?.xml_storage_path : invoice?.pdf_storage_path;
+  if (!path) throw new Error("Documento fiscal indisponivel.");
+  return createStorageSignedUrl("store-invoices", path, 300);
 }
