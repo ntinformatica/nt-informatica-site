@@ -1090,12 +1090,12 @@ function Content() {
           const canOpen = isYoutubeContent(card) || isSafeHttpUrl(card.targetUrl);
 
           return (
-          <Card key={card.slotKey} className="group overflow-hidden p-4 transition duration-300 hover:-translate-y-1 hover:border-nt-cyan/45 hover:shadow-[0_22px_48px_rgba(14,165,233,0.16)]">
+          <Card key={card.slotKey} className="group flex overflow-hidden p-4 transition duration-300 hover:-translate-y-1 hover:border-nt-cyan/45 hover:shadow-[0_22px_48px_rgba(14,165,233,0.16)]">
             <button
               type="button"
               disabled={!canOpen}
               onClick={(event) => openCard(card, event)}
-              className="block w-full text-left disabled:cursor-not-allowed"
+              className="flex w-full flex-1 flex-col text-left disabled:cursor-not-allowed"
               aria-label={`${card.buttonLabel || "Assistir"} ${card.title}`}
             >
               <div className="relative aspect-video overflow-hidden rounded-md border border-white/10 bg-slate-950">
@@ -1111,9 +1111,11 @@ function Content() {
                   <PlayCircle size={28} />
                 </span>
               </div>
-              <h3 className="mt-4 text-base font-black text-white">{card.title}</h3>
-              {card.description ? <p className="mt-2 min-h-10 text-sm leading-5 text-slate-300">{card.description}</p> : null}
-              <span className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-md border border-slate-600 bg-white/5 px-4 py-2 text-sm font-bold text-white transition group-hover:border-nt-cyan group-hover:bg-nt-cyan/10">
+              <h3 className="mt-4 flex h-12 items-start text-base font-black leading-6 text-white">{card.title}</h3>
+              <div className="mt-2 flex min-h-12 flex-1 items-center">
+                {card.description ? <p className="text-sm leading-5 text-slate-300">{card.description}</p> : null}
+              </div>
+              <span className="mt-auto inline-flex min-h-10 w-full items-center justify-center rounded-md border border-slate-600 bg-white/5 px-4 py-2 text-sm font-bold text-white transition group-hover:border-nt-cyan group-hover:bg-nt-cyan/10">
                 {card.buttonLabel || "Assistir"}
               </span>
             </button>
