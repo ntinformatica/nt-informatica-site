@@ -67,6 +67,29 @@ const messages = {
   contact: "Olá, gostaria de falar com a NT Informática, Celulares e Games.",
 };
 
+const contentCardStyles = {
+  "YouTube NT Informática e Celulares": {
+    card: "group border-red-500/20 bg-gradient-to-b from-red-500/10 via-white/[0.04] to-white/[0.03] hover:-translate-y-1 hover:border-red-400/60 hover:shadow-[0_20px_45px_rgba(239,68,68,0.16)]",
+    icon: "border border-red-400/40 bg-red-500/12 text-red-300 group-hover:bg-red-500/18 group-hover:text-red-200 group-hover:shadow-[0_0_22px_rgba(239,68,68,0.28)]",
+    button: "hover:border-red-400 hover:bg-red-500/15 hover:text-red-100 focus:ring-red-400",
+  },
+  "YouTube NT Gaming": {
+    card: "group border-red-500/20 bg-gradient-to-b from-red-600/10 via-white/[0.04] to-white/[0.03] hover:-translate-y-1 hover:border-red-400/60 hover:shadow-[0_20px_45px_rgba(220,38,38,0.18)]",
+    icon: "border border-red-400/40 bg-red-500/12 text-red-300 group-hover:bg-red-500/18 group-hover:text-red-200 group-hover:shadow-[0_0_22px_rgba(239,68,68,0.28)]",
+    button: "hover:border-red-400 hover:bg-red-500/15 hover:text-red-100 focus:ring-red-400",
+  },
+  Instagram: {
+    card: "group border-pink-400/20 bg-[linear-gradient(#101827,#101827)_padding-box,linear-gradient(135deg,rgba(251,191,36,0.45),rgba(236,72,153,0.45),rgba(129,140,248,0.45))_border-box] hover:-translate-y-1 hover:shadow-[0_20px_45px_rgba(236,72,153,0.16)]",
+    icon: "border border-pink-300/35 bg-gradient-to-br from-amber-300/15 via-pink-500/15 to-indigo-400/15 text-pink-200 group-hover:shadow-[0_0_24px_rgba(236,72,153,0.28)]",
+    button: "hover:border-pink-300 hover:bg-gradient-to-r hover:from-amber-300/12 hover:via-pink-500/15 hover:to-indigo-400/15 hover:text-pink-50 focus:ring-pink-300",
+  },
+  TikTok: {
+    card: "group border-cyan-300/20 bg-gradient-to-b from-cyan-400/8 via-white/[0.04] to-pink-500/8 hover:-translate-y-1 hover:border-cyan-300/55 hover:shadow-[0_20px_45px_rgba(34,211,238,0.12)]",
+    icon: "border border-cyan-300/35 bg-cyan-300/10 text-cyan-200 shadow-[6px_0_18px_rgba(236,72,153,0.12)] group-hover:shadow-[6px_0_22px_rgba(236,72,153,0.24),-6px_0_22px_rgba(34,211,238,0.2)]",
+    button: "hover:border-cyan-300 hover:bg-gradient-to-r hover:from-cyan-300/12 hover:to-pink-500/12 hover:text-cyan-50 focus:ring-cyan-300",
+  },
+};
+
 function sortByPortugueseName(items, getName = (item) => item?.name) {
   return [...items]
     .filter((item) => String(getName(item) || "").trim())
@@ -940,15 +963,19 @@ function Content() {
   return (
     <Section id="conteudo" eyebrow="Conteúdo" title="Acompanhe a NT Informática e a NT Gaming nas redes sociais.">
       <div className="grid gap-5 md:grid-cols-4">
-        {contentCards.map(({ title, icon: Icon, href, buttonLabel }) => (
-          <Card key={title} className="text-center">
-            <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-md bg-nt-cyan/10 text-nt-cyan">
-              <Icon />
-            </div>
-            <h3 className="min-h-12 text-base font-black text-white">{title}</h3>
-            <Button href={href} variant="secondary" className="mt-5 w-full">{buttonLabel}</Button>
-          </Card>
-        ))}
+        {contentCards.map(({ title, icon: Icon, href, buttonLabel }) => {
+          const styles = contentCardStyles[title] || {};
+
+          return (
+            <Card key={title} className={`text-center transition duration-300 ${styles.card || ""}`}>
+              <div className={`mx-auto mb-4 grid h-12 w-12 place-items-center rounded-md transition duration-300 ${styles.icon || "bg-nt-cyan/10 text-nt-cyan"}`}>
+                <Icon size={26} strokeWidth={2.4} />
+              </div>
+              <h3 className="min-h-12 text-base font-black text-white">{title}</h3>
+              <Button href={href} variant="secondary" className={`mt-5 w-full ${styles.button || ""}`}>{buttonLabel}</Button>
+            </Card>
+          );
+        })}
       </div>
       <div className="mt-8 grid gap-5 md:grid-cols-4">
         {videos.map((video) => (
