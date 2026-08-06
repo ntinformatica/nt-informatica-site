@@ -160,6 +160,12 @@ function toSupabase(product, categories = []) {
   };
 }
 
+function hasExplicitImagePayload(product) {
+  return Object.prototype.hasOwnProperty.call(product, "mainImage")
+    || Object.prototype.hasOwnProperty.call(product, "images")
+    || Object.prototype.hasOwnProperty.call(product, "gallery");
+}
+
 function toSupabaseVariation(variation, productId) {
   const normalized = normalizeVariation(variation);
   return {
@@ -326,9 +332,15 @@ export async function createProduct(product, categories = []) {
 export async function updateProduct(id, product, categories = []) {
   if (isSupabaseConfigured) {
     try {
+      const payload = toSupabase(product, categories);
+      if (!hasExplicitImagePayload(product)) {
+        delete payload.main_image;
+        delete payload.images;
+      }
+
       const [row] = await supabaseRequest(`/products?id=eq.${encodeURIComponent(id)}`, {
         method: "PATCH",
-        body: JSON.stringify(toSupabase(product, categories)),
+        body: JSON.stringify(payload),
       });
       if (!row?.id) throw new Error("O Supabase nao retornou o produto atualizado.");
       const variations = await saveVariations(id, product.variations);
