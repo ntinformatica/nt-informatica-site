@@ -472,14 +472,14 @@ function LoginPage({ onLogin, authError = "" }) {
   );
 }
 
-function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice, notifications = [], onNotificationRead, onNotificationDismiss, onNotificationsReadAll, onLogout }) {
+function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode, notice, notifications = [], onNotificationRead, onNotificationDismiss, onNotificationsReadAll, onLogout, printMode = false }) {
   const pathname = window.location.pathname.replace(/\/$/, "") || "/admin";
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const unreadNotifications = notifications.filter((item) => !item.read && !item.dismissed);
 
   return (
-    <div className="min-h-screen bg-[#070b12] text-white">
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 border-r border-white/10 bg-[#0b111d] p-4 transition lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+    <div className={`admin-shell-layout min-h-screen bg-[#070b12] text-white ${printMode ? "stock-print-mode" : ""}`}>
+      <aside className={`admin-shell-sidebar fixed inset-y-0 left-0 z-50 w-72 border-r border-white/10 bg-[#0b111d] p-4 transition lg:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
         <div className="flex items-center justify-between">
           <a href="/admin" className="leading-tight">
             <strong className="block text-lg">NT Admin</strong>
@@ -507,7 +507,7 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode
         </nav>
       </aside>
       {mobileOpen ? <button className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setMobileOpen(false)} aria-label="Fechar navegação" /> : null}
-      <div className="lg:pl-72">
+      <div className="admin-shell-main lg:pl-72">
         <header className="admin-shell-header sticky top-0 z-30 border-b border-white/10 bg-[#070b12]/88 backdrop-blur">
           <div className="flex min-h-20 items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
             <div>
@@ -562,7 +562,7 @@ function AdminShell({ children, title, subtitle, mobileOpen, setMobileOpen, mode
             </div>
           </div>
         </header>
-        <main className="px-4 py-6 sm:px-6 lg:px-8">
+        <main className="admin-shell-content px-4 py-6 sm:px-6 lg:px-8">
           {notice ? <div className="admin-shell-notice mb-5 rounded-md border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">{notice}</div> : null}
           {children}
         </main>
@@ -981,7 +981,7 @@ function StockSheetPage({ products, categories }) {
         </div>
       </section>
 
-      <section className="stock-sheet-document rounded-lg border border-white/10 bg-white p-6 text-slate-950 shadow-card">
+      <section className="stock-print-sheet stock-sheet-document rounded-lg border border-white/10 bg-white p-6 text-slate-950 shadow-card">
         <header className="stock-sheet-header">
           <h2>NT Informática, Celulares e Games</h2>
           <p>Conferência de Estoque</p>
@@ -4429,6 +4429,7 @@ export function AdminApp() {
       onNotificationDismiss={dismissNotification}
       onNotificationsReadAll={readAllNotifications}
       onLogout={logoutAdmin}
+      printMode={info.page === "stockSheet"}
     >
       {error ? <div className="mb-5 rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
       {loading ? <p className="rounded-md border border-white/10 bg-white/5 p-5 text-sm text-slate-300">Carregando dados do painel...</p> : null}

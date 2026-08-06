@@ -111,84 +111,117 @@ section {
 
 @media print {
   @page {
-    size: A4;
+    size: A4 portrait;
     margin: 10mm;
   }
 
-  body:has(.stock-sheet-page) {
+  html,
+  body,
+  #root {
+    min-height: auto !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  body {
     background: #fff !important;
     color: #111827 !important;
   }
 
-  body:has(.stock-sheet-page) aside,
-  body:has(.stock-sheet-page) .admin-shell-header,
-  body:has(.stock-sheet-page) .stock-sheet-controls,
-  body:has(.stock-sheet-page) .admin-shell-notice {
+  .stock-print-mode .admin-shell-sidebar,
+  .stock-print-mode .admin-shell-header,
+  .stock-print-mode .stock-sheet-controls,
+  .stock-print-mode .admin-shell-notice {
     display: none !important;
   }
 
-  body:has(.stock-sheet-page) .lg\:pl-72 {
-    padding-left: 0 !important;
+  .stock-print-mode,
+  .stock-print-mode .admin-shell-main,
+  .stock-print-mode .admin-shell-content,
+  .stock-print-mode .stock-sheet-page,
+  .stock-print-mode .stock-print-sheet,
+  .stock-print-mode .stock-print-sheet * {
+    display: block !important;
+    visibility: visible !important;
+    position: static !important;
+    transform: none !important;
+    overflow: visible !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
   }
 
-  body:has(.stock-sheet-page) main {
+  .stock-print-mode .admin-shell-main,
+  .stock-print-mode .admin-shell-content {
+    margin: 0 !important;
     padding: 0 !important;
   }
 
-  .stock-sheet-page {
+  .stock-print-sheet {
     display: block !important;
-  }
-
-  .stock-sheet-document {
     border: 0 !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
+    margin: 0 !important;
     padding: 0 !important;
     overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
   }
 
-  .stock-sheet-header {
+  .stock-print-sheet .stock-sheet-header {
     margin-bottom: 8mm;
   }
 
-  .stock-sheet-header h2 {
+  .stock-print-sheet .stock-sheet-header h2 {
     font-size: 14pt;
   }
 
-  .stock-sheet-header p {
+  .stock-print-sheet .stock-sheet-header p {
     color: #111827 !important;
     font-size: 10pt;
   }
 
-  .stock-sheet-table {
+  .stock-print-sheet .stock-sheet-table {
+    display: table !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
     font-size: 9pt;
   }
 
-  .stock-sheet-table thead {
-    display: table-header-group;
+  .stock-print-sheet .stock-sheet-table thead {
+    display: table-header-group !important;
   }
 
-  .stock-sheet-table tr {
+  .stock-print-sheet .stock-sheet-table tbody {
+    display: table-row-group !important;
+  }
+
+  .stock-print-sheet .stock-sheet-table tr {
+    display: table-row !important;
     break-inside: avoid;
     page-break-inside: avoid;
   }
 
-  .stock-sheet-table th,
-  .stock-sheet-table td {
+  .stock-print-sheet .stock-sheet-table th,
+  .stock-print-sheet .stock-sheet-table td {
+    display: table-cell !important;
     border-color: #111827;
     padding: 5px 7px;
   }
 
-  .stock-sheet-table th:nth-child(2),
-  .stock-sheet-table td:nth-child(2) {
+  .stock-print-sheet .stock-sheet-table th:nth-child(2),
+  .stock-print-sheet .stock-sheet-table td:nth-child(2) {
     width: 28mm;
   }
 
-  .stock-sheet-table th:nth-child(3),
-  .stock-sheet-table td:nth-child(3) {
+  .stock-print-sheet .stock-sheet-table th:nth-child(3),
+  .stock-print-sheet .stock-sheet-table td:nth-child(3) {
     width: 42mm;
   }
 
-  .stock-count-cell {
+  .stock-print-sheet .stock-count-cell {
     height: 8mm;
   }
 }
