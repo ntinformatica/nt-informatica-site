@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   allowedStoreOperationalStatuses,
   createAdminInvoiceSignedUrl,
+  displayStoreFiscalStatus,
   formatStoreDateTime,
   formatStoreMoney,
   listStoreOrders,
@@ -42,6 +43,7 @@ const financialTones = {
   expired: "border-slate-500/40 bg-slate-500/10 text-slate-200",
   refunded: "border-purple-300/30 bg-purple-400/10 text-purple-100",
   charged_back: "border-red-400/30 bg-red-500/10 text-red-100",
+  not_applicable: "border-slate-500/40 bg-slate-500/10 text-slate-200",
 };
 
 const operationalTones = {
@@ -193,6 +195,8 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
   const allowedStatuses = allowedStoreOperationalStatuses(order);
   const billing = orderBilling(order);
   const invoice = order.order_invoices?.[0] || null;
+  const fiscalStatus = displayStoreFiscalStatus(order, invoice);
+  const canAttachInvoice = fiscalStatus !== "not_applicable";
   const [invoiceForm, setInvoiceForm] = useState({ invoiceNumber: "", invoiceSeries: "1", accessKey: "", issuedAt: "", xmlFile: null, pdfFile: null });
   const [invoiceMessage, setInvoiceMessage] = useState("");
   const [invoiceSaving, setInvoiceSaving] = useState(false);
@@ -305,7 +309,7 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Dados para emissao fiscal</p>
-            <p className="mt-2 text-sm text-slate-300">Status fiscal: <strong className="text-white">{storeFiscalLabels[invoice?.status === "issued" ? "issued" : order.fiscal_status || "pending"] || order.fiscal_status || "Aguardando emissao"}</strong></p>
+            <p className="mt-2 text-sm text-slate-300">Status fiscal: <strong className="text-white">{storeFiscalLabels[fiscalStatus] || fiscalStatus}</strong></p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => copyText(billing.customer_document || order.customer_document)} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Copiar CPF</button>
@@ -336,13 +340,15 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
                   <button type="button" onClick={() => openInvoice("xml")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Baixar XML</button>
                 </div>
               </>
+            ) : fiscalStatus === "not_applicable" ? (
+              <p>Nao ha emissao fiscal prevista para pedido cancelado, expirado ou recusado.</p>
             ) : (
               <p>Nenhuma nota fiscal anexada ainda.</p>
             )}
           </div>
         </div>
 
-        <form className="mt-4 grid gap-3 rounded-md border border-white/10 bg-slate-950 p-4 md:grid-cols-2" onSubmit={attachInvoice}>
+        {canAttachInvoice ? <form className="mt-4 grid gap-3 rounded-md border border-white/10 bg-slate-950 p-4 md:grid-cols-2" onSubmit={attachInvoice}>
           <label className="text-sm font-bold text-slate-200">Numero da NF-e<input value={invoiceForm.invoiceNumber} onChange={(event) => setInvoiceField("invoiceNumber", event.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-nt-cyan" /></label>
           <label className="text-sm font-bold text-slate-200">Serie<input value={invoiceForm.invoiceSeries} onChange={(event) => setInvoiceField("invoiceSeries", event.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-nt-cyan" /></label>
           <label className="text-sm font-bold text-slate-200 md:col-span-2">Chave de acesso<input value={invoiceForm.accessKey} onChange={(event) => setInvoiceField("accessKey", event.target.value.replace(/\D/g, "").slice(0, 44))} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none focus:border-nt-cyan" inputMode="numeric" /></label>
@@ -353,7 +359,7 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
             <button type="submit" disabled={invoiceSaving || saving} className="min-h-10 rounded-md bg-nt-blue px-4 py-2 text-sm font-black text-white transition hover:bg-nt-cyan disabled:opacity-60">{invoiceSaving ? "Salvando..." : "Salvar nota fiscal"}</button>
             {invoiceMessage ? <p className="text-sm text-slate-300">{invoiceMessage}</p> : null}
           </div>
-        </form>
+        </form> : null}
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -477,8 +483,9 @@ export function StoreOrdersPage() {
     return orders.filter((order) => {
       if (quickFilter.startsWith("financial:") && order.financial_status !== quickFilter.replace("financial:", "")) return false;
       if (quickFilter.startsWith("operational:") && order.operational_status !== quickFilter.replace("operational:", "")) return false;
-      if (quickFilter === "fiscal:paid_pending" && !(order.financial_status === "approved" && (order.fiscal_status || "pending") === "pending")) return false;
-      if (quickFilter.startsWith("fiscal:") && quickFilter !== "fiscal:paid_pending" && (order.fiscal_status || "pending") !== quickFilter.replace("fiscal:", "")) return false;
+      const fiscalStatus = displayStoreFiscalStatus(order, order.order_invoices?.[0] || null);
+      if (quickFilter === "fiscal:paid_pending" && !(order.financial_status === "approved" && order.operational_status !== "cancelled" && fiscalStatus === "pending")) return false;
+      if (quickFilter.startsWith("fiscal:") && quickFilter !== "fiscal:paid_pending" && fiscalStatus !== quickFilter.replace("fiscal:", "")) return false;
       if (filters.startDate && dateOnly(order.created_at) < filters.startDate) return false;
       if (filters.endDate && dateOnly(order.created_at) > filters.endDate) return false;
       if (filters.paymentMethod && order.payment_method !== filters.paymentMethod) return false;
@@ -499,7 +506,7 @@ export function StoreOrdersPage() {
       pending: orders.filter((order) => order.financial_status === "pending").length,
       paid: orders.filter((order) => order.financial_status === "approved").length,
       ready: orders.filter((order) => order.operational_status === "ready_for_pickup").length,
-      fiscalPending: orders.filter((order) => order.financial_status === "approved" && (order.fiscal_status || "pending") === "pending").length,
+      fiscalPending: orders.filter((order) => order.financial_status === "approved" && order.operational_status !== "cancelled" && displayStoreFiscalStatus(order, order.order_invoices?.[0] || null) === "pending").length,
       soldToday: approvedToday.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
       soldMonth: approvedMonth.reduce((sum, order) => sum + Number(order.total_amount || 0), 0),
     };
@@ -616,7 +623,7 @@ export function StoreOrdersPage() {
                   <td>{paymentLabel(order)}</td>
                   <td className="font-black text-nt-cyan">{formatStoreMoney(order.total_amount)}</td>
                   <td>{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}</td>
-                  <td>{statusBadge(order.fiscal_status || "pending", storeFiscalLabels, financialTones)}</td>
+                  <td>{statusBadge(displayStoreFiscalStatus(order, order.order_invoices?.[0] || null), storeFiscalLabels, financialTones)}</td>
                   <td><OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></td>
                   <td>{orderItemCount(order)}</td>
                   <td><button type="button" onClick={() => openOrder(order.id)} className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan"><Eye size={15} /> Abrir</button></td>
@@ -636,7 +643,7 @@ export function StoreOrdersPage() {
                 <button type="button" onClick={() => openOrder(order.id)} className="rounded-md border border-slate-700 px-3 py-2 text-xs font-bold text-slate-100 hover:border-nt-cyan">Abrir</button>
               </div>
               <p className="mt-3 text-sm text-slate-300">{order.customer_name} - {order.customer_phone}</p>
-              <div className="mt-3 flex flex-wrap gap-2">{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}{statusBadge(order.fiscal_status || "pending", storeFiscalLabels, financialTones)}<OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></div>
+              <div className="mt-3 flex flex-wrap gap-2">{statusBadge(order.financial_status, storeFinancialLabels, financialTones)}{statusBadge(displayStoreFiscalStatus(order, order.order_invoices?.[0] || null), storeFiscalLabels, financialTones)}<OperationalStatusSelect order={order} saving={savingStatusId === order.id} onChange={changeStatus} /></div>
               <p className="mt-3 text-sm font-black text-nt-cyan">{formatStoreMoney(order.total_amount)} - {paymentLabel(order)} - {orderItemCount(order)} itens</p>
             </article>
           ))}

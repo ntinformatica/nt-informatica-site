@@ -52,6 +52,7 @@ export const storeFiscalLabels = {
   pending: "Aguardando emissao",
   issued: "Nota emitida",
   cancelled: "Nota cancelada",
+  not_applicable: "Sem emissao fiscal",
   error: "Problema fiscal",
 };
 
@@ -82,6 +83,15 @@ export function paymentLabel(order) {
 
 export function orderItemCount(order) {
   return (order?.store_order_items || []).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+}
+
+export function displayStoreFiscalStatus(order, invoice = null) {
+  if (invoice?.status === "issued") return "issued";
+  if (invoice?.status === "cancelled") return "cancelled";
+  if (invoice?.status === "error") return "error";
+  if (order?.operational_status === "cancelled") return "not_applicable";
+  if (["expired", "cancelled", "rejected", "refunded", "charged_back"].includes(order?.financial_status)) return "not_applicable";
+  return order?.fiscal_status || "pending";
 }
 
 export function orderMatchesSearch(order, term) {

@@ -71,6 +71,7 @@ const fiscalLabels = {
   pending: "Aguardando emissão",
   issued: "Emitida",
   cancelled: "Cancelada",
+  not_applicable: "Sem emissão fiscal",
   error: "Problema fiscal",
 };
 
@@ -163,6 +164,15 @@ function latestPayment(order) {
 
 function paymentStatusLabel(payment, order) {
   return customerFinancialLabels[payment?.status] || customerFinancialLabels[order?.financial_status] || payment?.status || order?.financial_status || "-";
+}
+
+function displayFiscalStatus(order, invoice = null) {
+  if (invoice?.status === "issued") return "issued";
+  if (invoice?.status === "cancelled") return "cancelled";
+  if (invoice?.status === "error") return "error";
+  if (order?.operational_status === "cancelled") return "not_applicable";
+  if (["expired", "cancelled", "rejected", "refunded", "charged_back"].includes(order?.financial_status)) return "not_applicable";
+  return order?.fiscal_status || "pending";
 }
 
 function paymentDetailMessage(detail) {
@@ -450,7 +460,7 @@ function OrdersPanel({ path = "", navigateTo }) {
     const installments = Number(payment?.installments || selected.installments || 1);
     const installmentAmount = Number(payment?.installment_amount || (installments > 1 ? Number(selected.total_amount || 0) / installments : 0));
     const invoice = Array.isArray(selected.order_invoices) ? selected.order_invoices[0] || null : null;
-    const fiscalStatus = invoice?.status === "issued" ? "issued" : selected.fiscal_status || "pending";
+    const fiscalStatus = displayFiscalStatus(selected, invoice);
 
     return (
       <div className="rounded-lg border border-white/10 bg-slate-950 p-5">
@@ -545,6 +555,8 @@ function OrdersPanel({ path = "", navigateTo }) {
                   <button type="button" onClick={() => copyInvoiceAccessKey(invoice.access_key)} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Copiar chave de acesso</button>
                 </div>
               </>
+            ) : fiscalStatus === "not_applicable" ? (
+              <p className="text-slate-400">Este pedido foi cancelado, expirado ou recusado e nao possui emissao fiscal prevista.</p>
             ) : (
               <p className="text-slate-400">A nota fiscal sera disponibilizada aqui apos emissao pela NT Informatica.</p>
             )}
@@ -652,8 +664,8 @@ function OrdersPanel({ path = "", navigateTo }) {
                 <td>{paymentLabel(order.payment_method)}</td>
                 <td>{customerFinancialLabels[order.financial_status] || financialLabels[order.financial_status] || order.financial_status}</td>
                 <td>{customerOperationalLabels[order.operational_status] || operationalLabels[order.operational_status] || order.operational_status}</td>
-                <td>{fiscalLabels[order.fiscal_status] || order.fiscal_status || "Aguardando emissão"}</td>
-                <td><a href={"/minha-conta/pedidos/" + encodeURIComponent(order.id)} onClick={(event) => { event.preventDefault(); openOrderRoute(order.id); }} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan hover:bg-nt-cyan/10">Ver detalhes</a></td>
+                <td>{fiscalLabels[displayFiscalStatus(order)] || order.fiscal_status || "Aguardando emissão"}</td>
+                <td><a href={"/minha-conta/pedidos/" + encodeURIComponent(order.id)} onClick={(event) => { event.preventDefault(); openOrderRoute(order.id); }} className="inline-flex min-h-9 min-w-[104px] items-center justify-center whitespace-nowrap rounded-md border border-nt-cyan/40 px-3 py-2 text-center text-xs font-black leading-none text-nt-cyan transition hover:bg-nt-cyan/10">Ver detalhes</a></td>
               </tr>
             ))}
           </tbody>
