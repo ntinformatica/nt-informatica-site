@@ -406,7 +406,7 @@ const homeCategoryIcons = {
   Headsets: Headphones,
   Gabinetes: PcCase,
   Fontes: PsuIcon,
-  SSDs: HardDrive,
+  Armazenamento: HardDrive,
   "Memórias RAM": MemoryStick,
   "Placas de Vídeo": GpuIcon,
   Processadores: Cpu,
@@ -420,7 +420,7 @@ const homeCategoryIcons = {
   Acessórios: Wrench,
   "Placas-mãe": MotherboardIcon,
   Cadeiras: ChairIcon,
-  "Kit Periféricos": PeripheralKitIcon,
+  "Kits de Periféricos": PeripheralKitIcon,
 };
 
 const whyChooseCards = [

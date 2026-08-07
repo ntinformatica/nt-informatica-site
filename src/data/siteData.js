@@ -119,7 +119,7 @@ export const productCategories = [
   { name: "Headsets", image: "category-assets/headsets.svg", icon: Headphones, description: "Áudio imersivo, microfone e conforto para jogar." },
   { name: "Gabinetes", image: "category-assets/gabinetes.svg", icon: Monitor, description: "Gabinetes com vidro, airflow e visual gamer." },
   { name: "Fontes", image: "category-assets/fontes.svg", icon: ShieldCheck, description: "Fontes para upgrades, PCs gamer e estabilidade." },
-  { name: "SSDs", image: "category-assets/ssds.svg", icon: HardDrive, description: "SSDs SATA e NVMe para mais velocidade." },
+  { name: "Armazenamento", slug: "armazenamento", image: "category-assets/ssds.svg", icon: HardDrive, description: "SSDs SATA, NVMe e armazenamento para mais velocidade." },
   { name: "Memórias RAM", image: "category-assets/memorias.svg", icon: Cpu, description: "Memórias DDR4, DDR5 e upgrades de desempenho." },
   { name: "Placas de Vídeo", image: "category-assets/acessorios.svg", icon: Cpu, description: "GPUs para jogos, edição e upgrades." },
   { name: "Processadores", image: "category-assets/acessorios.svg", icon: Cpu, description: "CPUs para montar, atualizar e ganhar desempenho." },
@@ -133,12 +133,12 @@ export const productCategories = [
   { name: "Acessórios", slug: "acessorios", image: "category-assets/acessorios.svg", icon: Wrench, description: "Adaptadores, suportes, cabos, periféricos e utilidades para seu setup." },
   { name: "Placas-mãe", slug: "placas-mae", image: "category-assets/acessorios.svg", icon: Cpu, description: "Modelos Intel e AMD para upgrades e montagem de computadores." },
   { name: "Cadeiras", slug: "cadeiras", image: "category-assets/acessorios.svg", icon: ShieldCheck, description: "Cadeiras gamer e office para conforto no trabalho e nas partidas." },
-  { name: "Kit Periféricos", slug: "kit-perifericos", image: "category-assets/kits.svg", icon: Keyboard, description: "Kits completos para seu setup" },
+  { name: "Kits de Periféricos", slug: "kits-de-perifericos", image: "category-assets/kits.svg", icon: Keyboard, description: "Kits completos para seu setup" },
 ];
 
 export const products = [
-  { name: "SSD 480GB", category: "SSDs", price: "Consulte", icon: HardDrive, description: "Mais velocidade para PC e notebook." },
-  { name: "SSD NVMe 1TB", category: "SSDs", price: "Consulte", icon: HardDrive, description: "Armazenamento rápido para jogos e programas pesados." },
+  { name: "SSD 480GB", category: "Armazenamento", price: "Consulte", icon: HardDrive, description: "Mais velocidade para PC e notebook." },
+  { name: "SSD NVMe 1TB", category: "Armazenamento", price: "Consulte", icon: HardDrive, description: "Armazenamento rápido para jogos e programas pesados." },
   { name: "Memória RAM DDR4", category: "Memórias RAM", price: "Consulte", icon: Cpu, description: "Upgrade para multitarefa e jogos." },
   { name: "Memória RAM DDR5", category: "Memórias RAM", price: "Consulte", icon: Cpu, description: "Desempenho moderno para plataformas atuais." },
   { name: "Fonte 500W", category: "Fontes", price: "Consulte", icon: ShieldCheck, description: "Energia estável para seu computador." },

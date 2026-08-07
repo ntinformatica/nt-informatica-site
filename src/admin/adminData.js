@@ -6,7 +6,7 @@ export const adminCategories = [
   "Mouses",
   "Headsets",
   "Gabinetes",
-  "SSDs",
+  "Armazenamento",
   "Memórias RAM",
   "Fontes",
   "Controles",

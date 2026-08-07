@@ -6,7 +6,7 @@ let categories = [
   ["Mouses", "Precisão para jogos e produtividade.", "../category-assets/mouses.svg"],
   ["Headsets", "Áudio, microfone e conforto para jogar.", "../category-assets/headsets.svg"],
   ["Gabinetes", "Visual gamer e boa refrigeração.", "../category-assets/gabinetes.svg"],
-  ["SSDs", "Mais velocidade para PC e notebook.", "../category-assets/ssds.svg"],
+  ["Armazenamento", "SSDs, NVMe e armazenamento para mais velocidade.", "../category-assets/ssds.svg"],
   ["Memórias RAM", "Upgrades para desempenho e multitarefa.", "../category-assets/memorias.svg"],
   ["Fontes", "Energia estável para seu computador.", "../category-assets/fontes.svg"],
   ["Controles", "Controles para PC, consoles e games.", "../category-assets/controles.svg"],
@@ -17,7 +17,7 @@ let categories = [
   ["Acessórios", "Adaptadores, suportes, cabos, perifericos e utilidades para seu setup.", "../category-assets/acessorios.svg"],
   ["Placas-mãe", "Modelos Intel e AMD para upgrades e montagem de computadores.", "../category-assets/acessorios.svg"],
   ["Cadeiras", "Cadeiras gamer e office para conforto no trabalho e nas partidas.", "../category-assets/acessorios.svg"],
-  ["Kit Periféricos", "Kits completos para seu setup.", "../category-assets/kits.svg"],
+  ["Kits de Periféricos", "Kits completos para seu setup.", "../category-assets/kits.svg"],
 ];
 
 const requiredCategories = [
@@ -27,7 +27,7 @@ const requiredCategories = [
   ["Headsets", "Audio, microfone e conforto para jogar.", "../category-assets/headsets.svg"],
   ["Gabinetes", "Visual gamer e boa refrigeracao.", "../category-assets/gabinetes.svg"],
   ["Fontes", "Energia estavel para seu computador.", "../category-assets/fontes.svg"],
-  ["SSDs", "Mais velocidade para PC e notebook.", "../category-assets/ssds.svg"],
+  ["Armazenamento", "SSDs, NVMe e armazenamento para mais velocidade.", "../category-assets/ssds.svg"],
   ["Memórias RAM", "Upgrades para desempenho e multitarefa.", "../category-assets/memorias.svg"],
   ["Placas de Vídeo", "Performance grafica para jogos e criacao.", "../category-assets/acessorios.svg"],
   ["Processadores", "CPUs para upgrades e montagens.", "../category-assets/acessorios.svg"],
@@ -41,7 +41,7 @@ const requiredCategories = [
   ["Acessórios", "Adaptadores, suportes, cabos, perifericos e utilidades para seu setup.", "../category-assets/acessorios.svg"],
   ["Placas-mãe", "Modelos Intel e AMD para upgrades e montagem de computadores.", "../category-assets/acessorios.svg"],
   ["Cadeiras", "Cadeiras gamer e office para conforto no trabalho e nas partidas.", "../category-assets/acessorios.svg"],
-  ["Kit Periféricos", "Kits completos para seu setup.", "../category-assets/kits.svg"],
+  ["Kits de Periféricos", "Kits completos para seu setup.", "../category-assets/kits.svg"],
 ];
 
 let products = [
@@ -1609,7 +1609,7 @@ let products = [
   {
     id: "ssd-adata-legend-860-1tb",
     name: "SSD Adata Legend 860 1TB NVMe",
-    category: "SSDs",
+    category: "Armazenamento",
     price: "Consulte",
     cashPrice: "R$ 1.360",
     cashLabel: "à vista com 15% OFF",
@@ -1645,7 +1645,7 @@ let products = [
   {
     id: "ssd-wd-green-sn350-500gb",
     name: "SSD WD Green SN350 500GB NVMe",
-    category: "SSDs",
+    category: "Armazenamento",
     price: "Consulte",
     cashPrice: "R$ 765",
     cashLabel: "à vista com 15% OFF",
@@ -1682,7 +1682,7 @@ let products = [
   {
     id: "ssd-rise-mode-gamer-line-120gb",
     name: "SSD Rise Mode Gamer Line 120GB",
-    category: "SSDs",
+    category: "Armazenamento",
     price: "Consulte",
     cashPrice: "R$ 170",
     cashLabel: "à vista com 15% OFF",
@@ -1718,7 +1718,7 @@ let products = [
   {
     id: "ssd-rise-mode-gamer-line-240gb",
     name: "SSD Rise Mode Gamer Line 240GB",
-    category: "SSDs",
+    category: "Armazenamento",
     price: "Consulte",
     cashPrice: "R$ 340",
     cashLabel: "à vista com 15% OFF",
@@ -2424,30 +2424,43 @@ function categoryKey(value) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+const categoryAliasKeys = new Map([
+  ["resfriadores-de-ar", "air-coolers"],
+  ["fones-de-ouvido", "headsets"],
+  ["kit-perifericos", "kits-de-perifericos"],
+  ["ratos", "mouses"],
+  ["ssds", "armazenamento"],
+]);
+
+function canonicalCategoryKey(value) {
+  const key = categoryKey(value);
+  return categoryAliasKeys.get(key) || key;
+}
+
 function categorySlug(value) {
-  return categoryKey(value);
+  return canonicalCategoryKey(value);
 }
 
 function findCategoryByParam(value) {
   if (!value) return null;
-  const key = categoryKey(value);
-  return categories.find(([name]) => categoryKey(name) === key) || null;
+  const key = canonicalCategoryKey(value);
+  return categories.find(([name]) => canonicalCategoryKey(name) === key) || null;
 }
 
 function ensureCatalogCategories() {
   const merged = new Map();
   requiredCategories.forEach((category) => {
-    merged.set(categoryKey(category[0]), category);
+    merged.set(canonicalCategoryKey(category[0]), category);
   });
   categories.forEach((category) => {
-    const key = categoryKey(category[0]);
+    const key = canonicalCategoryKey(category[0]);
     if (!merged.has(key)) merged.set(key, category);
   });
   categories = Array.from(merged.values());
 }
 
 function productMatchesCategory(product, category) {
-  return categoryKey(product.category) === categoryKey(category);
+  return canonicalCategoryKey(product.category) === canonicalCategoryKey(category);
 }
 
 function productsInCategory(category) {
