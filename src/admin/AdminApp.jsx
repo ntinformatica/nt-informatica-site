@@ -102,10 +102,13 @@ import {
 import { ServiceOrderViewPage } from "./pages/service-orders/ServiceOrderViewPage";
 import { StoreOrdersPage } from "./pages/store-orders/StoreOrdersPage";
 import {
+  configureBlingStockDeposit,
   createProduct,
   deleteProduct,
+  listBlingDeposits,
   listProducts,
   sendProductToBling,
+  syncProductStockToBling,
   updateProduct,
   updateProductFeatured,
   updateProductStatus,
@@ -1022,14 +1025,42 @@ const blingProductSyncLabels = {
   error: "Erro ao enviar ao Bling",
 };
 
-function ProductFormPage({ mode, productId, products, categories, onSave, onStockMove, onSendBling, error }) {
+const blingStockSyncLabels = {
+  not_synced: "Nao sincronizado",
+  syncing: "Sincronizando",
+  synced: "Estoque sincronizado",
+  error: "Erro ao sincronizar estoque",
+};
+
+function ProductFormPage({
+  mode,
+  productId,
+  products,
+  categories,
+  onSave,
+  onStockMove,
+  onSendBling,
+  onListBlingDeposits,
+  onConfigureBlingStockDeposit,
+  onSyncBlingStock,
+  error,
+}) {
   const existingProduct = products.find((product) => product.id === productId);
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
   const [stockModalOpen, setStockModalOpen] = useState(false);
   const [stockMovements, setStockMovements] = useState([]);
+  const [blingDeposits, setBlingDeposits] = useState([]);
+  const [blingConfiguredDeposit, setBlingConfiguredDeposit] = useState(null);
+  const [blingSelectedDepositId, setBlingSelectedDepositId] = useState("");
+  const [blingStockStatus, setBlingStockStatus] = useState("");
+  const [blingStockLoading, setBlingStockLoading] = useState(false);
   const installmentBase = form.price || form.promoPrice;
   const cashPrice = calculateCashPrice(form.price);
+  const stockMetadata = existingProduct?.blingStockSyncMetadata || {};
+  const configuredDepositName = blingConfiguredDeposit?.nome || stockMetadata.depositName || "";
+  const configuredDepositId = blingConfiguredDeposit?.id || stockMetadata.depositId || "";
+  const lastBlingStock = stockMetadata.blingStockAfter ?? stockMetadata.blingStockBefore ?? "";
 
   useEffect(() => {
     setForm(normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
@@ -1104,6 +1135,51 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
     const confirmed = window.confirm("Este produto sera criado ou vinculado no Bling pelo SKU. O estoque nao sera alterado nesta etapa. Deseja continuar?");
     if (!confirmed) return;
     await onSendBling(existingProduct);
+  }
+
+  async function handleLoadBlingDeposits() {
+    setBlingStockStatus("");
+    setBlingStockLoading(true);
+    try {
+      const result = await onListBlingDeposits();
+      const deposits = Array.isArray(result?.deposits) ? result.deposits : [];
+      const configured = result?.configured_deposit || null;
+      setBlingDeposits(deposits);
+      setBlingConfiguredDeposit(configured);
+      setBlingSelectedDepositId(configured?.id || deposits[0]?.id || "");
+      setBlingStockStatus(deposits.length ? "Depositos carregados." : "Nenhum deposito retornado pelo Bling.");
+    } catch (loadError) {
+      setBlingStockStatus(loadError.message || "Nao foi possivel carregar depositos Bling.");
+    } finally {
+      setBlingStockLoading(false);
+    }
+  }
+
+  async function handleConfigureBlingDeposit() {
+    const deposit = blingDeposits.find((item) => String(item.id) === String(blingSelectedDepositId));
+    if (!deposit?.id) {
+      setBlingStockStatus("Selecione um deposito Bling.");
+      return;
+    }
+
+    setBlingStockStatus("");
+    setBlingStockLoading(true);
+    try {
+      const result = await onConfigureBlingStockDeposit(deposit.id, deposit.nome);
+      setBlingConfiguredDeposit(result?.configured_deposit || { id: deposit.id, nome: deposit.nome });
+      setBlingStockStatus("Deposito principal salvo.");
+    } catch (saveError) {
+      setBlingStockStatus(saveError.message || "Nao foi possivel salvar o deposito Bling.");
+    } finally {
+      setBlingStockLoading(false);
+    }
+  }
+
+  async function handleSyncBlingStock() {
+    if (!existingProduct?.id) return;
+    const confirmed = window.confirm("O estoque do Bling sera ajustado para refletir o estoque atual do NT Admin. Deseja continuar?");
+    if (!confirmed) return;
+    await onSyncBlingStock(existingProduct);
   }
 
   if (isEdit && !existingProduct) {
@@ -1198,7 +1274,7 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
               {existingProduct.blingProductId ? <p className="mt-2 text-sm text-slate-300">ID Bling: <strong className="text-white">{existingProduct.blingProductId}</strong></p> : null}
               {existingProduct.blingSyncedAt ? <p className="text-sm text-slate-300">Ultima sincronizacao: <strong className="text-white">{formatDateTimeLabel(existingProduct.blingSyncedAt)}</strong></p> : null}
               {existingProduct.blingSyncError ? <p className="mt-2 text-sm text-red-100">{existingProduct.blingSyncError}</p> : null}
-              <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria ou vincula somente o cadastro do produto no Bling pelo SKU. O estoque nao sera alterado nesta etapa.</p>
+              <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria ou vincula somente o cadastro do produto no Bling pelo SKU.</p>
             </div>
             {existingProduct.blingSyncStatus === "synced" || existingProduct.blingProductId ? (
               <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-lime-300/30 bg-lime-300/10 px-4 py-2 text-sm font-black text-lime-200">
@@ -1216,6 +1292,52 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
               </AdminButton>
             )}
           </div>
+          {existingProduct.blingProductId ? (
+            <div className="mt-5 rounded-lg border border-slate-700 bg-slate-950/70 p-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h3 className="text-base font-black text-white">Estoque Bling</h3>
+                  <div className="mt-3 grid gap-2 text-sm text-slate-300 sm:grid-cols-2">
+                    <p>Estoque NT: <strong className="text-white">{existingProduct.stock ?? 0}</strong></p>
+                    <p>Estoque Bling: <strong className="text-white">{lastBlingStock === "" ? "Nao consultado" : lastBlingStock}</strong></p>
+                    <p>Deposito: <strong className="text-white">{configuredDepositName || configuredDepositId || "Nao configurado"}</strong></p>
+                    <p>Status: <strong className="text-white">{blingStockSyncLabels[existingProduct.blingStockSyncStatus] || blingStockSyncLabels.not_synced}</strong></p>
+                  </div>
+                  {existingProduct.blingStockSyncedAt ? <p className="mt-2 text-sm text-slate-300">Ultima sincronizacao de estoque: <strong className="text-white">{formatDateTimeLabel(existingProduct.blingStockSyncedAt)}</strong></p> : null}
+                  {existingProduct.blingStockSyncError ? <p className="mt-2 text-sm text-red-100">{existingProduct.blingStockSyncError}</p> : null}
+                  {blingStockStatus ? <p className="mt-2 text-sm text-slate-400">{blingStockStatus}</p> : null}
+                </div>
+                <div className="flex flex-col gap-2 sm:min-w-72">
+                  <AdminButton type="button" variant="secondary" icon={Search} disabled={blingStockLoading} onClick={handleLoadBlingDeposits}>
+                    {blingStockLoading ? "Carregando..." : "Carregar depositos"}
+                  </AdminButton>
+                  {blingDeposits.length ? (
+                    <>
+                      <select
+                        className="min-h-10 rounded-md border border-slate-700 bg-slate-900 px-3 text-sm font-bold text-white outline-none focus:border-nt-cyan"
+                        value={blingSelectedDepositId}
+                        onChange={(event) => setBlingSelectedDepositId(event.target.value)}
+                      >
+                        {blingDeposits.map((deposit) => (
+                          <option key={deposit.id} value={deposit.id}>{deposit.nome || `Deposito ${deposit.id}`}</option>
+                        ))}
+                      </select>
+                      <AdminButton type="button" variant="secondary" icon={CheckCircle2} disabled={blingStockLoading} onClick={handleConfigureBlingDeposit}>Salvar deposito principal</AdminButton>
+                    </>
+                  ) : null}
+                  <AdminButton
+                    type="button"
+                    variant="secondary"
+                    icon={UploadCloud}
+                    disabled={existingProduct.blingStockSyncStatus === "syncing"}
+                    onClick={handleSyncBlingStock}
+                  >
+                    {existingProduct.blingStockSyncStatus === "syncing" ? "Sincronizando..." : "Sincronizar estoque"}
+                  </AdminButton>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -4555,6 +4677,25 @@ export function AdminApp() {
     }, "Produto enviado ao Bling com sucesso.");
   }
 
+  async function loadBlingStockDeposits() {
+    setError("");
+    return listBlingDeposits();
+  }
+
+  async function saveBlingStockDeposit(depositId, depositName) {
+    setError("");
+    const result = await configureBlingStockDeposit(depositId, depositName);
+    await loadAdminData();
+    setNotice("Deposito principal do Bling salvo.");
+    return result;
+  }
+
+  async function syncProductBlingStock(product) {
+    return runAction(async () => {
+      await syncProductStockToBling(product.id);
+    }, "Estoque sincronizado com o Bling.");
+  }
+
   async function moveProductStock(product, movement) {
     return runAction(async () => createStockMovement({ product, ...movement }), "Estoque atualizado com sucesso.");
   }
@@ -4878,7 +5019,7 @@ export function AdminApp() {
         />
       ) : null}
       {!loading && info.page === "stockSheet" ? <StockSheetPage products={products} categories={categories} /> : null}
-      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} onSendBling={syncProductBling} error={error} /> : null}
+      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} onSendBling={syncProductBling} onListBlingDeposits={loadBlingStockDeposits} onConfigureBlingStockDeposit={saveBlingStockDeposit} onSyncBlingStock={syncProductBlingStock} error={error} /> : null}
       {!loading && info.page === "serviceOrders" ? <ServiceOrdersManagerPage /> : null}
       {!loading && info.page === "serviceOrderView" ? <ServiceOrderViewPage serviceOrderId={info.id} /> : null}
       {!loading && info.page === "serviceOrderForm" && info.mode === "new" ? <NewServiceOrderManagerPage /> : null}

@@ -133,6 +133,10 @@ function fromSupabase(row, categories = [], variations = []) {
     blingSyncStatus: row.bling_sync_status || "not_sent",
     blingSyncError: row.bling_sync_error || "",
     blingSyncMetadata: row.bling_sync_metadata || {},
+    blingStockSyncedAt: row.bling_stock_synced_at || "",
+    blingStockSyncStatus: row.bling_stock_sync_status || "not_synced",
+    blingStockSyncError: row.bling_stock_sync_error || "",
+    blingStockSyncMetadata: row.bling_stock_sync_metadata || {},
     updatedAt: row.updated_at || row.created_at,
   };
 }
@@ -420,6 +424,32 @@ export async function updateProductFeatured(id, featured, categories = []) {
 export async function sendProductToBling(productId) {
   if (!productId) throw new Error("Produto invalido.");
   return supabaseFunction("bling-sync-product", {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId }),
+  });
+}
+
+export async function listBlingDeposits() {
+  return supabaseFunction("bling-list-deposits", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function configureBlingStockDeposit(depositId, depositName = "") {
+  if (!depositId) throw new Error("Deposito Bling invalido.");
+  return supabaseFunction("bling-configure-stock-deposit", {
+    method: "POST",
+    body: JSON.stringify({
+      deposit_id: String(depositId),
+      deposit_name: depositName,
+    }),
+  });
+}
+
+export async function syncProductStockToBling(productId) {
+  if (!productId) throw new Error("Produto invalido.");
+  return supabaseFunction("bling-sync-stock", {
     method: "POST",
     body: JSON.stringify({ product_id: productId }),
   });
