@@ -6,3 +6,6 @@ verify_jwt = false
 
 [functions.expire-store-orders]
 verify_jwt = false
+
+[functions.bling-oauth-callback]
+verify_jwt = false

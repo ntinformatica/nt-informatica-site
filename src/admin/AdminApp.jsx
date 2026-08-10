@@ -39,6 +39,7 @@ import {
   storagePathFromPublicUrl,
   supabase,
   supabaseDiagnostics,
+  supabaseFunction,
   supabaseRequest,
   uploadStorageFile,
 } from "../lib/supabase";
@@ -3907,10 +3908,176 @@ function ArenaPage({
   );
 }
 
+function blingStatusLabel(status) {
+  const labels = {
+    active: "Bling conectado",
+    reauthorization_required: "Reconexao necessaria",
+    revoked: "Conexao revogada",
+    error: "Erro na conexao",
+    not_connected: "Nao conectado",
+  };
+  return labels[status] || status || "Nao conectado";
+}
+
+function blingErrorLabel(reason) {
+  const labels = {
+    access_denied: "Autorizacao negada no Bling.",
+    invalid_state: "Sessao de conexao expirada. Inicie a conexao novamente.",
+    missing_code: "O Bling nao retornou o codigo de autorizacao.",
+    token_exchange_failed: "Nao foi possivel concluir a conexao com o Bling.",
+    internal_error: "Erro interno ao concluir a conexao com o Bling.",
+  };
+  return labels[reason] || "Nao foi possivel conectar o Bling.";
+}
+
+function BlingIntegrationCard() {
+  const [status, setStatus] = useState(null);
+  const [loadingStatus, setLoadingStatus] = useState(true);
+  const [connecting, setConnecting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function loadStatus() {
+    if (!isSupabaseConfigured) {
+      setStatus({ connected: false, status: "not_connected", scopes: [] });
+      setLoadingStatus(false);
+      return;
+    }
+
+    setLoadingStatus(true);
+    setError("");
+    try {
+      const payload = await supabaseFunction("bling-connection-status", { method: "GET" });
+      setStatus(payload);
+    } catch (statusError) {
+      console.error(statusError);
+      setError(statusError?.message || "Nao foi possivel consultar o status do Bling.");
+      setStatus(null);
+    } finally {
+      setLoadingStatus(false);
+    }
+  }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const blingResult = params.get("bling");
+    const reason = params.get("reason");
+
+    if (blingResult === "connected") {
+      setMessage("Bling conectado com sucesso.");
+    } else if (blingResult === "error") {
+      setError(blingErrorLabel(reason));
+    }
+
+    if (blingResult) {
+      params.delete("bling");
+      params.delete("reason");
+      const query = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+    }
+
+    loadStatus();
+  }, []);
+
+  async function connectBling() {
+    setConnecting(true);
+    setMessage("");
+    setError("");
+
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (!data?.session?.access_token) {
+        throw new Error("Sessao expirada. Entre novamente no painel.");
+      }
+
+      const payload = await supabaseFunction("bling-oauth-start", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+
+      if (!payload?.authorization_url) {
+        throw new Error("O Bling nao retornou a URL de autorizacao.");
+      }
+
+      window.location.assign(payload.authorization_url);
+    } catch (connectError) {
+      console.error(connectError);
+      setError(connectError?.message || "Nao foi possivel iniciar a conexao com o Bling.");
+      setConnecting(false);
+    }
+  }
+
+  const normalizedStatus = status?.status || "not_connected";
+  const connected = status?.connected || normalizedStatus === "active";
+  const buttonLabel = connected ? "Reconectar Bling" : "Conectar Bling";
+  const scopes = Array.isArray(status?.scopes) ? status.scopes : [];
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">Integracao</p>
+          <h3 className="mt-1 text-xl font-black text-white">Bling ERP</h3>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            Integracao com o Bling para produtos, estoque, clientes, pedidos e documentos fiscais.
+          </p>
+        </div>
+        <span className={`inline-flex w-fit rounded-full border px-3 py-1 text-xs font-bold ${
+          connected
+            ? "border-lime-300/30 bg-lime-400/10 text-lime-200"
+            : normalizedStatus === "not_connected"
+              ? "border-slate-500/40 bg-slate-500/10 text-slate-300"
+              : "border-amber-300/30 bg-amber-400/10 text-amber-200"
+        }`}>
+          {loadingStatus ? "Consultando..." : blingStatusLabel(normalizedStatus)}
+        </span>
+      </div>
+
+      {message ? (
+        <p className="mt-4 rounded-md border border-lime-300/30 bg-lime-400/10 px-3 py-2 text-sm font-bold text-lime-100">{message}</p>
+      ) : null}
+      {error ? (
+        <p className="mt-4 rounded-md border border-red-300/30 bg-red-500/10 px-3 py-2 text-sm font-bold text-red-100">{error}</p>
+      ) : null}
+
+      <div className="mt-5 grid gap-3 text-sm text-slate-300 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-md border border-white/10 bg-black/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Status</p>
+          <p className="mt-1 font-bold text-white">{loadingStatus ? "Consultando..." : blingStatusLabel(normalizedStatus)}</p>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Conectado em</p>
+          <p className="mt-1 font-bold text-white">{formatDateTimeLabel(status?.connected_at)}</p>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Ultima renovacao</p>
+          <p className="mt-1 font-bold text-white">{formatDateTimeLabel(status?.last_refreshed_at)}</p>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/20 p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Escopos</p>
+          <p className="mt-1 break-words font-bold text-white">{scopes.length ? scopes.join(", ") : "-"}</p>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <AdminButton type="button" icon={CheckCircle2} onClick={connectBling} disabled={!isSupabaseConfigured || connecting}>
+          {connecting ? "Abrindo Bling..." : buttonLabel}
+        </AdminButton>
+        <AdminButton type="button" variant="secondary" onClick={loadStatus} disabled={!isSupabaseConfigured || loadingStatus}>
+          Atualizar status
+        </AdminButton>
+      </div>
+    </section>
+  );
+}
+
 function SettingsPage() {
   return (
     <section className="glass rounded-lg p-6">
       <h2 className="text-2xl font-black">Configurações</h2>
+      <div className="mt-6">
+        <BlingIntegrationCard />
+      </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <TextField label="Nome da empresa" value={businessName} onChange={() => {}} readOnly />
         <TextField label="URL do site" value="https://nt-informatica-site.vercel.app" onChange={() => {}} readOnly />
