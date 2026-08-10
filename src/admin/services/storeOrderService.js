@@ -1,4 +1,4 @@
-import { createStorageSignedUrl, supabaseRequest, uploadPrivateStorageFile } from "../../lib/supabase";
+import { createStorageSignedUrl, supabaseFunction, supabaseRequest, uploadPrivateStorageFile } from "../../lib/supabase";
 
 const orderSelect = [
   "*",
@@ -206,6 +206,14 @@ export async function updateStoreOrderInternalNotes(orderId, notes) {
     }),
   });
   return updated;
+}
+
+export async function sendStoreOrderToBling(orderId) {
+  if (!orderId) throw new Error("Pedido invalido.");
+  return supabaseFunction("bling-create-order", {
+    method: "POST",
+    body: JSON.stringify({ order_id: orderId }),
+  });
 }
 
 function invoiceFilePath(order, kind, file) {

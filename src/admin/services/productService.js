@@ -1,4 +1,4 @@
-import { isSupabaseConfigured, supabaseRequest } from "../../lib/supabase";
+import { isSupabaseConfigured, supabaseFunction, supabaseRequest } from "../../lib/supabase";
 import { adminStorageKey, initialAdminProducts } from "../adminData";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
 
@@ -128,6 +128,11 @@ function fromSupabase(row, categories = [], variations = []) {
     sku: row.sku || "",
     warranty: row.warranty || "",
     internalNotes: row.internal_notes || "",
+    blingProductId: row.bling_product_id || "",
+    blingSyncedAt: row.bling_synced_at || "",
+    blingSyncStatus: row.bling_sync_status || "not_sent",
+    blingSyncError: row.bling_sync_error || "",
+    blingSyncMetadata: row.bling_sync_metadata || {},
     updatedAt: row.updated_at || row.created_at,
   };
 }
@@ -410,4 +415,12 @@ export async function updateProductFeatured(id, featured, categories = []) {
   const product = readLocalProducts(categories).find((item) => item.id === id);
   if (!product) return null;
   return updateProduct(id, { ...product, featured }, categories);
+}
+
+export async function sendProductToBling(productId) {
+  if (!productId) throw new Error("Produto invalido.");
+  return supabaseFunction("bling-sync-product", {
+    method: "POST",
+    body: JSON.stringify({ product_id: productId }),
+  });
 }

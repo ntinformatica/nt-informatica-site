@@ -11,6 +11,7 @@ import {
   orderMatchesSearch,
   paymentLabel,
   saveStoreOrderInvoice,
+  sendStoreOrderToBling,
   storeFiscalLabels,
   storeFinancialLabels,
   storeOperationalFlow,
@@ -190,13 +191,14 @@ async function copyText(value) {
   await navigator.clipboard?.writeText(String(value || ""));
 }
 
-function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, onInvoiceSaved }) {
+function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, onInvoiceSaved, onSendBling, blingSaving = false }) {
   const payment = orderPayment(order);
   const allowedStatuses = allowedStoreOperationalStatuses(order);
   const billing = orderBilling(order);
   const invoice = order.order_invoices?.[0] || null;
   const fiscalStatus = displayStoreFiscalStatus(order, invoice);
   const canAttachInvoice = fiscalStatus !== "not_applicable";
+  const blingLinked = Boolean(order.bling_order_id);
   const [invoiceForm, setInvoiceForm] = useState({ invoiceNumber: "", invoiceSeries: "1", accessKey: "", issuedAt: "", xmlFile: null, pdfFile: null });
   const [invoiceMessage, setInvoiceMessage] = useState("");
   const [invoiceSaving, setInvoiceSaving] = useState(false);
@@ -306,6 +308,32 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
       </div>
 
       <div className="mt-6 rounded-lg border border-white/10 bg-white/5 p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Bling ERP</p>
+            <p className="mt-2 text-sm text-slate-300">
+              Status: <strong className="text-white">{blingLinked ? "Enviado ao Bling" : order.bling_sync_status === "syncing" ? "Enviando ao Bling" : "Nao enviado ao Bling"}</strong>
+            </p>
+            {order.bling_order_id ? <p className="mt-2 text-sm text-slate-300">ID Bling: <strong className="text-white">{order.bling_order_id}</strong></p> : null}
+            {order.bling_order_number ? <p className="text-sm text-slate-300">Numero Bling: <strong className="text-white">{order.bling_order_number}</strong></p> : null}
+            {order.bling_synced_at ? <p className="text-sm text-slate-300">Enviado em: <strong className="text-white">{formatStoreDateTime(order.bling_synced_at)}</strong></p> : null}
+            {order.bling_sync_error ? <p className="mt-2 text-sm text-red-100">{order.bling_sync_error}</p> : null}
+            <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria apenas o pedido de venda no Bling. Nenhuma nota fiscal sera emitida automaticamente.</p>
+          </div>
+          {!blingLinked ? (
+            <button
+              type="button"
+              disabled={saving || blingSaving || order.bling_sync_status === "syncing"}
+              onClick={() => onSendBling(order)}
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-nt-cyan/40 bg-nt-cyan/10 px-4 py-2 text-sm font-black text-nt-cyan transition hover:bg-nt-cyan/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {blingSaving ? "Enviando..." : "Enviar ao Bling"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-white/10 bg-white/5 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Dados para emissao fiscal</p>
@@ -404,6 +432,7 @@ export function StoreOrdersPage() {
   const [filters, setFilters] = useState({ startDate: "", endDate: "", paymentMethod: "", customer: "", orderNumber: "", document: "", phone: "", search: "" });
   const [savingNotes, setSavingNotes] = useState(false);
   const [savingStatusId, setSavingStatusId] = useState("");
+  const [blingSavingId, setBlingSavingId] = useState("");
   const detailsRef = useRef(null);
   const pendingScrollOrderIdRef = useRef("");
   const selectedOrder = orders.find((order) => order.id === selectedId) || null;
@@ -453,6 +482,27 @@ export function StoreOrdersPage() {
           }
         : order
     )));
+  }
+
+  async function sendBling(order) {
+    if (!order?.id) return;
+    const confirmed = window.confirm("Este pedido sera criado no Bling. Nenhuma nota fiscal sera emitida automaticamente nesta etapa. Deseja continuar?");
+    if (!confirmed) return;
+
+    setBlingSavingId(order.id);
+    setError("");
+    setNotice("");
+    try {
+      const result = await sendStoreOrderToBling(order.id);
+      if (result?.order) mergeUpdatedOrder(result.order);
+      setNotice(result?.already_linked ? "Pedido ja estava vinculado ao Bling." : "Pedido enviado ao Bling com sucesso.");
+    } catch (blingError) {
+      console.error(blingError);
+      setError(blingError?.message || "Nao foi possivel enviar o pedido ao Bling.");
+      await load();
+    } finally {
+      setBlingSavingId("");
+    }
   }
 
   function mergeInvoice(orderId, invoice) {
@@ -660,6 +710,8 @@ export function StoreOrdersPage() {
             onStatus={(status) => changeStatus(selectedOrder, status)}
             onSaveNotes={saveNotes}
             onInvoiceSaved={mergeInvoice}
+            onSendBling={sendBling}
+            blingSaving={blingSavingId === selectedOrder.id}
           />
         </div>
       ) : null}

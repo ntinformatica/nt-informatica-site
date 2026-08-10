@@ -105,6 +105,7 @@ import {
   createProduct,
   deleteProduct,
   listProducts,
+  sendProductToBling,
   updateProduct,
   updateProductFeatured,
   updateProductStatus,
@@ -1014,7 +1015,14 @@ function StockSheetPage({ products, categories }) {
   );
 }
 
-function ProductFormPage({ mode, productId, products, categories, onSave, onStockMove, error }) {
+const blingProductSyncLabels = {
+  not_sent: "Nao enviado ao Bling",
+  syncing: "Enviando ao Bling",
+  synced: "Produto vinculado ao Bling",
+  error: "Erro ao enviar ao Bling",
+};
+
+function ProductFormPage({ mode, productId, products, categories, onSave, onStockMove, onSendBling, error }) {
   const existingProduct = products.find((product) => product.id === productId);
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
@@ -1089,6 +1097,13 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
     event.preventDefault();
     const saved = await onSave(isEdit ? existingProduct.id : null, form);
     if (saved) window.location.href = "/admin/produtos";
+  }
+
+  async function handleSendBling() {
+    if (!existingProduct?.id) return;
+    const confirmed = window.confirm("Este produto sera criado ou vinculado no Bling pelo SKU. O estoque nao sera alterado nesta etapa. Deseja continuar?");
+    if (!confirmed) return;
+    await onSendBling(existingProduct);
   }
 
   if (isEdit && !existingProduct) {
@@ -1171,6 +1186,38 @@ function ProductFormPage({ mode, productId, products, categories, onSave, onStoc
           {!form.variations.length ? <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">Nenhuma variação cadastrada para este produto.</p> : null}
         </div>
       </section>
+
+      {isEdit ? (
+        <section className="rounded-lg border border-white/10 bg-white/5 p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-black">Bling ERP</h2>
+              <p className="mt-2 text-sm text-slate-300">
+                Status: <strong className="text-white">{blingProductSyncLabels[existingProduct.blingSyncStatus] || blingProductSyncLabels.not_sent}</strong>
+              </p>
+              {existingProduct.blingProductId ? <p className="mt-2 text-sm text-slate-300">ID Bling: <strong className="text-white">{existingProduct.blingProductId}</strong></p> : null}
+              {existingProduct.blingSyncedAt ? <p className="text-sm text-slate-300">Ultima sincronizacao: <strong className="text-white">{formatDateTimeLabel(existingProduct.blingSyncedAt)}</strong></p> : null}
+              {existingProduct.blingSyncError ? <p className="mt-2 text-sm text-red-100">{existingProduct.blingSyncError}</p> : null}
+              <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria ou vincula somente o cadastro do produto no Bling pelo SKU. O estoque nao sera alterado nesta etapa.</p>
+            </div>
+            {existingProduct.blingSyncStatus === "synced" || existingProduct.blingProductId ? (
+              <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-lime-300/30 bg-lime-300/10 px-4 py-2 text-sm font-black text-lime-200">
+                Produto vinculado ao Bling
+              </span>
+            ) : (
+              <AdminButton
+                type="button"
+                variant="secondary"
+                icon={UploadCloud}
+                disabled={existingProduct.blingSyncStatus === "syncing"}
+                onClick={handleSendBling}
+              >
+                {existingProduct.blingSyncStatus === "syncing" ? "Enviando..." : "Enviar ao Bling"}
+              </AdminButton>
+            )}
+          </div>
+        </section>
+      ) : null}
 
       {isEdit ? (
         <section className="rounded-lg border border-white/10 bg-white/5 p-5">
@@ -4499,6 +4546,15 @@ export function AdminApp() {
     return runAction(async () => updateProductFeatured(product.id, featured, categories), "Destaque atualizado.");
   }
 
+  async function syncProductBling(product) {
+    return runAction(async () => {
+      const result = await sendProductToBling(product.id);
+      if (result?.already_linked || result?.linked_existing) {
+        setNotice("Produto vinculado ao Bling pelo SKU.");
+      }
+    }, "Produto enviado ao Bling com sucesso.");
+  }
+
   async function moveProductStock(product, movement) {
     return runAction(async () => createStockMovement({ product, ...movement }), "Estoque atualizado com sucesso.");
   }
@@ -4822,7 +4878,7 @@ export function AdminApp() {
         />
       ) : null}
       {!loading && info.page === "stockSheet" ? <StockSheetPage products={products} categories={categories} /> : null}
-      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} error={error} /> : null}
+      {!loading && info.page === "productForm" ? <ProductFormPage mode={info.mode} productId={info.id} products={products} categories={categories} onSave={saveProduct} onStockMove={moveProductStock} onSendBling={syncProductBling} error={error} /> : null}
       {!loading && info.page === "serviceOrders" ? <ServiceOrdersManagerPage /> : null}
       {!loading && info.page === "serviceOrderView" ? <ServiceOrderViewPage serviceOrderId={info.id} /> : null}
       {!loading && info.page === "serviceOrderForm" && info.mode === "new" ? <NewServiceOrderManagerPage /> : null}

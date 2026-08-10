@@ -1,0 +1,711 @@
+import {
+  BlingHttpError,
+} from "../_shared/bling.ts";
+import {
+  accessTokenForBlingConnection,
+  blingRequestWithTokenRefresh,
+  loadActiveBlingConnection,
+  type BlingAccessContext,
+} from "../_shared/blingConnection.ts";
+import { handleCors } from "../_shared/cors.ts";
+import { fail, ok } from "../_shared/responses.ts";
+import { getSingle, supabaseRest } from "../_shared/supabaseAdmin.ts";
+
+type JsonObject = Record<string, unknown>;
+
+type SupabaseAuthUser = {
+  id?: string;
+  email?: string;
+};
+
+type StoreOrder = {
+  id: string;
+  order_number: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone: string;
+  customer_document: string;
+  financial_status: string;
+  operational_status: string;
+  created_at?: string | null;
+  paid_at?: string | null;
+  subtotal_amount: number | string;
+  discount_amount: number | string;
+  total_amount: number | string;
+  payment_method: string;
+  installments?: number | null;
+  bling_order_id?: string | null;
+  bling_order_number?: string | null;
+  bling_synced_at?: string | null;
+  bling_sync_status?: string | null;
+  bling_sync_metadata?: JsonObject | null;
+  store_order_items?: StoreOrderItem[];
+  order_billing_snapshots?: BillingSnapshot[];
+};
+
+type StoreOrderItem = {
+  id: string;
+  item_type: string;
+  sku: string;
+  internal_code: string;
+  product_name: string;
+  variation_name: string;
+  quantity: number | string;
+  final_unit_price: number | string;
+  subtotal_amount: number | string;
+};
+
+type BillingSnapshot = {
+  customer_name?: string;
+  customer_document?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  postal_code?: string;
+  street?: string;
+  number?: string;
+  complement?: string;
+  district?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+};
+
+type BlingProduct = {
+  id?: number | string | null;
+  codigo?: string | null;
+  nome?: string | null;
+};
+
+const SYNC_LOCK_STALE_MS = 10 * 60 * 1000;
+const STORE_ORDER_SELECT = [
+  "*",
+  "store_order_items(*)",
+  "order_billing_snapshots(*)",
+].join(",");
+
+function env(name: string) {
+  const value = Deno.env.get(name);
+  if (!value) throw new Error(`Variavel ${name} nao configurada.`);
+  return value;
+}
+
+function supabaseUrl() {
+  return env("SUPABASE_URL").replace(/\/+$/, "");
+}
+
+function serviceRoleKey() {
+  return env("SUPABASE_SERVICE_ROLE_KEY");
+}
+
+function bearerToken(request: Request) {
+  return (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+}
+
+function isObject(value: unknown): value is JsonObject {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cleanText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function cleanDigits(value: unknown) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function money(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return Math.round(parsed * 100) / 100;
+}
+
+function isUuid(value: unknown) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cleanText(value));
+}
+
+function dateOnly(value: unknown) {
+  const parsed = value ? new Date(String(value)) : new Date();
+  const date = Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  return date.toISOString().slice(0, 10);
+}
+
+function maskDocument(value: unknown) {
+  const digits = cleanDigits(value);
+  if (!digits) return "";
+  return `${"*".repeat(Math.max(0, digits.length - 4))}${digits.slice(-4)}`;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function isStaleSyncMetadata(metadata: unknown) {
+  if (!isObject(metadata)) return false;
+  const startedAt = cleanText(metadata.syncStartedAt);
+  if (!startedAt) return false;
+  const timestamp = new Date(startedAt).getTime();
+  return Number.isFinite(timestamp) && timestamp <= Date.now() - SYNC_LOCK_STALE_MS;
+}
+
+async function parseResponse(response: Response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+async function getUserFromJwt(token: string) {
+  const response = await fetch(`${supabaseUrl()}/auth/v1/user`, {
+    method: "GET",
+    headers: {
+      apikey: serviceRoleKey(),
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+  });
+  const payload = await parseResponse(response);
+
+  if (!response.ok) return null;
+  return payload as SupabaseAuthUser;
+}
+
+async function isAdminUser(userId: string) {
+  const adminUser = await getSingle(
+    `/admin_users?user_id=eq.${encodeURIComponent(userId)}&select=user_id&limit=1`,
+  );
+  return Boolean(adminUser);
+}
+
+async function readJsonBody(request: Request) {
+  const text = await request.text();
+  if (!text) return {};
+  const payload = JSON.parse(text);
+  return isObject(payload) ? payload : {};
+}
+
+async function loadOrder(orderId: string) {
+  return await getSingle(
+    `/store_orders?id=eq.${encodeURIComponent(orderId)}&select=${encodeURIComponent(STORE_ORDER_SELECT)}&limit=1`,
+  ) as StoreOrder | null;
+}
+
+async function markSyncing(orderId: string, syncAttemptId: string) {
+  const startedAt = nowIso();
+  const rows = await supabaseRest(
+    `/store_orders?id=eq.${encodeURIComponent(orderId)}`
+    + "&bling_order_id=is.null"
+    + "&bling_sync_status=in.(not_sent,error)"
+    + "&select=id,bling_sync_status,bling_sync_metadata",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        bling_sync_status: "syncing",
+        bling_sync_error: "",
+        bling_sync_metadata: {
+          syncAttemptId,
+          syncStartedAt: startedAt,
+        },
+      }),
+    },
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function markPreflightError(orderId: string, errorCode: string, message: string) {
+  await supabaseRest(
+    `/store_orders?id=eq.${encodeURIComponent(orderId)}`
+    + "&bling_order_id=is.null"
+    + "&bling_sync_status=in.(not_sent,error)"
+    + "&select=id",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        bling_sync_status: "error",
+        bling_sync_error: message,
+        bling_sync_metadata: {
+          errorCode,
+          failedAt: nowIso(),
+        },
+      }),
+    },
+  ).catch(() => null);
+}
+
+async function markSyncError(orderId: string, syncAttemptId: string, errorCode: string, message: string) {
+  const rows = await supabaseRest(
+    `/store_orders?id=eq.${encodeURIComponent(orderId)}`
+    + "&bling_order_id=is.null"
+    + "&bling_sync_status=eq.syncing"
+    + `&bling_sync_metadata->>syncAttemptId=eq.${encodeURIComponent(syncAttemptId)}`
+    + "&select=id",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        bling_sync_status: "error",
+        bling_sync_error: message,
+        bling_sync_metadata: {
+          syncAttemptId,
+          errorCode,
+          failedAt: nowIso(),
+        },
+      }),
+    },
+  ).catch(() => []);
+
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function saveBlingLink(orderId: string, response: unknown, syncAttemptId: string) {
+  const data = isObject(response) && isObject(response.data) ? response.data : response;
+  const blingOrderId = isObject(data) ? cleanText(data.id) : "";
+  const blingOrderNumber = isObject(data) ? cleanText(data.numero || data.numeroLoja || "") : "";
+  if (!blingOrderId) throw new Error("bling_response_without_order_id");
+
+  const syncedAt = nowIso();
+  const rows = await supabaseRest(
+    `/store_orders?id=eq.${encodeURIComponent(orderId)}`
+    + "&bling_order_id=is.null"
+    + "&bling_sync_status=eq.syncing"
+    + `&bling_sync_metadata->>syncAttemptId=eq.${encodeURIComponent(syncAttemptId)}`
+    + "&select=id,bling_order_id,bling_order_number,bling_synced_at,bling_sync_status,bling_sync_error,bling_sync_metadata",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        bling_order_id: blingOrderId,
+        bling_order_number: blingOrderNumber,
+        bling_synced_at: syncedAt,
+        bling_sync_status: "synced",
+        bling_sync_error: "",
+        bling_sync_metadata: {
+          syncedAt,
+          syncAttemptId,
+          response: sanitizeBlingResponse(response),
+        },
+      }),
+    },
+  );
+
+  const updatedOrder = Array.isArray(rows) ? rows[0] || null : null;
+  if (!updatedOrder) throw new Error("bling_sync_lock_lost");
+  return updatedOrder;
+}
+
+async function recoverStaleSyncing(orderId: string, syncAttemptId: string) {
+  const current = await loadOrder(orderId);
+  if (!current || current.bling_order_id || current.bling_sync_status !== "syncing") return false;
+  if (!isStaleSyncMetadata(current.bling_sync_metadata)) return false;
+
+  const previousMetadata = isObject(current.bling_sync_metadata) ? current.bling_sync_metadata : {};
+  const previousAttemptId = cleanText(previousMetadata.syncAttemptId);
+  const previousStartedAt = cleanText(previousMetadata.syncStartedAt);
+  const startedAt = nowIso();
+  let filters = `/store_orders?id=eq.${encodeURIComponent(orderId)}`
+    + "&bling_order_id=is.null"
+    + "&bling_sync_status=eq.syncing";
+  filters += previousAttemptId
+    ? `&bling_sync_metadata->>syncAttemptId=eq.${encodeURIComponent(previousAttemptId)}`
+    : "&bling_sync_metadata->>syncAttemptId=is.null";
+  filters += `&bling_sync_metadata->>syncStartedAt=eq.${encodeURIComponent(previousStartedAt)}`;
+
+  const rows = await supabaseRest(
+    filters
+    + "&select=id,bling_sync_status,bling_sync_metadata",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        bling_sync_status: "syncing",
+        bling_sync_error: "",
+        bling_sync_metadata: {
+          syncAttemptId,
+          syncStartedAt: startedAt,
+          recoveredStaleLockAt: startedAt,
+          previousSyncMetadata: previousMetadata,
+        },
+      }),
+    },
+  );
+
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function insertOrderLog(orderId: string, userId: string, message: string, metadata: JsonObject = {}) {
+  await supabaseRest("/store_order_logs", {
+    method: "POST",
+    body: JSON.stringify({
+      order_id: orderId,
+      event_type: "bling_order_created",
+      message,
+      actor_type: "admin",
+      actor_id: userId,
+      source: "admin",
+      metadata,
+    }),
+  }).catch((error) => {
+    console.warn("bling-create-order log skipped", {
+      message: error instanceof Error ? error.message : "Falha ao registrar log.",
+    });
+  });
+}
+
+function validateOrder(order: StoreOrder) {
+  if (!order.id) throw new Error("invalid_order");
+  if (order.bling_order_id) throw new Error("already_linked");
+
+  const items = Array.isArray(order.store_order_items) ? order.store_order_items : [];
+  if (!items.length) throw new Error("missing_order_items");
+
+  const total = money(order.total_amount);
+  if (total === null || total <= 0) throw new Error("invalid_order_total");
+
+  const billing = order.order_billing_snapshots?.[0];
+  const customerName = cleanText(billing?.customer_name || order.customer_name);
+  const customerDocument = cleanDigits(billing?.customer_document || order.customer_document);
+  if (!customerName) throw new Error("missing_customer_data");
+  if (![11, 14].includes(customerDocument.length)) throw new Error("missing_customer_document");
+
+  for (const item of items) {
+    const quantity = Number(item.quantity);
+    const price = money(item.final_unit_price);
+    const code = cleanText(item.sku || item.internal_code);
+    if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("invalid_item_quantity");
+    if (price === null) throw new Error("invalid_item_price");
+    if (!code) throw new Error("missing_product_sku");
+  }
+}
+
+function validationMessage(code: string) {
+  const messages: Record<string, string> = {
+    invalid_order: "Pedido invalido para envio ao Bling.",
+    missing_order_items: "Pedido sem itens para enviar ao Bling.",
+    invalid_order_total: "Pedido sem valor total valido.",
+    missing_customer_data: "Pedido sem nome do cliente.",
+    missing_customer_document: "Pedido sem CPF/CNPJ valido para enviar ao Bling.",
+    invalid_item_quantity: "Pedido possui item com quantidade invalida.",
+    invalid_item_price: "Pedido possui item com valor invalido.",
+    missing_product_sku: "Pedido possui item sem SKU/codigo para localizar no Bling.",
+    missing_bling_product: "Produto do pedido nao foi encontrado no Bling pelo SKU.",
+    bling_response_without_order_id: "O Bling criou uma resposta sem ID de pedido.",
+  };
+  return messages[code] || "Pedido nao esta completo para envio ao Bling.";
+}
+
+function paymentDescription(order: StoreOrder) {
+  if (order.payment_method === "card") return "Cartao";
+  if (order.payment_method === "pix") return "Pix";
+  return "Pagamento NT";
+}
+
+function buildContact(order: StoreOrder) {
+  const billing = order.order_billing_snapshots?.[0] || {};
+  const document = cleanDigits(billing.customer_document || order.customer_document);
+  return {
+    nome: cleanText(billing.customer_name || order.customer_name),
+    tipoPessoa: document.length === 14 ? "J" : "F",
+    numeroDocumento: document,
+    email: cleanText(billing.customer_email || order.customer_email),
+    telefone: cleanDigits(billing.customer_phone || order.customer_phone),
+    endereco: {
+      endereco: cleanText(billing.street),
+      numero: cleanText(billing.number),
+      complemento: cleanText(billing.complement),
+      bairro: cleanText(billing.district),
+      cep: cleanDigits(billing.postal_code),
+      municipio: cleanText(billing.city),
+      uf: cleanText(billing.state).toUpperCase(),
+      pais: cleanText(billing.country || "Brasil"),
+    },
+  };
+}
+
+async function findBlingProductByCode(context: BlingAccessContext, code: string) {
+  const query = new URLSearchParams();
+  query.set("pagina", "1");
+  query.set("limite", "10");
+  query.set("codigo", code);
+  const response = await blingRequestWithTokenRefresh(context, `/produtos?${query.toString()}`, { method: "GET" });
+  const rows = isObject(response) && Array.isArray(response.data) ? response.data : [];
+  return rows.find((item) => {
+    const product = isObject(item) ? item as BlingProduct : {};
+    return cleanText(product.codigo).toLowerCase() === code.toLowerCase();
+  }) as BlingProduct | undefined;
+}
+
+async function buildItems(context: BlingAccessContext, order: StoreOrder) {
+  const items = [];
+  for (const item of order.store_order_items || []) {
+    const code = cleanText(item.sku || item.internal_code);
+    const blingProduct = await findBlingProductByCode(context, code);
+    if (!blingProduct?.id) throw new Error("missing_bling_product");
+
+    items.push({
+      quantidade: Number(item.quantity),
+      valor: money(item.final_unit_price),
+      descricao: cleanText(item.product_name),
+      codigo: code,
+      unidade: "UN",
+      desconto: 0,
+      produto: {
+        id: Number(blingProduct.id),
+      },
+    });
+  }
+  return items;
+}
+
+async function findExistingBlingOrderByNumeroLoja(context: BlingAccessContext, orderNumber: string) {
+  const query = new URLSearchParams();
+  query.set("pagina", "1");
+  query.set("limite", "10");
+  query.set("numerosLojas[]", orderNumber);
+  const response = await blingRequestWithTokenRefresh(context, `/pedidos/vendas?${query.toString()}`, { method: "GET" });
+  const rows = isObject(response) && Array.isArray(response.data) ? response.data : [];
+  return rows.find((item) => {
+    const order = isObject(item) ? item : {};
+    return cleanText(order.numeroLoja).toLowerCase() === orderNumber.toLowerCase()
+      || cleanText(order.numeroPedidoLoja).toLowerCase() === orderNumber.toLowerCase();
+  });
+}
+
+function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[]) {
+  const total = money(order.total_amount) || 0;
+  return {
+    contato: buildContact(order),
+    itens: items,
+    numeroLoja: order.order_number,
+    data: dateOnly(order.created_at),
+    totalProdutos: money(order.subtotal_amount) || total,
+    total,
+    desconto: {
+      valor: money(order.discount_amount) || 0,
+      unidade: "REAL",
+    },
+    parcelas: [
+      {
+        dataVencimento: dateOnly(order.paid_at || order.created_at),
+        valor: total,
+        observacoes: paymentDescription(order),
+      },
+    ],
+    observacoesInternas: `Pedido NT ${order.order_number}. Criado manualmente pelo NT Admin. Nao emitir NF-e automaticamente nesta etapa.`,
+    transporte: {
+      fretePorConta: 0,
+      frete: 0,
+      quantidadeVolumes: 1,
+      etiqueta: {
+        nome: buildContact(order).nome,
+        endereco: buildContact(order).endereco.endereco,
+        numero: buildContact(order).endereco.numero,
+        complemento: buildContact(order).endereco.complemento,
+        municipio: buildContact(order).endereco.municipio,
+        uf: buildContact(order).endereco.uf,
+        cep: buildContact(order).endereco.cep,
+        bairro: buildContact(order).endereco.bairro,
+        nomePais: buildContact(order).endereco.pais,
+      },
+    },
+  };
+}
+
+function sanitizeBlingResponse(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeBlingResponse);
+  if (!isObject(value)) return value;
+
+  const sanitized: JsonObject = {};
+  for (const [key, raw] of Object.entries(value)) {
+    const normalized = key.toLowerCase();
+    if (normalized.includes("token") || normalized === "authorization") continue;
+    if (["numerodocumento", "documento", "cpf", "cnpj"].includes(normalized)) {
+      sanitized[key] = maskDocument(raw);
+      continue;
+    }
+    sanitized[key] = sanitizeBlingResponse(raw);
+  }
+  return sanitized;
+}
+
+function blingErrorMessage(error: BlingHttpError) {
+  if (error.status === 401) return "Token do Bling invalido ou expirado.";
+  if (error.status === 403) return "Escopo insuficiente para criar pedido de venda no Bling.";
+  if (error.status === 404) return "Recurso nao encontrado no Bling.";
+  if (error.status === 422) return "O Bling recusou os dados do pedido. Revise os dados fiscais e SKUs.";
+  if (error.status === 429) return "Limite de requisicoes do Bling atingido. Tente novamente em instantes.";
+  if (error.status >= 500) return "Erro temporario na API do Bling.";
+  return "Nao foi possivel criar o pedido no Bling.";
+}
+
+Deno.serve(async (request) => {
+  const cors = handleCors(request);
+  if (cors) return cors;
+
+  let orderId = "";
+  let syncAttemptId = "";
+  let ownsSyncAttempt = false;
+
+  try {
+    if (request.method !== "POST") return fail(request, "Metodo nao permitido.", 405);
+
+    const token = bearerToken(request);
+    if (!token) return fail(request, "Nao autenticado.", 401);
+
+    const user = await getUserFromJwt(token);
+    if (!user?.id) return fail(request, "Nao autenticado.", 401);
+
+    const admin = await isAdminUser(user.id);
+    if (!admin) return fail(request, "Acesso restrito a administradores.", 403);
+
+    const body = await readJsonBody(request);
+    orderId = cleanText(body.order_id);
+    if (!isUuid(orderId)) return fail(request, "Pedido invalido.", 400, { code: "invalid_order_id" });
+
+    const order = await loadOrder(orderId);
+    if (!order) return fail(request, "Pedido nao encontrado.", 404, { code: "order_not_found" });
+
+    if (order.bling_order_id) {
+      return ok(request, {
+        success: true,
+        already_linked: true,
+        bling_order_id: order.bling_order_id,
+        bling_order_number: order.bling_order_number || "",
+        order: {
+          id: order.id,
+          bling_order_id: order.bling_order_id,
+          bling_order_number: order.bling_order_number || "",
+          bling_synced_at: order.bling_synced_at || null,
+          bling_sync_status: "synced",
+          bling_sync_error: "",
+        },
+      });
+    }
+
+    try {
+      validateOrder(order);
+    } catch (validationError) {
+      const code = validationError instanceof Error ? validationError.message : "invalid_order";
+      await markPreflightError(orderId, code, validationMessage(code));
+      return fail(request, validationMessage(code), 422, { code });
+    }
+
+    syncAttemptId = crypto.randomUUID();
+    const connection = await loadActiveBlingConnection();
+    const accessToken = await accessTokenForBlingConnection(connection);
+    const context = { connection, accessToken };
+    const existingBlingOrder = await findExistingBlingOrderByNumeroLoja(context, order.order_number);
+
+    const lockAcquired = await markSyncing(orderId, syncAttemptId);
+    ownsSyncAttempt = lockAcquired;
+    if (!lockAcquired) {
+      const current = await loadOrder(orderId);
+      if (current?.bling_order_id) {
+        return ok(request, {
+          success: true,
+          already_linked: true,
+          bling_order_id: current.bling_order_id,
+          bling_order_number: current.bling_order_number || "",
+          order: {
+            id: current.id,
+            bling_order_id: current.bling_order_id,
+            bling_order_number: current.bling_order_number || "",
+            bling_synced_at: current.bling_synced_at || null,
+            bling_sync_status: "synced",
+            bling_sync_error: "",
+          },
+        });
+      }
+      if (current?.bling_sync_status === "syncing" && isStaleSyncMetadata(current.bling_sync_metadata)) {
+        ownsSyncAttempt = await recoverStaleSyncing(orderId, syncAttemptId);
+      }
+      if (!ownsSyncAttempt) {
+        return fail(request, "Pedido ja esta em envio ao Bling. Aguarde a conclusao.", 409, {
+          code: "bling_sync_in_progress",
+        });
+      }
+    }
+
+    if (existingBlingOrder) {
+      const updatedOrder = await saveBlingLink(orderId, { data: existingBlingOrder }, syncAttemptId);
+      await insertOrderLog(orderId, user.id, "Pedido vinculado a pedido ja existente no Bling.", {
+        bling_order_id: updatedOrder?.bling_order_id || null,
+        bling_order_number: updatedOrder?.bling_order_number || null,
+      });
+      return ok(request, {
+        success: true,
+        already_linked: true,
+        bling_order_id: updatedOrder?.bling_order_id || null,
+        bling_order_number: updatedOrder?.bling_order_number || "",
+        order: updatedOrder,
+      });
+    }
+
+    if (!lockAcquired && ownsSyncAttempt) {
+      const staleCheck = await findExistingBlingOrderByNumeroLoja(context, order.order_number);
+      if (staleCheck) {
+        const updatedOrder = await saveBlingLink(orderId, { data: staleCheck }, syncAttemptId);
+        await insertOrderLog(orderId, user.id, "Pedido vinculado a pedido ja existente no Bling apos recuperar tentativa antiga.", {
+          bling_order_id: updatedOrder?.bling_order_id || null,
+          bling_order_number: updatedOrder?.bling_order_number || null,
+        });
+        return ok(request, {
+          success: true,
+          already_linked: true,
+          bling_order_id: updatedOrder?.bling_order_id || null,
+          bling_order_number: updatedOrder?.bling_order_number || "",
+          order: updatedOrder,
+        });
+      }
+    }
+
+    const items = await buildItems(context, order);
+    const blingPayload = buildBlingOrderPayload(order, items);
+    const blingResponse = await blingRequestWithTokenRefresh(context, "/pedidos/vendas", {
+      method: "POST",
+      body: blingPayload,
+    });
+    const updatedOrder = await saveBlingLink(orderId, blingResponse, syncAttemptId);
+
+    await insertOrderLog(orderId, user.id, "Pedido enviado manualmente ao Bling pelo administrador.", {
+      bling_order_id: updatedOrder?.bling_order_id || null,
+      bling_order_number: updatedOrder?.bling_order_number || null,
+    });
+
+    return ok(request, {
+      success: true,
+      already_linked: false,
+      bling_order_id: updatedOrder?.bling_order_id || null,
+      bling_order_number: updatedOrder?.bling_order_number || "",
+      order: updatedOrder,
+    });
+  } catch (error) {
+    if (orderId && ownsSyncAttempt && syncAttemptId) {
+      const message = error instanceof BlingHttpError ? blingErrorMessage(error) : "Nao foi possivel enviar o pedido ao Bling.";
+      await markSyncError(orderId, syncAttemptId, error instanceof BlingHttpError ? "bling_api_error" : "internal_error", message);
+    }
+
+    if (error instanceof BlingHttpError) {
+      console.error("bling-create-order BlingHttpError", {
+        orderId,
+        status: error.status,
+        temporary: error.temporary,
+      });
+      return fail(request, blingErrorMessage(error), error.temporary ? 503 : error.status, {
+        code: "bling_api_error",
+        status: error.status,
+      });
+    }
+
+    const message = error instanceof Error ? error.message : "Erro interno ao enviar pedido ao Bling.";
+    console.error("bling-create-order", { orderId, message });
+
+    if (message === "bling_not_connected") return fail(request, "Bling nao conectado.", 409, { code: message });
+    if (message === "bling_not_active") return fail(request, "Conexao Bling nao esta ativa.", 409, { code: message });
+    if (message === "bling_access_token_missing") return fail(request, "Access token do Bling ausente.", 409, { code: message });
+    if (message === "bling_refresh_token_missing") return fail(request, "Refresh token do Bling ausente.", 409, { code: message });
+    if (message === "bling_refresh_in_progress") return fail(request, "Token do Bling esta sendo renovado. Tente novamente em instantes.", 409, { code: message });
+    if (message === "bling_refresh_lock_lost") return fail(request, "Outra tentativa renovou a conexao Bling. Tente novamente.", 409, { code: message });
+    if (message === "bling_sync_lock_lost") return fail(request, "Outra tentativa alterou o envio ao Bling. Atualize o pedido e tente novamente.", 409, { code: message });
+
+    return fail(request, "Erro interno ao enviar pedido ao Bling.", 500);
+  }
+});
