@@ -7,3 +7,5 @@ dist/
 dev-server*.log
 dev-server*.err.log
 public/arena/mercado-pago-config.local.js
+.vercel
+.env*

@@ -222,6 +222,7 @@ async function tokenRequest(params: URLSearchParams) {
         Authorization: blingBasicAuthHeader(config),
         Accept: "application/json",
         "Content-Type": "application/x-www-form-urlencoded",
+        "enable-jwt": "1",
       },
       body: params.toString(),
     });
@@ -374,7 +375,8 @@ export async function blingRequest<T = unknown>(
       headers: {
         Authorization: `Bearer ${cleanAccessToken}`,
         Accept: "application/json",
-        ...(hasBody ? { "Content-Type": "application/json" } : {}),
+        "Content-Type": "application/json",
+        "enable-jwt": "1",
         ...(options.headers || {}),
       },
       body: hasBody
