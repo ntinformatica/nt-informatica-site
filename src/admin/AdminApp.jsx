@@ -3934,6 +3934,9 @@ function BlingIntegrationCard() {
   const [status, setStatus] = useState(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [diagnosticLoading, setDiagnosticLoading] = useState("");
+  const [diagnosticResult, setDiagnosticResult] = useState(null);
+  const [diagnosticError, setDiagnosticError] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -4007,10 +4010,31 @@ function BlingIntegrationCard() {
     }
   }
 
+  async function runBlingDiagnostic(action, extra = {}) {
+    setDiagnosticLoading(action);
+    setDiagnosticError("");
+    setDiagnosticResult(null);
+
+    try {
+      const payload = await supabaseFunction("bling-api-diagnostic", {
+        method: "POST",
+        body: JSON.stringify({ action, ...extra }),
+      });
+      setDiagnosticResult(payload);
+    } catch (diagnosticRequestError) {
+      console.error(diagnosticRequestError);
+      setDiagnosticError(diagnosticRequestError?.message || "Nao foi possivel executar o diagnostico Bling.");
+    } finally {
+      setDiagnosticLoading("");
+    }
+  }
+
   const normalizedStatus = status?.status || "not_connected";
   const connected = status?.connected || normalizedStatus === "active";
   const buttonLabel = connected ? "Reconectar Bling" : "Conectar Bling";
   const scopes = Array.isArray(status?.scopes) ? status.scopes : [];
+  const diagnosticItems = Array.isArray(diagnosticResult?.items) ? diagnosticResult.items : [];
+  const diagnosticAction = diagnosticResult?.action || "";
 
   return (
     <section className="rounded-lg border border-white/10 bg-white/5 p-5">
@@ -4066,6 +4090,129 @@ function BlingIntegrationCard() {
         <AdminButton type="button" variant="secondary" onClick={loadStatus} disabled={!isSupabaseConfigured || loadingStatus}>
           Atualizar status
         </AdminButton>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-dashed border-nt-cyan/25 bg-black/20 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">Diagnostico Bling</p>
+            <h4 className="mt-1 text-lg font-black text-white">Teste temporario read-only</h4>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Consulta produtos e pedidos recentes para validar a API sem criar, alterar ou emitir nada.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <AdminButton
+              type="button"
+              variant="secondary"
+              onClick={() => runBlingDiagnostic("products")}
+              disabled={!isSupabaseConfigured || Boolean(diagnosticLoading)}
+            >
+              {diagnosticLoading === "products" ? "Consultando..." : "Testar API Bling"}
+            </AdminButton>
+            <AdminButton
+              type="button"
+              variant="secondary"
+              onClick={() => runBlingDiagnostic("orders", { pagina: 1, limite: 20 })}
+              disabled={!isSupabaseConfigured || Boolean(diagnosticLoading)}
+            >
+              {diagnosticLoading === "orders" ? "Consultando..." : "Testar pedidos recentes"}
+            </AdminButton>
+          </div>
+        </div>
+
+        {diagnosticError ? (
+          <p className="mt-4 rounded-md border border-red-300/30 bg-red-500/10 px-3 py-2 text-sm font-bold text-red-100">{diagnosticError}</p>
+        ) : null}
+
+        {diagnosticResult ? (
+          <div className="mt-4 rounded-md border border-white/10 bg-white/5 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm font-black text-white">
+                Consulta concluida: {diagnosticAction === "products" ? "produtos" : diagnosticAction === "orders" ? "pedidos recentes" : "detalhe do pedido"}
+              </p>
+              <span className="rounded-full border border-lime-300/30 bg-lime-400/10 px-3 py-1 text-xs font-bold text-lime-100">
+                {diagnosticAction === "order" ? "Detalhe carregado" : `${Number(diagnosticResult.count || 0)} registro(s)`}
+              </span>
+            </div>
+
+            {diagnosticAction === "products" ? (
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-left text-xs text-slate-300">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="py-2 pr-3">ID</th>
+                      <th className="py-2 pr-3">Codigo</th>
+                      <th className="py-2 pr-3">Nome</th>
+                      <th className="py-2 pr-3">Situacao</th>
+                      <th className="py-2 pr-3">Tipo</th>
+                      <th className="py-2 pr-3">Preco</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diagnosticItems.slice(0, 20).map((item, index) => (
+                      <tr key={`${item.id || "produto"}-${index}`} className="border-t border-white/10">
+                        <td className="py-2 pr-3 font-mono text-slate-400">{item.id || "-"}</td>
+                        <td className="py-2 pr-3 font-mono text-slate-400">{item.codigo || "-"}</td>
+                        <td className="py-2 pr-3 font-bold text-white">{item.nome || "-"}</td>
+                        <td className="py-2 pr-3">{item.situacao || "-"}</td>
+                        <td className="py-2 pr-3">{item.tipo || "-"}</td>
+                        <td className="py-2 pr-3">{item.preco ?? "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {diagnosticAction === "orders" ? (
+              <div className="mt-3 overflow-x-auto">
+                <table className="min-w-full text-left text-xs text-slate-300">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="py-2 pr-3">ID</th>
+                      <th className="py-2 pr-3">Numero</th>
+                      <th className="py-2 pr-3">Data</th>
+                      <th className="py-2 pr-3">Situacao</th>
+                      <th className="py-2 pr-3">Total</th>
+                      <th className="py-2 pr-3">Cliente</th>
+                      <th className="py-2 pr-3">Detalhe</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diagnosticItems.slice(0, 20).map((item, index) => (
+                      <tr key={`${item.id || "pedido"}-${index}`} className="border-t border-white/10">
+                        <td className="py-2 pr-3 font-mono text-slate-400">{item.id || "-"}</td>
+                        <td className="py-2 pr-3 font-bold text-white">{item.numero || "-"}</td>
+                        <td className="py-2 pr-3">{item.data || "-"}</td>
+                        <td className="py-2 pr-3">{item.situacao || "-"}</td>
+                        <td className="py-2 pr-3">{item.total ?? "-"}</td>
+                        <td className="py-2 pr-3">{item.contato?.nome || "-"}</td>
+                        <td className="py-2 pr-3">
+                          <AdminButton
+                            type="button"
+                            variant="secondary"
+                            className="min-h-8 px-3 py-1 text-xs"
+                            onClick={() => runBlingDiagnostic("order", { order_id: item.id })}
+                            disabled={!item.id || Boolean(diagnosticLoading)}
+                          >
+                            Abrir
+                          </AdminButton>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            {diagnosticAction === "order" ? (
+              <pre className="mt-3 max-h-96 overflow-auto rounded-md border border-white/10 bg-black/30 p-3 text-xs leading-5 text-slate-200">
+                {JSON.stringify(diagnosticResult.order || {}, null, 2)}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </section>
   );
