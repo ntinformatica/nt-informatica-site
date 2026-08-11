@@ -312,9 +312,14 @@ export async function listProducts(categories = []) {
 export async function createProduct(product, categories = []) {
   if (isSupabaseConfigured) {
     try {
+      const payload = {
+        ...toSupabase(product, categories),
+        bling_sync_status: "not_sent",
+        bling_stock_sync_status: "not_synced",
+      };
       const [row] = await supabaseRequest("/products", {
         method: "POST",
-        body: JSON.stringify(toSupabase(product, categories)),
+        body: JSON.stringify(payload),
       });
       if (!row?.id) throw new Error("O Supabase nao retornou o produto criado.");
       const variations = await saveVariations(row.id, product.variations);
@@ -342,6 +347,10 @@ export async function updateProduct(id, product, categories = []) {
   if (isSupabaseConfigured) {
     try {
       const payload = toSupabase(product, categories);
+      if (product.blingProductId) {
+        payload.bling_sync_status = "dirty";
+        payload.bling_sync_error = "";
+      }
       if (!hasExplicitImagePayload(product)) {
         delete payload.main_image;
         delete payload.images;
@@ -452,5 +461,26 @@ export async function syncProductStockToBling(productId) {
   return supabaseFunction("bling-sync-stock", {
     method: "POST",
     body: JSON.stringify({ product_id: productId }),
+  });
+}
+
+export async function syncBlingProductsBatch({ mode = "pending", limit = 5, cursor = "" } = {}) {
+  return supabaseFunction("bling-sync-products-batch", {
+    method: "POST",
+    body: JSON.stringify({ mode, limit, cursor }),
+  });
+}
+
+export async function syncBlingStocksBatch({ mode = "pending", limit = 5, cursor = "" } = {}) {
+  return supabaseFunction("bling-sync-stocks-batch", {
+    method: "POST",
+    body: JSON.stringify({ mode, limit, cursor }),
+  });
+}
+
+export async function processBlingSyncJobs({ limit = 5 } = {}) {
+  return supabaseFunction("bling-process-sync-jobs", {
+    method: "POST",
+    body: JSON.stringify({ limit }),
   });
 }

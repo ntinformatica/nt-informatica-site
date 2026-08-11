@@ -107,7 +107,10 @@ import {
   deleteProduct,
   listBlingDeposits,
   listProducts,
+  processBlingSyncJobs,
   sendProductToBling,
+  syncBlingProductsBatch,
+  syncBlingStocksBatch,
   syncProductStockToBling,
   updateProduct,
   updateProductFeatured,
@@ -1020,13 +1023,17 @@ function StockSheetPage({ products, categories }) {
 
 const blingProductSyncLabels = {
   not_sent: "Nao enviado ao Bling",
+  dirty: "Alterado no NT",
   syncing: "Enviando ao Bling",
   synced: "Produto vinculado ao Bling",
   error: "Erro ao enviar ao Bling",
+  unsupported: "Nao suportado nesta fase",
+  review_required: "Revisao necessaria",
 };
 
 const blingStockSyncLabels = {
   not_synced: "Nao sincronizado",
+  dirty: "Estoque alterado no NT",
   syncing: "Sincronizando",
   synced: "Estoque sincronizado",
   error: "Erro ao sincronizar estoque",
@@ -4099,13 +4106,16 @@ function blingErrorLabel(reason) {
   return labels[reason] || "Nao foi possivel conectar o Bling.";
 }
 
-function BlingIntegrationCard() {
+function BlingIntegrationCard({ products = [] }) {
   const [status, setStatus] = useState(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState("");
   const [diagnosticResult, setDiagnosticResult] = useState(null);
   const [diagnosticError, setDiagnosticError] = useState("");
+  const [syncLoading, setSyncLoading] = useState("");
+  const [syncResult, setSyncResult] = useState(null);
+  const [syncError, setSyncError] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -4198,12 +4208,106 @@ function BlingIntegrationCard() {
     }
   }
 
+  async function runBlingBatch(type, mode = "pending") {
+    const isProductBatch = type === "products";
+    const confirmation = isProductBatch
+      ? "Os produtos elegiveis do NT Admin serao criados ou vinculados no Bling pelo SKU. Produtos com erro ou variacoes serao ignorados e poderao ser revisados depois. O estoque sera tratado separadamente. Deseja continuar?"
+      : "Os saldos do Bling serao ajustados para refletir o estoque atual do NT Admin no deposito principal configurado.";
+    if (!window.confirm(confirmation)) return;
+
+    setSyncLoading(`${type}:${mode}`);
+    setSyncError("");
+    setSyncResult(null);
+
+    try {
+      let cursor = "";
+      const total = isProductBatch
+        ? { processed: 0, synced: 0, linked_existing: 0, skipped: 0, errors: 0, retryable_errors: 0, items: [] }
+        : { processed: 0, noops: 0, entries: 0, exits: 0, errors: 0, retryable_errors: 0, items: [] };
+      let hasMore = true;
+      let guard = 0;
+
+      while (hasMore && guard < 4) {
+        guard += 1;
+        const payload = isProductBatch
+          ? await syncBlingProductsBatch({ mode, limit: 5, cursor })
+          : await syncBlingStocksBatch({ mode, limit: 5, cursor });
+        cursor = payload?.next_cursor || "";
+        hasMore = Boolean(payload?.has_more && cursor);
+        for (const key of Object.keys(total)) {
+          if (key === "items") continue;
+          total[key] += Number(payload?.[key] || 0);
+        }
+        total.items = [...total.items, ...(Array.isArray(payload?.items) ? payload.items : [])].slice(0, 30);
+      }
+
+      setSyncResult({
+        type,
+        mode,
+        has_more: hasMore,
+        next_cursor: cursor || null,
+        ...total,
+      });
+      setMessage(hasMore ? "Lote processado parcialmente. Execute novamente para continuar." : "Lote concluido.");
+    } catch (batchError) {
+      console.error(batchError);
+      setSyncError(batchError?.message || "Nao foi possivel executar o lote Bling.");
+    } finally {
+      setSyncLoading("");
+    }
+  }
+
+  async function runBlingWorker() {
+    setSyncLoading("jobs");
+    setSyncError("");
+    setSyncResult(null);
+
+    try {
+      const payload = await processBlingSyncJobs({ limit: 5 });
+      setSyncResult({
+        type: "jobs",
+        ...payload,
+      });
+      setMessage("Fila Bling processada.");
+    } catch (workerError) {
+      console.error(workerError);
+      setSyncError(workerError?.message || "Nao foi possivel processar a fila Bling.");
+    } finally {
+      setSyncLoading("");
+    }
+  }
+
   const normalizedStatus = status?.status || "not_connected";
   const connected = status?.connected || normalizedStatus === "active";
   const buttonLabel = connected ? "Reconectar Bling" : "Conectar Bling";
   const scopes = Array.isArray(status?.scopes) ? status.scopes : [];
   const diagnosticItems = Array.isArray(diagnosticResult?.items) ? diagnosticResult.items : [];
   const diagnosticAction = diagnosticResult?.action || "";
+  const syncItems = Array.isArray(syncResult?.items) ? syncResult.items : [];
+  const blingStats = useMemo(() => {
+    const total = Array.isArray(products) ? products.length : 0;
+    return products.reduce((stats, product) => {
+      if (product.blingProductId || product.blingSyncStatus === "synced") stats.catalogSynced += 1;
+      else if (product.blingSyncStatus === "error") stats.catalogErrors += 1;
+      else if (product.blingSyncStatus === "unsupported") stats.catalogUnsupported += 1;
+      else stats.catalogPending += 1;
+
+      if (!product.blingProductId) return stats;
+      if (product.blingStockSyncStatus === "synced") stats.stockSynced += 1;
+      else if (product.blingStockSyncStatus === "error") stats.stockErrors += 1;
+      else stats.stockPending += 1;
+      return stats;
+    }, {
+      total,
+      catalogSynced: 0,
+      catalogPending: 0,
+      catalogErrors: 0,
+      catalogUnsupported: 0,
+      stockSynced: 0,
+      stockPending: 0,
+      stockErrors: 0,
+    });
+  }, [products]);
 
   return (
     <section className="rounded-lg border border-white/10 bg-white/5 p-5">
@@ -4259,6 +4363,131 @@ function BlingIntegrationCard() {
         <AdminButton type="button" variant="secondary" onClick={loadStatus} disabled={!isSupabaseConfigured || loadingStatus}>
           Atualizar status
         </AdminButton>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-nt-cyan">Bling ERP - Catalogo</p>
+            <h4 className="mt-1 text-lg font-black text-white">Sincronizacao controlada</h4>
+            <p className="mt-1 text-sm leading-6 text-slate-400">
+              Processa lotes pequenos. Cadastro de produto e estoque continuam em etapas separadas.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <AdminButton
+              type="button"
+              variant="secondary"
+              onClick={() => runBlingBatch("products", "pending")}
+              disabled={!connected || Boolean(syncLoading)}
+            >
+              {syncLoading === "products:pending" ? "Sincronizando..." : "Sincronizar produtos pendentes"}
+            </AdminButton>
+            <AdminButton
+              type="button"
+              variant="secondary"
+              onClick={() => runBlingBatch("stocks", "pending")}
+              disabled={!connected || Boolean(syncLoading)}
+            >
+              {syncLoading === "stocks:pending" ? "Sincronizando..." : "Sincronizar estoques pendentes"}
+            </AdminButton>
+            <AdminButton
+              type="button"
+              variant="secondary"
+              onClick={() => runBlingBatch("products", "retry_errors")}
+              disabled={!connected || Boolean(syncLoading)}
+            >
+              Reprocessar erros
+            </AdminButton>
+            <AdminButton
+              type="button"
+              variant="secondary"
+              onClick={runBlingWorker}
+              disabled={!connected || Boolean(syncLoading)}
+            >
+              {syncLoading === "jobs" ? "Processando..." : "Processar fila"}
+            </AdminButton>
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-3 text-sm text-slate-300 sm:grid-cols-2 xl:grid-cols-7">
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Produtos</p>
+            <p className="mt-1 font-black text-white">{blingStats.total}</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Catalogo OK</p>
+            <p className="mt-1 font-black text-lime-200">{blingStats.catalogSynced}</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Pendentes</p>
+            <p className="mt-1 font-black text-amber-200">{blingStats.catalogPending}</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Nao suportados</p>
+            <p className="mt-1 font-black text-slate-200">{blingStats.catalogUnsupported}</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Estoque OK</p>
+            <p className="mt-1 font-black text-lime-200">{blingStats.stockSynced}</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Estoque pendente</p>
+            <p className="mt-1 font-black text-amber-200">{blingStats.stockPending}</p>
+          </div>
+          <div className="rounded-md border border-white/10 bg-white/5 p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Erros</p>
+            <p className="mt-1 font-black text-red-200">{blingStats.catalogErrors + blingStats.stockErrors}</p>
+          </div>
+        </div>
+
+        {syncError ? (
+          <p className="mt-4 rounded-md border border-red-300/30 bg-red-500/10 px-3 py-2 text-sm font-bold text-red-100">{syncError}</p>
+        ) : null}
+
+        {syncResult ? (
+          <div className="mt-4 rounded-md border border-white/10 bg-white/5 p-3">
+            <div className="grid gap-3 text-sm text-slate-300 sm:grid-cols-2 xl:grid-cols-6">
+              {"processed" in syncResult ? <p>Processados: <strong className="text-white">{syncResult.processed || 0}</strong></p> : null}
+              {"synced" in syncResult ? <p>Sincronizados: <strong className="text-white">{syncResult.synced || 0}</strong></p> : null}
+              {"linked_existing" in syncResult ? <p>Vinculados: <strong className="text-white">{syncResult.linked_existing || 0}</strong></p> : null}
+              {"skipped" in syncResult ? <p>Ignorados: <strong className="text-white">{syncResult.skipped || 0}</strong></p> : null}
+              {"noops" in syncResult ? <p>Ja iguais: <strong className="text-white">{syncResult.noops || 0}</strong></p> : null}
+              {"entries" in syncResult ? <p>Entradas: <strong className="text-white">{syncResult.entries || 0}</strong></p> : null}
+              {"exits" in syncResult ? <p>Saidas: <strong className="text-white">{syncResult.exits || 0}</strong></p> : null}
+              {"done" in syncResult ? <p>Jobs concluidos: <strong className="text-white">{syncResult.done || 0}</strong></p> : null}
+              {"retried" in syncResult ? <p>Jobs reagendados: <strong className="text-white">{syncResult.retried || 0}</strong></p> : null}
+              {"errors" in syncResult ? <p>Erros: <strong className="text-white">{syncResult.errors || 0}</strong></p> : null}
+            </div>
+            {syncResult.has_more ? (
+              <p className="mt-3 text-sm text-amber-200">Ainda existem itens pendentes. Execute novamente para continuar a partir de {syncResult.next_cursor || "proximo lote"}.</p>
+            ) : null}
+            {syncItems.length ? (
+              <div className="mt-3 max-h-72 overflow-auto rounded-md border border-white/10">
+                <table className="min-w-full text-left text-xs text-slate-300">
+                  <thead className="text-slate-500">
+                    <tr>
+                      <th className="py-2 pl-3 pr-3">Produto</th>
+                      <th className="py-2 pr-3">SKU</th>
+                      <th className="py-2 pr-3">Status</th>
+                      <th className="py-2 pr-3">Detalhe</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {syncItems.map((item, index) => (
+                      <tr key={`${item.product_id || item.entity_id || item.job_id || "sync"}-${index}`} className="border-t border-white/10">
+                        <td className="py-2 pl-3 pr-3 font-mono text-slate-400">{item.product_id || item.entity_id || "-"}</td>
+                        <td className="py-2 pr-3 font-mono text-slate-400">{item.sku || "-"}</td>
+                        <td className="py-2 pr-3 font-bold text-white">{item.status || item.operation || "-"}</td>
+                        <td className="py-2 pr-3">{item.message || item.code || (item.delta ?? "-")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-6 rounded-lg border border-dashed border-nt-cyan/25 bg-black/20 p-4">
@@ -4387,12 +4616,12 @@ function BlingIntegrationCard() {
   );
 }
 
-function SettingsPage() {
+function SettingsPage({ products = [] }) {
   return (
     <section className="glass rounded-lg p-6">
       <h2 className="text-2xl font-black">Configurações</h2>
       <div className="mt-6">
-        <BlingIntegrationCard />
+        <BlingIntegrationCard products={products} />
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <TextField label="Nome da empresa" value={businessName} onChange={() => {}} readOnly />
@@ -5071,7 +5300,7 @@ export function AdminApp() {
           onCancelMaintenance={cancelArenaMaintenanceAction}
         />
       ) : null}
-      {!loading && info.page === "settings" ? <SettingsPage /> : null}
+      {!loading && info.page === "settings" ? <SettingsPage products={products} /> : null}
       {!loading && info.page === "placeholder" ? <PlaceholderPage title={info.title} /> : null}
     </AdminShell>
   );

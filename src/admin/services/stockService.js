@@ -131,7 +131,14 @@ export async function createStockMovement({ product, variationId = "", type, qua
 
     await supabaseRequest(`/products?id=eq.${encodeURIComponent(product.id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ stock: newProductStock, updated_at: new Date().toISOString() }),
+      body: JSON.stringify({
+        stock: newProductStock,
+        updated_at: new Date().toISOString(),
+        ...(product.blingProductId ? {
+          bling_stock_sync_status: "dirty",
+          bling_stock_sync_error: "",
+        } : {}),
+      }),
     });
 
     const [movement] = await supabaseRequest("/stock_movements", {

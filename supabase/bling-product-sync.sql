@@ -12,7 +12,7 @@ alter table public.products
 
 alter table public.products
   add constraint products_bling_sync_status_check
-  check (bling_sync_status in ('not_sent', 'syncing', 'synced', 'error'));
+  check (bling_sync_status in ('not_sent', 'dirty', 'syncing', 'synced', 'error', 'unsupported', 'review_required'));
 
 create unique index if not exists products_bling_product_id_uidx
   on public.products(bling_product_id)

@@ -11,7 +11,7 @@ alter table public.products
 
 alter table public.products
   add constraint products_bling_stock_sync_status_check
-  check (bling_stock_sync_status in ('not_synced', 'syncing', 'synced', 'error'));
+  check (bling_stock_sync_status in ('not_synced', 'dirty', 'syncing', 'synced', 'error'));
 
 create index if not exists products_bling_stock_sync_status_idx
   on public.products(bling_stock_sync_status);
