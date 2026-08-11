@@ -59,6 +59,7 @@ export type SyncProductResult = {
   success: boolean;
   already_linked: boolean;
   linked_existing: boolean;
+  updated_existing?: boolean;
   bling_product_id: string | null;
   product: JsonObject | null;
 };
@@ -154,7 +155,6 @@ function validateProduct(product: ProductRow, variations: VariationRow[], catego
   const status = statusKey(product.status);
 
   if (!product.id) throw new Error("invalid_product");
-  if (product.bling_product_id) throw new Error("already_linked");
   if (!sku) throw new Error("missing_product_sku");
   if (!/^[A-Za-z0-9._-]+$/.test(sku)) throw new Error("invalid_product_sku");
   if (!name) throw new Error("missing_product_name");
@@ -178,6 +178,8 @@ export function productSyncValidationMessage(code: string) {
     invalid_product_category: "Categoria do produto nao foi encontrada.",
     inactive_product_category: "Categoria do produto esta inativa.",
     product_variations_not_supported: "Produto com variacoes ainda nao e sincronizado nesta etapa. Sincronize um produto simples primeiro.",
+    linked_product_review_required: "Produto vinculado precisa de revisao administrativa antes de sincronizar.",
+    linked_bling_product_not_found: "Produto vinculado nao foi encontrado no Bling. Revisao administrativa necessaria.",
     missing_bling_product_id: "O Bling retornou uma resposta sem ID de produto.",
     ambiguous_bling_product_sku: "Mais de um produto foi encontrado no Bling com o mesmo SKU. Resolva a duplicidade antes de vincular.",
     bling_sync_lock_lost: "Outra tentativa alterou a sincronizacao do produto. Atualize e tente novamente.",
@@ -249,7 +251,6 @@ async function findBlingProductsByCode(context: BlingAccessContext, sku: string)
 async function markSyncing(productId: string, syncAttemptId: string) {
   const rows = await supabaseRest(
     `/products?id=eq.${encodeURIComponent(productId)}`
-    + "&bling_product_id=is.null"
     + "&bling_sync_status=in.(not_sent,dirty,error,review_required)"
     + "&select=id,bling_sync_status,bling_sync_metadata",
     {
@@ -287,6 +288,26 @@ async function markPreflightError(productId: string, errorCode: string, message:
           skippedReason: unsupported ? errorCode : undefined,
           skippedAt: unsupported ? skippedAt : undefined,
           failedAt: unsupported ? undefined : skippedAt,
+        },
+      }),
+    },
+  ).catch(() => null);
+}
+
+async function markProductReviewRequired(productId: string, errorCode: string, message: string, metadata: JsonObject = {}) {
+  await supabaseRest(
+    `/products?id=eq.${encodeURIComponent(productId)}`
+    + "&bling_sync_status=eq.syncing"
+    + "&select=id",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        bling_sync_status: "review_required",
+        bling_sync_error: message,
+        bling_sync_metadata: {
+          errorCode,
+          reviewRequiredAt: nowIso(),
+          ...metadata,
         },
       }),
     },
@@ -384,6 +405,63 @@ async function saveBlingProductLink(productId: string, response: unknown, syncAt
   return updatedProduct as JsonObject;
 }
 
+async function saveBlingProductUpdate(productId: string, blingProductId: string, response: unknown, syncAttemptId: string) {
+  const syncedAt = nowIso();
+  const rows = await supabaseRest(
+    `/products?id=eq.${encodeURIComponent(productId)}`
+    + `&bling_product_id=eq.${encodeURIComponent(blingProductId)}`
+    + "&bling_sync_status=eq.syncing"
+    + `&bling_sync_metadata->>syncAttemptId=eq.${encodeURIComponent(syncAttemptId)}`
+    + "&select=id,bling_product_id,bling_synced_at,bling_sync_status,bling_sync_error,bling_sync_metadata",
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        bling_synced_at: syncedAt,
+        bling_sync_status: "synced",
+        bling_sync_error: "",
+        bling_sync_metadata: {
+          syncedAt,
+          syncAttemptId,
+          operation: "updated_existing",
+          response: sanitizeBlingResponse(response),
+        },
+      }),
+    },
+  );
+
+  const updatedProduct = Array.isArray(rows) ? rows[0] || null : null;
+  if (!updatedProduct) throw new Error("bling_sync_lock_lost");
+  return updatedProduct as JsonObject;
+}
+
+async function loadBlingProduct(context: BlingAccessContext, blingProductId: string) {
+  return await blingRequestWithTokenRefresh(context, `/produtos/${encodeURIComponent(blingProductId)}`, { method: "GET" });
+}
+
+function productDataFromResponse(response: unknown) {
+  if (isObject(response) && isObject(response.data)) return response.data;
+  return isObject(response) ? response : {};
+}
+
+function buildBlingProductUpdatePayload(remoteProductResponse: unknown, product: ProductRow) {
+  const remoteProduct = productDataFromResponse(remoteProductResponse);
+  return {
+    ...remoteProduct,
+    ...buildBlingProductPayload(product),
+    id: Number(cleanText(product.bling_product_id)) || remoteProduct.id,
+  };
+}
+
+async function updateLinkedBlingProduct(context: BlingAccessContext, product: ProductRow) {
+  const blingProductId = cleanText(product.bling_product_id);
+  const remoteProduct = await loadBlingProduct(context, blingProductId);
+  const payload = buildBlingProductUpdatePayload(remoteProduct, product);
+  return await blingRequestWithTokenRefresh(context, `/produtos/${encodeURIComponent(blingProductId)}`, {
+    method: "PUT",
+    body: payload,
+  });
+}
+
 export function productSyncBlingErrorMessage(error: BlingHttpError) {
   if (error.status === 401) return "Token do Bling invalido ou expirado.";
   if (error.status === 403) return "Escopo insuficiente para criar produto no Bling.";
@@ -405,19 +483,59 @@ export async function syncSingleProductToBling(productId: string): Promise<SyncP
   if (!product) throw new Error("product_not_found");
 
   if (product.bling_product_id) {
-    return {
-      success: true,
-      already_linked: true,
-      linked_existing: true,
-      bling_product_id: product.bling_product_id,
-      product: {
-        id: product.id,
-        bling_product_id: product.bling_product_id,
-        bling_synced_at: product.bling_synced_at || null,
-        bling_sync_status: "synced",
-        bling_sync_error: "",
-      },
-    };
+    if (product.bling_sync_status === "review_required") {
+      throw new Error("linked_product_review_required");
+    }
+
+    const variations = await loadProductVariations(product.id);
+    const category = await loadCategory(product.category_id);
+
+    try {
+      validateProduct(product, variations, category);
+    } catch (validationError) {
+      const code = validationError instanceof Error ? validationError.message : "invalid_product";
+      await markPreflightError(product.id, code, productSyncValidationMessage(code), product.bling_sync_metadata);
+      throw validationError;
+    }
+
+    const syncAttemptId = crypto.randomUUID();
+    let ownsSyncAttempt = await markSyncing(product.id, syncAttemptId);
+    if (!ownsSyncAttempt) {
+      const current = await loadProduct(product.id);
+      if (current?.bling_sync_status === "syncing" && isStaleSyncMetadata(current.bling_sync_metadata)) {
+        ownsSyncAttempt = await recoverStaleSyncing(product.id, syncAttemptId);
+      }
+      if (!ownsSyncAttempt) throw new Error("bling_sync_in_progress");
+    }
+
+    try {
+      const connection = await loadActiveBlingConnection();
+      const accessToken = await accessTokenForBlingConnection(connection);
+      const context = { connection, accessToken };
+      const blingResponse = await updateLinkedBlingProduct(context, product);
+      const updatedProduct = await saveBlingProductUpdate(product.id, cleanText(product.bling_product_id), blingResponse, syncAttemptId);
+
+      return {
+        success: true,
+        already_linked: true,
+        linked_existing: false,
+        updated_existing: true,
+        bling_product_id: cleanText(updatedProduct.bling_product_id),
+        product: updatedProduct,
+      };
+    } catch (error) {
+      if (error instanceof BlingHttpError && error.status === 404) {
+        const message = "Produto vinculado nao foi encontrado no Bling. Revisao administrativa necessaria.";
+        await markProductReviewRequired(product.id, "linked_bling_product_not_found", message, {
+          blingProductId: cleanText(product.bling_product_id),
+        });
+        throw new Error("linked_bling_product_not_found");
+      } else {
+        const message = error instanceof BlingHttpError ? productSyncBlingErrorMessage(error) : productSyncValidationMessage(error instanceof Error ? error.message : "internal_error");
+        await markSyncError(product.id, syncAttemptId, error instanceof BlingHttpError ? "bling_api_error" : error instanceof Error ? error.message : "internal_error", message);
+      }
+      throw error;
+    }
   }
 
   const variations = await loadProductVariations(product.id);
@@ -472,6 +590,7 @@ export async function syncSingleProductToBling(productId: string): Promise<SyncP
         success: true,
         already_linked: false,
         linked_existing: true,
+        updated_existing: false,
         bling_product_id: cleanText(updatedProduct.bling_product_id),
         product: updatedProduct,
       };
@@ -485,6 +604,7 @@ export async function syncSingleProductToBling(productId: string): Promise<SyncP
         success: true,
         already_linked: false,
         linked_existing: true,
+        updated_existing: false,
         bling_product_id: cleanText(updatedProduct.bling_product_id),
         product: updatedProduct,
       };
@@ -501,6 +621,7 @@ export async function syncSingleProductToBling(productId: string): Promise<SyncP
       success: true,
       already_linked: false,
       linked_existing: false,
+      updated_existing: false,
       bling_product_id: cleanText(updatedProduct.bling_product_id),
       product: updatedProduct,
     };

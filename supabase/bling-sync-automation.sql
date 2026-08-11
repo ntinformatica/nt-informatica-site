@@ -130,13 +130,11 @@ begin
           );
       end if;
     elsif new.bling_sync_status not in ('syncing', 'review_required') then
-      -- Existing product update by PUT/PATCH is not enabled in V1.
-      -- Keep the local state visible without enqueueing a job that cannot update Bling yet.
       new.bling_sync_status := 'dirty';
       new.bling_sync_error := '';
       new.bling_sync_metadata := coalesce(new.bling_sync_metadata, '{}'::jsonb)
         || jsonb_build_object(
-          'automationReason', 'linked_product_catalog_changed_update_pending',
+          'automationReason', 'linked_product_catalog_changed',
           'automationClassifiedAt', now()
         );
     end if;
@@ -233,9 +231,18 @@ begin
     and not v_sku_changed
     and new.bling_sync_status = 'dirty'
   then
-    -- Product update for already linked products is intentionally not enqueued in V1.
-    -- The worker currently creates/links products, but does not PUT/PATCH existing Bling products.
-    null;
+    perform public.enqueue_bling_sync_job(
+      'product',
+      new.id,
+      'product_sync',
+      100,
+      now(),
+      jsonb_build_object(
+        'source', 'products_trigger',
+        'reason', 'catalog_changed_linked_product',
+        'createdAt', now()
+      )
+    );
   end if;
 
   if v_stock_changed and v_has_bling_product then

@@ -47,11 +47,11 @@ async function listCandidateProducts(params: { mode: string; limit: number; curs
   let path = `/products?select=id,sku,bling_product_id,bling_sync_status&id=gt.${encodeURIComponent(params.cursor || "00000000-0000-0000-0000-000000000000")}&order=id.asc&limit=${limitWithLookahead}`;
 
   if (params.mode === "retry_errors") {
-    path += "&bling_product_id=is.null&bling_sync_status=in.(error,review_required)";
+    path += "&bling_sync_status=eq.error";
   } else if (params.mode === "all_pending") {
-    path += "&bling_product_id=is.null&bling_sync_status=in.(not_sent,dirty,error,review_required)";
+    path += "&bling_sync_status=in.(not_sent,dirty,error)";
   } else {
-    path += "&bling_product_id=is.null&bling_sync_status=in.(not_sent,dirty)";
+    path += "&bling_sync_status=in.(not_sent,dirty)";
   }
 
   const rows = await supabaseRest(path);
@@ -96,12 +96,13 @@ Deno.serve(async (request) => {
 
       try {
         const result = await syncSingleProductToBling(productId);
-        if (result.linked_existing || result.already_linked) summary.linked_existing += 1;
+        if (result.updated_existing) summary.synced += 1;
+        else if (result.linked_existing || result.already_linked) summary.linked_existing += 1;
         else summary.synced += 1;
         summary.items.push({
           product_id: productId,
           sku,
-          status: result.linked_existing ? "linked_existing" : result.already_linked ? "already_linked" : "synced",
+          status: result.updated_existing ? "updated_existing" : result.linked_existing ? "linked_existing" : result.already_linked ? "already_linked" : "synced",
           bling_product_id: result.bling_product_id,
         });
       } catch (error) {

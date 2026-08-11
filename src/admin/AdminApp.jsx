@@ -1281,9 +1281,12 @@ function ProductFormPage({
               {existingProduct.blingProductId ? <p className="mt-2 text-sm text-slate-300">ID Bling: <strong className="text-white">{existingProduct.blingProductId}</strong></p> : null}
               {existingProduct.blingSyncedAt ? <p className="text-sm text-slate-300">Ultima sincronizacao: <strong className="text-white">{formatDateTimeLabel(existingProduct.blingSyncedAt)}</strong></p> : null}
               {existingProduct.blingSyncError ? <p className="mt-2 text-sm text-red-100">{existingProduct.blingSyncError}</p> : null}
-              <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria ou vincula somente o cadastro do produto no Bling pelo SKU.</p>
+              <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria, vincula ou atualiza o cadastro do produto no Bling. Estoque continua em sincronizacao separada.</p>
+              {existingProduct.blingProductId && existingProduct.blingSyncStatus === "dirty" ? (
+                <p className="mt-2 text-sm font-bold text-amber-200">Alteracoes pendentes de sincronizacao com Bling.</p>
+              ) : null}
             </div>
-            {existingProduct.blingSyncStatus === "synced" || existingProduct.blingProductId ? (
+            {existingProduct.blingProductId && existingProduct.blingSyncStatus === "synced" ? (
               <span className="inline-flex min-h-10 items-center justify-center rounded-md border border-lime-300/30 bg-lime-300/10 px-4 py-2 text-sm font-black text-lime-200">
                 Produto vinculado ao Bling
               </span>
@@ -1295,7 +1298,7 @@ function ProductFormPage({
                 disabled={existingProduct.blingSyncStatus === "syncing"}
                 onClick={handleSendBling}
               >
-                {existingProduct.blingSyncStatus === "syncing" ? "Enviando..." : "Enviar ao Bling"}
+                {existingProduct.blingSyncStatus === "syncing" ? "Enviando..." : "Sincronizar com Bling"}
               </AdminButton>
             )}
           </div>
@@ -4994,10 +4997,12 @@ export function AdminApp() {
   async function syncProductBling(product) {
     return runAction(async () => {
       const result = await sendProductToBling(product.id);
-      if (result?.already_linked || result?.linked_existing) {
+      if (result?.updated_existing) {
+        setNotice("Produto atualizado no Bling.");
+      } else if (result?.already_linked || result?.linked_existing) {
         setNotice("Produto vinculado ao Bling pelo SKU.");
       }
-    }, "Produto enviado ao Bling com sucesso.");
+    }, "Produto sincronizado com Bling com sucesso.");
   }
 
   async function loadBlingStockDeposits() {
