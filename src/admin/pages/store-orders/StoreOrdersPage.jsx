@@ -498,7 +498,7 @@ export function StoreOrdersPage() {
     try {
       const result = await sendStoreOrderToBling(order.id);
       if (result?.order) mergeUpdatedOrder(result.order);
-      setNotice(blingLinked || result?.already_linked ? "Dados do cliente atualizados no Bling." : "Pedido enviado ao Bling com sucesso.");
+      setNotice(blingLinked || result?.already_linked ? "Dados fiscais atualizados no Bling." : "Pedido enviado ao Bling com sucesso.");
     } catch (blingError) {
       console.error(blingError);
       setError(blingError?.message || "Nao foi possivel enviar o pedido ao Bling.");

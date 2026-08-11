@@ -40,7 +40,7 @@ type StoreOrder = {
   bling_sync_status?: string | null;
   bling_sync_metadata?: JsonObject | null;
   store_order_items?: StoreOrderItem[];
-  order_billing_snapshots?: BillingSnapshot[];
+  order_billing_snapshots?: BillingSnapshot[] | BillingSnapshot;
 };
 
 type StoreOrderItem = {
@@ -94,6 +94,9 @@ type BlingCreateOrderStage =
   | "create_contact"
   | "get_contact"
   | "update_contact"
+  | "verify_contact_after_update"
+  | "get_remote_order"
+  | "update_existing_order"
   | "find_product"
   | "create_order";
 
@@ -210,9 +213,47 @@ async function readJsonBody(request: Request) {
 }
 
 async function loadOrder(orderId: string) {
-  return await getSingle(
+  const order = await getSingle(
     `/store_orders?id=eq.${encodeURIComponent(orderId)}&select=${encodeURIComponent(STORE_ORDER_SELECT)}&limit=1`,
   ) as StoreOrder | null;
+  if (!order?.id) return order;
+
+  const billingSnapshot = await loadBillingSnapshot(order.id);
+  const snapshots = billingSnapshot
+    ? [billingSnapshot]
+    : normalizeBillingSnapshots(order.order_billing_snapshots);
+
+  console.info("bling-create-order billing snapshot diagnostic", stringifyLog({
+    orderId: order.id,
+    billingSnapshotFound: snapshots.length > 0,
+    hasStreet: Boolean(cleanText(snapshots[0]?.street)),
+    hasNumber: Boolean(cleanText(snapshots[0]?.number)),
+    hasDistrict: Boolean(cleanText(snapshots[0]?.district)),
+    hasPostalCode: cleanDigits(snapshots[0]?.postal_code).length === 8,
+    hasCity: Boolean(cleanText(snapshots[0]?.city)),
+    hasState: /^[A-Z]{2}$/.test(cleanText(snapshots[0]?.state).toUpperCase()),
+  }));
+
+  return {
+    ...order,
+    order_billing_snapshots: snapshots,
+  };
+}
+
+function normalizeBillingSnapshots(value: StoreOrder["order_billing_snapshots"]) {
+  if (Array.isArray(value)) return value.filter(isObject) as BillingSnapshot[];
+  if (isObject(value)) return [value as BillingSnapshot];
+  return [];
+}
+
+function firstBillingSnapshot(order: StoreOrder) {
+  return normalizeBillingSnapshots(order.order_billing_snapshots)[0] || null;
+}
+
+async function loadBillingSnapshot(orderId: string) {
+  return await getSingle(
+    `/order_billing_snapshots?order_id=eq.${encodeURIComponent(orderId)}&select=customer_name,customer_document,customer_email,customer_phone,postal_code,street,number,complement,district,city,state,country&limit=1`,
+  ) as BillingSnapshot | null;
 }
 
 async function markSyncing(orderId: string, syncAttemptId: string) {
@@ -383,7 +424,7 @@ function validateOrder(order: StoreOrder) {
   const total = money(order.total_amount);
   if (total === null || total <= 0) throw new Error("invalid_order_total");
 
-  const billing = order.order_billing_snapshots?.[0];
+  const billing = firstBillingSnapshot(order);
   const customerName = cleanText(billing?.customer_name || order.customer_name);
   const customerDocument = cleanDigits(billing?.customer_document || order.customer_document);
   if (!customerName) throw new Error("missing_customer_data");
@@ -447,7 +488,7 @@ function paymentDescription(order: StoreOrder) {
 }
 
 function buildContact(order: StoreOrder) {
-  const billing = order.order_billing_snapshots?.[0] || {};
+  const billing = firstBillingSnapshot(order) || {};
   const document = cleanDigits(billing.customer_document || order.customer_document);
   return {
     nome: cleanText(billing.customer_name || order.customer_name),
@@ -525,6 +566,58 @@ function buildBlingContactPayload(order: StoreOrder) {
   });
 }
 
+function billingAddressPresence(order: StoreOrder) {
+  const billing = firstBillingSnapshot(order) || {};
+  return {
+    street: Boolean(cleanText(billing.street)),
+    number: Boolean(cleanText(billing.number)),
+    district: Boolean(cleanText(billing.district)),
+    postalCode: cleanDigits(billing.postal_code).length === 8,
+    city: Boolean(cleanText(billing.city)),
+    state: /^[A-Z]{2}$/.test(cleanText(billing.state).toUpperCase()),
+    complement: Boolean(cleanText(billing.complement)),
+  };
+}
+
+function payloadAddressPresence(payload: unknown) {
+  const address = isObject(payload) && isObject(payload.endereco) ? payload.endereco : {};
+  const general = isObject(address.geral) ? address.geral : {};
+  return {
+    endereco: Boolean(cleanText(general.endereco)),
+    numero: Boolean(cleanText(general.numero)),
+    bairro: Boolean(cleanText(general.bairro)),
+    cep: cleanDigits(general.cep).length === 8,
+    municipio: Boolean(cleanText(general.municipio)),
+    uf: /^[A-Z]{2}$/.test(cleanText(general.uf).toUpperCase()),
+    complemento: Boolean(cleanText(general.complemento)),
+  };
+}
+
+function blingContactAddressPresence(contact: unknown) {
+  const address = isObject(contact) && isObject(contact.endereco) ? contact.endereco : {};
+  const general = isObject(address.geral) ? address.geral : {};
+  return {
+    endereco: Boolean(cleanText(general.endereco)),
+    numero: Boolean(cleanText(general.numero)),
+    bairro: Boolean(cleanText(general.bairro)),
+    cep: cleanDigits(general.cep).length === 8,
+    municipio: Boolean(cleanText(general.municipio)),
+    uf: /^[A-Z]{2}$/.test(cleanText(general.uf).toUpperCase()),
+    complemento: Boolean(cleanText(general.complemento)),
+  };
+}
+
+function responseShape(response: unknown) {
+  const payload = isObject(response) ? response : {};
+  const data = isObject(payload.data) ? payload.data : null;
+  return {
+    hasBody: response !== null && response !== undefined && !(typeof response === "string" && !response.trim()),
+    topLevelKeys: Object.keys(payload),
+    hasData: Boolean(data),
+    dataKeys: data ? Object.keys(data) : [],
+  };
+}
+
 async function findBlingContactByDocument(context: BlingAccessContext, document: string, setStage?: StageTracker) {
   const query = new URLSearchParams();
   query.set("pagina", "1");
@@ -545,8 +638,13 @@ async function findBlingContactByDocument(context: BlingAccessContext, document:
   return null;
 }
 
-async function loadBlingContactById(context: BlingAccessContext, contactId: number, setStage?: StageTracker) {
-  setStage?.("get_contact");
+async function loadBlingContactById(
+  context: BlingAccessContext,
+  contactId: number,
+  setStage?: StageTracker,
+  stage: BlingCreateOrderStage = "get_contact",
+) {
+  setStage?.(stage);
   const response = await blingRequestWithTokenRefresh(context, `/contatos/${encodeURIComponent(String(contactId))}`, { method: "GET" });
   const data = isObject(response) && isObject(response.data) ? response.data : response;
   return isObject(data) ? data : {};
@@ -584,11 +682,35 @@ function mergeBlingContactPayload(remoteContact: JsonObject, managedContact: Jso
 async function updateBlingContact(context: BlingAccessContext, contactId: number, order: StoreOrder, setStage?: StageTracker) {
   const remoteContact = await loadBlingContactById(context, contactId, setStage);
   const payload = mergeBlingContactPayload(remoteContact, buildBlingContactPayload(order));
+  console.info("bling-create-order contact update diagnostic", stringifyLog({
+    orderId: order.id,
+    stage: "update_contact",
+    blingContactId: contactId,
+    billingAddressPresence: billingAddressPresence(order),
+    payloadAddressPresence: payloadAddressPresence(payload),
+  }));
+
   setStage?.("update_contact");
-  await blingRequestWithTokenRefresh(context, `/contatos/${encodeURIComponent(String(contactId))}`, {
+  const updateResponse = await blingRequestWithTokenRefresh(context, `/contatos/${encodeURIComponent(String(contactId))}`, {
     method: "PUT",
     body: payload,
   });
+  console.info("bling-create-order contact update response", stringifyLog({
+    orderId: order.id,
+    stage: "update_contact",
+    blingContactId: contactId,
+    httpStatus: "success_2xx",
+    exactHttpStatusAvailable: false,
+    responseShape: responseShape(updateResponse),
+  }));
+
+  const verifiedContact = await loadBlingContactById(context, contactId, setStage, "verify_contact_after_update");
+  console.info("bling-create-order contact verify after update", stringifyLog({
+    orderId: order.id,
+    stage: "verify_contact_after_update",
+    blingContactId: contactId,
+    addressPresence: blingContactAddressPresence(verifiedContact),
+  }));
 }
 
 async function createBlingContact(context: BlingAccessContext, order: StoreOrder, setStage?: StageTracker) {
@@ -673,6 +795,21 @@ async function findExistingBlingOrderByNumeroLoja(context: BlingAccessContext, o
   });
 }
 
+function buildShippingLabel(order: StoreOrder) {
+  const contact = buildContact(order);
+  return {
+    nome: contact.nome,
+    endereco: contact.endereco.endereco,
+    numero: contact.endereco.numero,
+    complemento: contact.endereco.complemento,
+    municipio: contact.endereco.municipio,
+    uf: contact.endereco.uf,
+    cep: contact.endereco.cep,
+    bairro: contact.endereco.bairro,
+    nomePais: contact.endereco.pais,
+  };
+}
+
 function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[], contactId: number) {
   const total = money(order.total_amount) || 0;
   return {
@@ -700,19 +837,95 @@ function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[], contactI
       fretePorConta: 0,
       frete: 0,
       quantidadeVolumes: 1,
-      etiqueta: {
-        nome: buildContact(order).nome,
-        endereco: buildContact(order).endereco.endereco,
-        numero: buildContact(order).endereco.numero,
-        complemento: buildContact(order).endereco.complemento,
-        municipio: buildContact(order).endereco.municipio,
-        uf: buildContact(order).endereco.uf,
-        cep: buildContact(order).endereco.cep,
-        bairro: buildContact(order).endereco.bairro,
-        nomePais: buildContact(order).endereco.pais,
-      },
+      etiqueta: buildShippingLabel(order),
     },
   };
+}
+
+async function loadRemoteBlingOrder(context: BlingAccessContext, blingOrderId: string, setStage?: StageTracker) {
+  setStage?.("get_remote_order");
+  const response = await blingRequestWithTokenRefresh(context, `/pedidos/vendas/${encodeURIComponent(blingOrderId)}`, { method: "GET" });
+  const data = isObject(response) && isObject(response.data) ? response.data : response;
+  if (!isObject(data)) throw new Error("bling_response_without_order_id");
+  return data;
+}
+
+function buildExistingBlingOrderUpdatePayload(remoteOrder: JsonObject, order: StoreOrder, contactId: number) {
+  const remoteTransport = isObject(remoteOrder.transporte) ? remoteOrder.transporte : {};
+  const remoteLabel = isObject(remoteTransport.etiqueta) ? remoteTransport.etiqueta : {};
+  const remoteContact = isObject(remoteOrder.contato) ? remoteOrder.contato : {};
+
+  return compactObject({
+    ...remoteOrder,
+    contato: {
+      ...remoteContact,
+      id: contactId,
+    },
+    numeroLoja: cleanText(remoteOrder.numeroLoja) || order.order_number,
+    transporte: {
+      ...remoteTransport,
+      etiqueta: {
+        ...remoteLabel,
+        ...buildShippingLabel(order),
+      },
+    },
+  });
+}
+
+function updateOrderDiagnostics(remoteOrder: JsonObject, payload: JsonObject, contactId: number) {
+  const remoteTransport = isObject(remoteOrder.transporte) ? remoteOrder.transporte : {};
+  const payloadTransport = isObject(payload.transporte) ? payload.transporte : {};
+  return {
+    contactIdPreserved: blingContactId(isObject(payload.contato) ? payload.contato.id : null) === contactId,
+    numeroLojaPreserved: cleanText(remoteOrder.numeroLoja) === cleanText(payload.numeroLoja),
+    totalPreserved: Number(remoteOrder.total) === Number(payload.total),
+    totalProdutosPreserved: Number(remoteOrder.totalProdutos) === Number(payload.totalProdutos),
+    descontoPreserved: JSON.stringify(remoteOrder.desconto || null) === JSON.stringify(payload.desconto || null),
+    itensCountPreserved: Array.isArray(remoteOrder.itens) && Array.isArray(payload.itens)
+      ? remoteOrder.itens.length === payload.itens.length
+      : true,
+    parcelasCountPreserved: Array.isArray(remoteOrder.parcelas) && Array.isArray(payload.parcelas)
+      ? remoteOrder.parcelas.length === payload.parcelas.length
+      : true,
+    addressPresence: payloadAddressPresence({ endereco: { geral: isObject(payloadTransport.etiqueta) ? payloadTransport.etiqueta : {} } }),
+  };
+}
+
+async function updateExistingBlingOrder(
+  context: BlingAccessContext,
+  order: StoreOrder,
+  contactId: number,
+  setStage?: StageTracker,
+) {
+  const blingOrderId = cleanText(order.bling_order_id);
+  if (!blingOrderId) throw new Error("bling_response_without_order_id");
+
+  const remoteOrder = await loadRemoteBlingOrder(context, blingOrderId, setStage);
+  const payload = buildExistingBlingOrderUpdatePayload(remoteOrder, order, contactId);
+  console.info("bling-create-order existing order update diagnostic", stringifyLog({
+    orderId: order.id,
+    stage: "update_existing_order",
+    blingOrderId,
+    blingContactId: contactId,
+    diagnostics: updateOrderDiagnostics(remoteOrder, payload, contactId),
+  }));
+
+  setStage?.("update_existing_order");
+  const response = await blingRequestWithTokenRefresh(context, `/pedidos/vendas/${encodeURIComponent(blingOrderId)}`, {
+    method: "PUT",
+    body: payload,
+  });
+
+  console.info("bling-create-order existing order update response", stringifyLog({
+    orderId: order.id,
+    stage: "update_existing_order",
+    blingOrderId,
+    httpStatus: "success_2xx",
+    exactHttpStatusAvailable: false,
+    responseShape: responseShape(response),
+  }));
+
+  return response;
 }
 
 function sanitizeBlingResponse(value: unknown): unknown {
@@ -886,10 +1099,12 @@ Deno.serve(async (request) => {
         blingContactId: contact.id,
         alreadyLinkedOrder: true,
       });
+      await updateExistingBlingOrder(context, order, contact.id, setStage);
 
       return ok(request, {
         success: true,
         already_linked: true,
+        bling_order_updated: true,
         bling_order_id: order.bling_order_id,
         bling_order_number: order.bling_order_number || "",
         order: {
