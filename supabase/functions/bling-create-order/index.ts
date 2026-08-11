@@ -87,6 +87,12 @@ type BlingContactResolution = {
   action: "existing_contact" | "updated_contact" | "created_contact";
 };
 
+type BlingPaymentMethod = {
+  id: number;
+  descricao: string;
+  tipoPagamento?: number | null;
+};
+
 type BlingCreateOrderStage =
   | "idle"
   | "find_existing_order"
@@ -98,6 +104,7 @@ type BlingCreateOrderStage =
   | "get_remote_order"
   | "update_existing_order"
   | "find_product"
+  | "resolve_payment_method"
   | "create_order";
 
 type StageTracker = (stage: BlingCreateOrderStage) => void;
@@ -462,6 +469,7 @@ function validationMessage(code: string) {
     invalid_item_price: "Pedido possui item com valor invalido.",
     missing_product_sku: "Pedido possui item sem SKU/codigo para localizar no Bling.",
     missing_bling_product: "Produto do pedido nao foi encontrado no Bling pelo SKU.",
+    bling_pix_payment_method_not_found: "Forma de pagamento Pix nao encontrada no Bling. Cadastre ou ative uma forma Pix antes de enviar o pedido.",
     bling_response_without_order_id: "O Bling criou uma resposta sem ID de pedido.",
   };
   return messages[code] || "Pedido nao esta completo para envio ao Bling.";
@@ -485,6 +493,10 @@ function paymentDescription(order: StoreOrder) {
   if (order.payment_method === "card") return "Cartao";
   if (order.payment_method === "pix") return "Pix";
   return "Pagamento NT";
+}
+
+function normalizedPaymentMethod(order: StoreOrder) {
+  return cleanText(order.payment_method).toLowerCase();
 }
 
 function buildContact(order: StoreOrder) {
@@ -810,7 +822,94 @@ function buildShippingLabel(order: StoreOrder) {
   };
 }
 
-function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[], contactId: number) {
+function positiveInteger(value: unknown) {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function blingPaymentMethodFromRow(value: unknown) {
+  if (!isObject(value)) return null;
+  const id = positiveInteger(value.id);
+  if (!id) return null;
+  return {
+    id,
+    descricao: cleanText(value.descricao),
+    tipoPagamento: positiveInteger(value.tipoPagamento),
+  } satisfies BlingPaymentMethod;
+}
+
+function isPixBlingPaymentMethod(value: unknown) {
+  const paymentMethod = blingPaymentMethodFromRow(value);
+  if (!paymentMethod) return false;
+  return paymentMethod.tipoPagamento === 17 || paymentMethod.descricao.toLowerCase().includes("pix");
+}
+
+async function resolveBlingPaymentMethod(
+  context: BlingAccessContext,
+  order: StoreOrder,
+  setStage?: StageTracker,
+) {
+  if (normalizedPaymentMethod(order) !== "pix") return null;
+
+  setStage?.("resolve_payment_method");
+  const query = new URLSearchParams();
+  query.set("pagina", "1");
+  query.set("limite", "100");
+  query.append("tiposPagamentos[]", "17");
+  query.set("situacao", "1");
+
+  const response = await blingRequestWithTokenRefresh(context, `/formas-pagamentos?${query.toString()}`, { method: "GET" });
+  const rows = isObject(response) && Array.isArray(response.data) ? response.data : [];
+  const pixMethod = blingPaymentMethodFromRow(rows.find(isPixBlingPaymentMethod));
+  if (!pixMethod) throw new Error("bling_pix_payment_method_not_found");
+
+  console.info("bling-create-order payment method resolved", stringifyLog({
+    orderId: order.id,
+    stage: "resolve_payment_method",
+    paymentMethod: "pix",
+    blingPaymentMethodId: pixMethod.id,
+    blingPaymentMethodType: pixMethod.tipoPagamento,
+    blingPaymentMethodDescription: pixMethod.descricao,
+  }));
+
+  return pixMethod;
+}
+
+function buildPaymentInstallments(order: StoreOrder, paymentMethod: BlingPaymentMethod | null) {
+  const total = money(order.total_amount) || 0;
+  const installment = compactObject({
+    dataVencimento: dateOnly(order.paid_at || order.created_at),
+    valor: total,
+    formaPagamento: paymentMethod ? { id: paymentMethod.id } : undefined,
+    observacoes: paymentDescription(order),
+  });
+  return [installment];
+}
+
+function applyPaymentMethodToRemoteInstallments(
+  order: StoreOrder,
+  remoteInstallments: unknown,
+  paymentMethod: BlingPaymentMethod | null,
+) {
+  if (!paymentMethod) return remoteInstallments;
+  if (!Array.isArray(remoteInstallments) || !remoteInstallments.length) {
+    return buildPaymentInstallments(order, paymentMethod);
+  }
+  return remoteInstallments.map((item) => {
+    const installment = isObject(item) ? item : {};
+    return compactObject({
+      ...installment,
+      formaPagamento: { id: paymentMethod.id },
+    });
+  });
+}
+
+function buildBlingOrderPayload(
+  order: StoreOrder,
+  items: JsonObject[],
+  contactId: number,
+  paymentMethod: BlingPaymentMethod | null,
+) {
   const total = money(order.total_amount) || 0;
   return {
     contato: {
@@ -825,13 +924,7 @@ function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[], contactI
       valor: money(order.discount_amount) || 0,
       unidade: "REAL",
     },
-    parcelas: [
-      {
-        dataVencimento: dateOnly(order.paid_at || order.created_at),
-        valor: total,
-        observacoes: paymentDescription(order),
-      },
-    ],
+    parcelas: buildPaymentInstallments(order, paymentMethod),
     observacoesInternas: `Pedido NT ${order.order_number}. Criado manualmente pelo NT Admin. Nao emitir NF-e automaticamente nesta etapa.`,
     transporte: {
       fretePorConta: 0,
@@ -850,7 +943,12 @@ async function loadRemoteBlingOrder(context: BlingAccessContext, blingOrderId: s
   return data;
 }
 
-function buildExistingBlingOrderUpdatePayload(remoteOrder: JsonObject, order: StoreOrder, contactId: number) {
+function buildExistingBlingOrderUpdatePayload(
+  remoteOrder: JsonObject,
+  order: StoreOrder,
+  contactId: number,
+  paymentMethod: BlingPaymentMethod | null,
+) {
   const remoteTransport = isObject(remoteOrder.transporte) ? remoteOrder.transporte : {};
   const remoteLabel = isObject(remoteTransport.etiqueta) ? remoteTransport.etiqueta : {};
   const remoteContact = isObject(remoteOrder.contato) ? remoteOrder.contato : {};
@@ -862,6 +960,7 @@ function buildExistingBlingOrderUpdatePayload(remoteOrder: JsonObject, order: St
       id: contactId,
     },
     numeroLoja: cleanText(remoteOrder.numeroLoja) || order.order_number,
+    parcelas: applyPaymentMethodToRemoteInstallments(order, remoteOrder.parcelas, paymentMethod),
     transporte: {
       ...remoteTransport,
       etiqueta: {
@@ -895,13 +994,14 @@ async function updateExistingBlingOrder(
   context: BlingAccessContext,
   order: StoreOrder,
   contactId: number,
+  paymentMethod: BlingPaymentMethod | null,
   setStage?: StageTracker,
 ) {
   const blingOrderId = cleanText(order.bling_order_id);
   if (!blingOrderId) throw new Error("bling_response_without_order_id");
 
   const remoteOrder = await loadRemoteBlingOrder(context, blingOrderId, setStage);
-  const payload = buildExistingBlingOrderUpdatePayload(remoteOrder, order, contactId);
+  const payload = buildExistingBlingOrderUpdatePayload(remoteOrder, order, contactId, paymentMethod);
   console.info("bling-create-order existing order update diagnostic", stringifyLog({
     orderId: order.id,
     stage: "update_existing_order",
@@ -1099,7 +1199,8 @@ Deno.serve(async (request) => {
         blingContactId: contact.id,
         alreadyLinkedOrder: true,
       });
-      await updateExistingBlingOrder(context, order, contact.id, setStage);
+      const paymentMethod = await resolveBlingPaymentMethod(context, order, setStage);
+      await updateExistingBlingOrder(context, order, contact.id, paymentMethod, setStage);
 
       return ok(request, {
         success: true,
@@ -1203,7 +1304,8 @@ Deno.serve(async (request) => {
     });
 
     const items = await buildItems(context, order, setStage);
-    const blingPayload = buildBlingOrderPayload(order, items, contact.id);
+    const paymentMethod = await resolveBlingPaymentMethod(context, order, setStage);
+    const blingPayload = buildBlingOrderPayload(order, items, contact.id, paymentMethod);
     setStage("create_order");
     const blingResponse = await blingRequestWithTokenRefresh(context, "/pedidos/vendas", {
       method: "POST",
@@ -1231,6 +1333,7 @@ Deno.serve(async (request) => {
       const message = error instanceof BlingHttpError
         ? blingErrorMessage(error, blingError?.message || "")
         : isBlingContactError(errorCode)
+            || errorCode === "bling_pix_payment_method_not_found"
           ? validationMessage(errorCode)
         : "Nao foi possivel enviar o pedido ao Bling.";
       await markSyncError(orderId, syncAttemptId, error instanceof BlingHttpError ? "bling_api_error" : "internal_error", message);
@@ -1262,6 +1365,9 @@ Deno.serve(async (request) => {
     if (message === "bling_refresh_in_progress") return fail(request, "Token do Bling esta sendo renovado. Tente novamente em instantes.", 409, { code: message });
     if (message === "bling_refresh_lock_lost") return fail(request, "Outra tentativa renovou a conexao Bling. Tente novamente.", 409, { code: message });
     if (message === "bling_sync_lock_lost") return fail(request, "Outra tentativa alterou o envio ao Bling. Atualize o pedido e tente novamente.", 409, { code: message });
+    if (message === "bling_pix_payment_method_not_found") {
+      return fail(request, validationMessage(message), 422, { code: message });
+    }
     if (isBlingContactError(message)) {
       return fail(request, validationMessage(message), 422, { code: message });
     }
