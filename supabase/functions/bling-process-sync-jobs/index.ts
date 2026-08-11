@@ -31,6 +31,32 @@ type BlingSyncJob = {
 
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
+const CRON_SECRET_HEADER = "x-nt-cron-secret";
+
+function timingSafeEqual(a: string, b: string) {
+  const encoder = new TextEncoder();
+  const aBytes = encoder.encode(a);
+  const bBytes = encoder.encode(b);
+  const maxLength = Math.max(aBytes.length, bBytes.length);
+  let diff = aBytes.length ^ bBytes.length;
+
+  for (let index = 0; index < maxLength; index += 1) {
+    diff |= (aBytes[index] || 0) ^ (bBytes[index] || 0);
+  }
+
+  return diff === 0;
+}
+
+function isCronRequest(request: Request) {
+  const configuredSecret = Deno.env.get("BLING_WORKER_CRON_SECRET") || "";
+  const receivedSecret = request.headers.get(CRON_SECRET_HEADER) || "";
+  if (!configuredSecret || !receivedSecret) return false;
+  return timingSafeEqual(receivedSecret, configuredSecret);
+}
+
+function hasCronSecret(request: Request) {
+  return Boolean(request.headers.get(CRON_SECRET_HEADER));
+}
 
 function positiveLimit(value: unknown) {
   const parsed = Number(value);
@@ -108,12 +134,22 @@ Deno.serve(async (request) => {
   try {
     if (request.method !== "POST") return fail(request, "Metodo nao permitido.", 405);
 
-    const auth = await requireAdmin(request);
-    if (!auth.ok) return fail(request, auth.message, auth.status);
+    const cronSecretPresent = hasCronSecret(request);
+    const cronRequest = cronSecretPresent ? isCronRequest(request) : false;
+    if (cronSecretPresent && !Deno.env.get("BLING_WORKER_CRON_SECRET")) {
+      return fail(request, "Cron Bling nao configurado.", 500);
+    }
+    if (cronSecretPresent && !cronRequest) {
+      return fail(request, "Credencial do cron Bling invalida.", 403);
+    }
+    if (!cronRequest) {
+      const auth = await requireAdmin(request);
+      if (!auth.ok) return fail(request, auth.message, auth.status);
+    }
 
     const body = await readJsonBody(request);
     const limit = positiveLimit(body.limit);
-    const workerId = `edge-${crypto.randomUUID()}`;
+    const workerId = `${cronRequest ? "cron" : "edge"}-${crypto.randomUUID()}`;
     const jobs = await acquireJobs(workerId, limit);
     const summary = {
       worker_id: workerId,

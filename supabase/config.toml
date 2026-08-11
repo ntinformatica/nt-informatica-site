@@ -9,3 +9,6 @@ verify_jwt = false
 
 [functions.bling-oauth-callback]
 verify_jwt = false
+
+[functions.bling-process-sync-jobs]
+verify_jwt = false

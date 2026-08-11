@@ -4493,6 +4493,7 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
                 {" "}Processing: <strong className="text-cyan-200">{queueSummary.processing || 0}</strong>
                 {" "}Erro/dead: <strong className="text-red-200">{Number(queueSummary.error || 0) + Number(queueSummary.dead || 0)}</strong>
               </p>
+              <p className="mt-1 text-xs text-slate-500">Processamento automatico: Supabase Cron apos aplicar o SQL de agendamento.</p>
             </div>
             <p className="text-xs text-slate-500">{queueLoading ? "Consultando..." : `${queueItems.length} job(s) recentes`}</p>
           </div>
