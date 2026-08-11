@@ -89,6 +89,10 @@ export const PRODUCT_SELECT = [
 ].join(",");
 
 const PRODUCT_SYNC_STALE_MS = 10 * 60 * 1000;
+const UNSUPPORTED_PRODUCT_SYNC_CODES = new Set([
+  "draft_product",
+  "product_variations_not_supported",
+]);
 
 function isObject(value: unknown): value is JsonObject {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -181,6 +185,10 @@ export function productSyncValidationMessage(code: string) {
   return messages[code] || "Produto nao esta completo para envio ao Bling.";
 }
 
+export function isUnsupportedProductSyncCode(code: string) {
+  return UNSUPPORTED_PRODUCT_SYNC_CODES.has(code);
+}
+
 function blingSituation(product: ProductRow) {
   return statusKey(product.status) === "esgotado" ? "I" : "A";
 }
@@ -259,7 +267,10 @@ async function markSyncing(productId: string, syncAttemptId: string) {
   return Array.isArray(rows) && rows.length > 0;
 }
 
-async function markPreflightError(productId: string, errorCode: string, message: string) {
+async function markPreflightError(productId: string, errorCode: string, message: string, existingMetadata: unknown = null) {
+  const unsupported = isUnsupportedProductSyncCode(errorCode);
+  const previousMetadata = isObject(existingMetadata) ? existingMetadata : {};
+  const skippedAt = nowIso();
   await supabaseRest(
     `/products?id=eq.${encodeURIComponent(productId)}`
     + "&bling_product_id=is.null"
@@ -268,11 +279,14 @@ async function markPreflightError(productId: string, errorCode: string, message:
     {
       method: "PATCH",
       body: JSON.stringify({
-        bling_sync_status: errorCode === "product_variations_not_supported" ? "unsupported" : "error",
-        bling_sync_error: message,
+        bling_sync_status: unsupported ? "unsupported" : "error",
+        bling_sync_error: unsupported ? "" : message,
         bling_sync_metadata: {
+          ...previousMetadata,
           errorCode,
-          failedAt: nowIso(),
+          skippedReason: unsupported ? errorCode : undefined,
+          skippedAt: unsupported ? skippedAt : undefined,
+          failedAt: unsupported ? undefined : skippedAt,
         },
       }),
     },
@@ -413,7 +427,7 @@ export async function syncSingleProductToBling(productId: string): Promise<SyncP
     validateProduct(product, variations, category);
   } catch (validationError) {
     const code = validationError instanceof Error ? validationError.message : "invalid_product";
-    await markPreflightError(product.id, code, productSyncValidationMessage(code));
+    await markPreflightError(product.id, code, productSyncValidationMessage(code), product.bling_sync_metadata);
     throw validationError;
   }
 

@@ -2,6 +2,7 @@ import { BlingHttpError } from "../_shared/bling.ts";
 import { cleanText, requireAdmin, readJsonBody } from "../_shared/adminAuth.ts";
 import {
   isRetryableProductSyncError,
+  isUnsupportedProductSyncCode,
   productSyncBlingErrorMessage,
   productSyncValidationMessage,
   syncSingleProductToBling,
@@ -61,6 +62,11 @@ function errorCode(error: unknown) {
 
 function isRetryable(error: unknown, operation: string) {
   return operation === "stock_sync" ? isRetryableStockSyncError(error) : isRetryableProductSyncError(error);
+}
+
+function isSkipped(error: unknown, operation: string) {
+  if (operation !== "product_sync" || error instanceof BlingHttpError) return false;
+  return isUnsupportedProductSyncCode(errorCode(error));
 }
 
 async function acquireJobs(workerId: string, limit: number) {
@@ -136,16 +142,19 @@ Deno.serve(async (request) => {
         });
       } catch (error) {
         const retryable = isRetryable(error, job.operation);
+        const skipped = isSkipped(error, job.operation);
         const message = errorMessage(error, job.operation);
         const code = errorCode(error);
-        const finalStatus = retryable && job.attempts < job.max_attempts ? "pending" : retryable ? "dead" : "error";
+        const finalStatus = skipped ? "skipped" : retryable && job.attempts < job.max_attempts ? "pending" : retryable ? "dead" : "error";
         await finishJob(job, workerId, finalStatus, message, {
           failedAt: new Date().toISOString(),
           code,
           retryable,
+          skipped,
         });
         if (finalStatus === "pending") summary.retried += 1;
         else if (finalStatus === "dead") summary.dead += 1;
+        else if (finalStatus === "skipped") summary.skipped += 1;
         else summary.errors += 1;
         summary.items.push({
           job_id: job.id,

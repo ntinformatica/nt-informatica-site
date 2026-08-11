@@ -2,6 +2,7 @@ import { BlingHttpError } from "../_shared/bling.ts";
 import { cleanText, requireAdmin, readJsonBody } from "../_shared/adminAuth.ts";
 import {
   isRetryableProductSyncError,
+  isUnsupportedProductSyncCode,
   productSyncBlingErrorMessage,
   productSyncValidationMessage,
   syncSingleProductToBling,
@@ -106,7 +107,8 @@ Deno.serve(async (request) => {
       } catch (error) {
         const code = productErrorCode(error);
         const retryable = isRetryableProductSyncError(error);
-        const skipped = ["product_variations_not_supported", "draft_product", "missing_product_sku", "invalid_product_sku", "invalid_product_price"].includes(code);
+        const skipped = isUnsupportedProductSyncCode(code)
+          || ["missing_product_sku", "invalid_product_sku", "invalid_product_price"].includes(code);
         if (skipped) summary.skipped += 1;
         else summary.errors += 1;
         if (retryable) summary.retryable_errors += 1;
