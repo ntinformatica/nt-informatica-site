@@ -4110,6 +4110,8 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
   const [status, setStatus] = useState(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [queueStatus, setQueueStatus] = useState(null);
+  const [queueLoading, setQueueLoading] = useState(false);
   const [diagnosticLoading, setDiagnosticLoading] = useState("");
   const [diagnosticResult, setDiagnosticResult] = useState(null);
   const [diagnosticError, setDiagnosticError] = useState("");
@@ -4140,6 +4142,24 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
     }
   }
 
+  async function loadQueueStatus() {
+    if (!isSupabaseConfigured) {
+      setQueueStatus(null);
+      return;
+    }
+
+    setQueueLoading(true);
+    try {
+      const payload = await supabaseFunction("bling-sync-jobs-status", { method: "GET" });
+      setQueueStatus(payload);
+    } catch (queueError) {
+      console.warn("Nao foi possivel consultar a fila Bling:", queueError);
+      setQueueStatus(null);
+    } finally {
+      setQueueLoading(false);
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const blingResult = params.get("bling");
@@ -4159,6 +4179,7 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
     }
 
     loadStatus();
+    loadQueueStatus();
   }, []);
 
   async function connectBling() {
@@ -4253,6 +4274,7 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
       } catch (refreshError) {
         console.warn("Nao foi possivel atualizar os contadores Bling apos o lote:", refreshError);
       }
+      await loadQueueStatus();
       setMessage(hasMore ? "Lote processado parcialmente. Execute novamente para continuar." : "Lote concluido.");
     } catch (batchError) {
       console.error(batchError);
@@ -4278,6 +4300,7 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
       } catch (refreshError) {
         console.warn("Nao foi possivel atualizar os contadores Bling apos a fila:", refreshError);
       }
+      await loadQueueStatus();
       setMessage("Fila Bling processada.");
     } catch (workerError) {
       console.error(workerError);
@@ -4294,6 +4317,8 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
   const diagnosticItems = Array.isArray(diagnosticResult?.items) ? diagnosticResult.items : [];
   const diagnosticAction = diagnosticResult?.action || "";
   const syncItems = Array.isArray(syncResult?.items) ? syncResult.items : [];
+  const queueSummary = queueStatus?.summary || {};
+  const queueItems = Array.isArray(queueStatus?.items) ? queueStatus.items : [];
   const blingStats = useMemo(() => {
     const total = Array.isArray(products) ? products.length : 0;
     return products.reduce((stats, product) => {
@@ -4417,6 +4442,14 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
             >
               {syncLoading === "jobs" ? "Processando..." : "Processar fila"}
             </AdminButton>
+            <AdminButton
+              type="button"
+              variant="secondary"
+              onClick={loadQueueStatus}
+              disabled={!connected || queueLoading}
+            >
+              {queueLoading ? "Consultando fila..." : "Atualizar fila"}
+            </AdminButton>
           </div>
         </div>
 
@@ -4449,6 +4482,49 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
             <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Erros</p>
             <p className="mt-1 font-black text-red-200">{blingStats.catalogErrors + blingStats.stockErrors}</p>
           </div>
+        </div>
+
+        <div className="mt-4 rounded-md border border-white/10 bg-black/20 p-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Fila automatica</p>
+              <p className="mt-1 text-sm text-slate-300">
+                Pending: <strong className="text-amber-200">{queueSummary.pending || 0}</strong>
+                {" "}Processing: <strong className="text-cyan-200">{queueSummary.processing || 0}</strong>
+                {" "}Erro/dead: <strong className="text-red-200">{Number(queueSummary.error || 0) + Number(queueSummary.dead || 0)}</strong>
+              </p>
+            </div>
+            <p className="text-xs text-slate-500">{queueLoading ? "Consultando..." : `${queueItems.length} job(s) recentes`}</p>
+          </div>
+          {queueItems.length ? (
+            <div className="mt-3 max-h-56 overflow-auto rounded-md border border-white/10">
+              <table className="min-w-full text-left text-xs text-slate-300">
+                <thead className="text-slate-500">
+                  <tr>
+                    <th className="py-2 pl-3 pr-3">Operacao</th>
+                    <th className="py-2 pr-3">Produto</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2 pr-3">Tentativas</th>
+                    <th className="py-2 pr-3">Detalhe</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {queueItems.slice(0, 10).map((job) => (
+                    <tr key={job.id} className="border-t border-white/10">
+                      <td className="py-2 pl-3 pr-3 font-mono text-slate-400">{job.operation}</td>
+                      <td className="py-2 pr-3">
+                        <span className="font-bold text-white">{job.product_name || job.sku || job.entity_id}</span>
+                        {job.sku ? <small className="mt-1 block font-mono text-slate-500">{job.sku}</small> : null}
+                      </td>
+                      <td className="py-2 pr-3 font-bold text-white">{job.status}</td>
+                      <td className="py-2 pr-3">{job.attempts}/{job.max_attempts}</td>
+                      <td className="py-2 pr-3 text-slate-400">{job.last_error || job.available_at || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
 
         {syncError ? (
