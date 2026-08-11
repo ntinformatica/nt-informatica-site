@@ -242,7 +242,7 @@ async function markSyncing(productId: string, syncAttemptId: string) {
   const rows = await supabaseRest(
     `/products?id=eq.${encodeURIComponent(productId)}`
     + "&bling_product_id=is.null"
-    + "&bling_sync_status=in.(not_sent,error,review_required)"
+    + "&bling_sync_status=in.(not_sent,dirty,error,review_required)"
     + "&select=id,bling_sync_status,bling_sync_metadata",
     {
       method: "PATCH",
@@ -263,7 +263,7 @@ async function markPreflightError(productId: string, errorCode: string, message:
   await supabaseRest(
     `/products?id=eq.${encodeURIComponent(productId)}`
     + "&bling_product_id=is.null"
-    + "&bling_sync_status=in.(not_sent,error,review_required)"
+    + "&bling_sync_status=in.(not_sent,dirty,error,review_required)"
     + "&select=id",
     {
       method: "PATCH",

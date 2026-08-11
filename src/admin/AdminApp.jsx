@@ -4106,7 +4106,7 @@ function blingErrorLabel(reason) {
   return labels[reason] || "Nao foi possivel conectar o Bling.";
 }
 
-function BlingIntegrationCard({ products = [] }) {
+function BlingIntegrationCard({ products = [], onProductsRefresh }) {
   const [status, setStatus] = useState(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [connecting, setConnecting] = useState(false);
@@ -4248,6 +4248,11 @@ function BlingIntegrationCard({ products = [] }) {
         next_cursor: cursor || null,
         ...total,
       });
+      try {
+        await onProductsRefresh?.();
+      } catch (refreshError) {
+        console.warn("Nao foi possivel atualizar os contadores Bling apos o lote:", refreshError);
+      }
       setMessage(hasMore ? "Lote processado parcialmente. Execute novamente para continuar." : "Lote concluido.");
     } catch (batchError) {
       console.error(batchError);
@@ -4268,6 +4273,11 @@ function BlingIntegrationCard({ products = [] }) {
         type: "jobs",
         ...payload,
       });
+      try {
+        await onProductsRefresh?.();
+      } catch (refreshError) {
+        console.warn("Nao foi possivel atualizar os contadores Bling apos a fila:", refreshError);
+      }
       setMessage("Fila Bling processada.");
     } catch (workerError) {
       console.error(workerError);
@@ -4616,12 +4626,12 @@ function BlingIntegrationCard({ products = [] }) {
   );
 }
 
-function SettingsPage({ products = [] }) {
+function SettingsPage({ products = [], onProductsRefresh }) {
   return (
     <section className="glass rounded-lg p-6">
       <h2 className="text-2xl font-black">Configurações</h2>
       <div className="mt-6">
-        <BlingIntegrationCard products={products} />
+        <BlingIntegrationCard products={products} onProductsRefresh={onProductsRefresh} />
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <TextField label="Nome da empresa" value={businessName} onChange={() => {}} readOnly />
@@ -4895,6 +4905,13 @@ export function AdminApp() {
 
   async function changeProductFeatured(product, featured) {
     return runAction(async () => updateProductFeatured(product.id, featured, categories), "Destaque atualizado.");
+  }
+
+  async function refreshAdminProducts() {
+    const loadedCategories = categories.length ? categories : await listCategories();
+    if (!categories.length) setCategories(loadedCategories);
+    const loadedProducts = await listProducts(loadedCategories);
+    setProducts(loadedProducts);
   }
 
   async function syncProductBling(product) {
@@ -5300,7 +5317,7 @@ export function AdminApp() {
           onCancelMaintenance={cancelArenaMaintenanceAction}
         />
       ) : null}
-      {!loading && info.page === "settings" ? <SettingsPage products={products} /> : null}
+      {!loading && info.page === "settings" ? <SettingsPage products={products} onProductsRefresh={refreshAdminProducts} /> : null}
       {!loading && info.page === "placeholder" ? <PlaceholderPage title={info.title} /> : null}
     </AdminShell>
   );

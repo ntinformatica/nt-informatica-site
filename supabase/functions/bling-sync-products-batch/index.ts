@@ -50,7 +50,7 @@ async function listCandidateProducts(params: { mode: string; limit: number; curs
   } else if (params.mode === "all_pending") {
     path += "&bling_product_id=is.null&bling_sync_status=in.(not_sent,dirty,error,review_required)";
   } else {
-    path += "&bling_product_id=is.null&bling_sync_status=in.(not_sent,dirty,review_required)";
+    path += "&bling_product_id=is.null&bling_sync_status=in.(not_sent,dirty)";
   }
 
   const rows = await supabaseRest(path);
