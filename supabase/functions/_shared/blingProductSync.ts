@@ -27,6 +27,13 @@ type ProductRow = {
   main_image?: string | null;
   images?: string[] | null;
   internal_notes?: string | null;
+  fiscal_ncm?: string | null;
+  fiscal_origin_code?: string | null;
+  fiscal_review_status?: string | null;
+  fiscal_source?: string | null;
+  fiscal_reviewed_at?: string | null;
+  fiscal_imported_from_bling_at?: string | null;
+  fiscal_metadata?: JsonObject | null;
   bling_product_id?: string | null;
   bling_synced_at?: string | null;
   bling_sync_status?: string | null;
@@ -82,6 +89,13 @@ export const PRODUCT_SELECT = [
   "main_image",
   "images",
   "internal_notes",
+  "fiscal_ncm",
+  "fiscal_origin_code",
+  "fiscal_review_status",
+  "fiscal_source",
+  "fiscal_reviewed_at",
+  "fiscal_imported_from_bling_at",
+  "fiscal_metadata",
   "bling_product_id",
   "bling_synced_at",
   "bling_sync_status",
@@ -107,6 +121,23 @@ function money(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return null;
   return Math.round(parsed * 100) / 100;
+}
+
+function fiscalNcm(value: unknown) {
+  const digits = cleanText(value).replace(/\D/g, "");
+  return digits.length === 8 ? digits : "";
+}
+
+function fiscalOrigin(value: unknown) {
+  const clean = cleanText(value);
+  return /^[0-8]$/.test(clean) ? Number(clean) : null;
+}
+
+function productFiscalPayload(product: ProductRow) {
+  const ncm = fiscalNcm(product.fiscal_ncm);
+  const origem = fiscalOrigin(product.fiscal_origin_code);
+  if (!ncm || origem === null) return null;
+  return { ncm, origem };
 }
 
 function nowIso() {
@@ -204,7 +235,7 @@ function buildBlingProductPayload(product: ProductRow) {
     cleanText(product.warranty) ? `Garantia: ${cleanText(product.warranty)}` : "",
   ].filter(Boolean);
 
-  return {
+  const payload: JsonObject = {
     nome: cleanText(product.name).slice(0, 120),
     codigo: cleanText(product.sku),
     preco: money(product.price),
@@ -215,6 +246,9 @@ function buildBlingProductPayload(product: ProductRow) {
     descricaoCurta: shortDescription || fullDescription.slice(0, 255),
     descricaoComplementar: [fullDescription, ...metadata].filter(Boolean).join("\n\n"),
   };
+  const tributacao = productFiscalPayload(product);
+  if (tributacao) payload.tributacao = tributacao;
+  return payload;
 }
 
 function sanitizeBlingResponse(value: unknown): unknown {
@@ -445,11 +479,21 @@ function productDataFromResponse(response: unknown) {
 
 function buildBlingProductUpdatePayload(remoteProductResponse: unknown, product: ProductRow) {
   const remoteProduct = productDataFromResponse(remoteProductResponse);
-  return {
+  const payload: JsonObject = {
     ...remoteProduct,
     ...buildBlingProductPayload(product),
     id: Number(cleanText(product.bling_product_id)) || remoteProduct.id,
   };
+  const tributacao = productFiscalPayload(product);
+  if (tributacao) {
+    payload.tributacao = {
+      ...(isObject(remoteProduct.tributacao) ? remoteProduct.tributacao : {}),
+      ...tributacao,
+    };
+  } else if (isObject(remoteProduct.tributacao)) {
+    payload.tributacao = remoteProduct.tributacao;
+  }
+  return payload;
 }
 
 async function updateLinkedBlingProduct(context: BlingAccessContext, product: ProductRow) {

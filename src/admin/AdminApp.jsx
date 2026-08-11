@@ -157,6 +157,15 @@ const emptyProduct = {
   sku: "",
   warranty: "",
   internalNotes: "",
+  fiscalNcm: "",
+  fiscalNcmInitial: "",
+  fiscalOriginCode: "",
+  fiscalOriginCodeInitial: "",
+  fiscalReviewStatus: "incomplete",
+  fiscalSource: "",
+  fiscalReviewedAt: "",
+  fiscalImportedFromBlingAt: "",
+  fiscalMetadata: {},
 };
 
 const emptyVariation = {
@@ -1039,6 +1048,52 @@ const blingStockSyncLabels = {
   error: "Erro ao sincronizar estoque",
 };
 
+const fiscalOriginOptions = [
+  ["", "Selecionar origem"],
+  ["0", "0 - Nacional, exceto as indicadas nos codigos 3, 4, 5 e 8"],
+  ["1", "1 - Estrangeira - importacao direta, exceto codigo 6"],
+  ["2", "2 - Estrangeira - adquirida no mercado interno, exceto codigo 7"],
+  ["3", "3 - Nacional, conteudo de importacao superior a 40% e inferior ou igual a 70%"],
+  ["4", "4 - Nacional, produzida conforme processos produtivos basicos"],
+  ["5", "5 - Nacional, conteudo de importacao inferior ou igual a 40%"],
+  ["6", "6 - Estrangeira - importacao direta, sem similar nacional"],
+  ["7", "7 - Estrangeira - adquirida no mercado interno, sem similar nacional"],
+  ["8", "8 - Nacional, conteudo de importacao superior a 70%"],
+];
+
+function normalizeFiscalNcmInput(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 8);
+}
+
+function fiscalStatusInfo(form) {
+  if (form.fiscalReviewStatus === "divergent") {
+    return {
+      label: "Divergencia com Bling",
+      tone: "border-amber-300/40 bg-amber-300/10 text-amber-100",
+      missing: [],
+    };
+  }
+
+  const hasNcm = normalizeFiscalNcmInput(form.fiscalNcm).length === 8;
+  const hasOrigin = /^[0-8]$/.test(String(form.fiscalOriginCode || ""));
+  const missing = [
+    hasNcm ? "" : "NCM",
+    hasOrigin ? "" : "Origem",
+  ].filter(Boolean);
+
+  return missing.length
+    ? {
+        label: "Dados fiscais incompletos",
+        tone: "border-slate-600 bg-slate-950 text-slate-200",
+        missing,
+      }
+    : {
+        label: "Dados fiscais completos",
+        tone: "border-lime-300/40 bg-lime-300/10 text-lime-100",
+        missing: [],
+      };
+}
+
 function ProductFormPage({
   mode,
   productId,
@@ -1062,12 +1117,14 @@ function ProductFormPage({
   const [blingSelectedDepositId, setBlingSelectedDepositId] = useState("");
   const [blingStockStatus, setBlingStockStatus] = useState("");
   const [blingStockLoading, setBlingStockLoading] = useState(false);
+  const [fiscalError, setFiscalError] = useState("");
   const installmentBase = form.price || form.promoPrice;
   const cashPrice = calculateCashPrice(form.price);
   const stockMetadata = existingProduct?.blingStockSyncMetadata || {};
   const configuredDepositName = blingConfiguredDeposit?.nome || stockMetadata.depositName || "";
   const configuredDepositId = blingConfiguredDeposit?.id || stockMetadata.depositId || "";
   const lastBlingStock = stockMetadata.blingStockAfter ?? stockMetadata.blingStockBefore ?? "";
+  const fiscalInfo = fiscalStatusInfo(form);
 
   useEffect(() => {
     setForm(normalizeProductForm(isEdit ? existingProduct : emptyProduct, categories));
@@ -1102,13 +1159,18 @@ function ProductFormPage({
 
   function updateField(field, value) {
     setForm((current) => {
-      const next = { ...current, [field]: value };
+      const next = { ...current, [field]: field === "fiscalNcm" ? normalizeFiscalNcmInput(value) : value };
       if (field === "name" && !isEdit) next.slug = slugify(value);
       if (field === "mainImage") next.images = listToText([value, ...textToList(current.gallery)]);
       if (field === "gallery") next.images = listToText([current.mainImage, ...textToList(value)]);
       if (field === "categoryId") {
         const category = categories.find((item) => item.id === value);
         next.category = category?.name || "";
+      }
+      if (field === "fiscalNcm" || field === "fiscalOriginCode") {
+        const hasNcm = normalizeFiscalNcmInput(next.fiscalNcm).length === 8;
+        const hasOrigin = /^[0-8]$/.test(String(next.fiscalOriginCode || ""));
+        next.fiscalReviewStatus = hasNcm && hasOrigin ? "complete" : "incomplete";
       }
       return next;
     });
@@ -1133,6 +1195,12 @@ function ProductFormPage({
 
   async function handleSubmit(event) {
     event.preventDefault();
+    setFiscalError("");
+    const fiscalNcm = normalizeFiscalNcmInput(form.fiscalNcm);
+    if (fiscalNcm && fiscalNcm.length !== 8) {
+      setFiscalError("O NCM deve estar vazio ou conter exatamente 8 digitos.");
+      return;
+    }
     const saved = await onSave(isEdit ? existingProduct.id : null, form);
     if (saved) window.location.href = "/admin/produtos";
   }
@@ -1201,6 +1269,7 @@ function ProductFormPage({
   return (
     <form onSubmit={handleSubmit} className="grid gap-6">
       {error ? <div className="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{error}</div> : null}
+      {fiscalError ? <div className="rounded-md border border-red-400/40 bg-red-500/10 p-4 text-sm text-red-100">{fiscalError}</div> : null}
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
         <TextField label="Nome do produto" value={form.name} onChange={(value) => updateField("name", value)} required />
@@ -1235,6 +1304,38 @@ function ProductFormPage({
         <TextField label="Imagem principal" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="URL da imagem principal" />
         <TextareaField label="Galeria de imagens por URL" value={form.gallery} onChange={(value) => updateField("gallery", value)} placeholder="Uma URL por linha" />
         <TextareaField label="Observações internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
+      </section>
+
+      <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black">Dados fiscais</h2>
+            <p className="mt-1 text-sm text-slate-400">Preencha NCM e origem para deixar o produto pronto para emissao fiscal no Bling.</p>
+          </div>
+          <span className={`inline-flex min-h-9 items-center rounded-md border px-3 py-2 text-sm font-black ${fiscalInfo.tone}`}>
+            {fiscalInfo.label}
+          </span>
+        </div>
+        {fiscalInfo.missing.length ? (
+          <p className="rounded-md border border-slate-700 bg-slate-950 p-3 text-sm text-slate-300">
+            Campos pendentes: <strong className="text-white">{fiscalInfo.missing.join(", ")}</strong>.
+          </p>
+        ) : null}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <label>
+            <span className="text-sm font-bold text-slate-200">NCM</span>
+            <input
+              value={form.fiscalNcm}
+              onChange={(event) => updateField("fiscalNcm", event.target.value)}
+              inputMode="numeric"
+              maxLength={8}
+              placeholder="Ex.: 85044090"
+              className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-white outline-none focus:border-nt-cyan"
+            />
+            <span className="mt-2 block text-xs text-slate-500">Classificacao fiscal do produto (8 digitos).</span>
+          </label>
+          <SelectField label="Origem da mercadoria" value={form.fiscalOriginCode} onChange={(value) => updateField("fiscalOriginCode", value)} options={fiscalOriginOptions} />
+        </div>
       </section>
 
       <section className="rounded-lg border border-white/10 bg-white/5 p-5">

@@ -47,7 +47,9 @@ begin
     or p_old.full_description is distinct from p_new.full_description
     or p_old.brand is distinct from p_new.brand
     or p_old.model is distinct from p_new.model
-    or p_old.warranty is distinct from p_new.warranty;
+    or p_old.warranty is distinct from p_new.warranty
+    or p_old.fiscal_ncm is distinct from p_new.fiscal_ncm
+    or p_old.fiscal_origin_code is distinct from p_new.fiscal_origin_code;
 end;
 $$;
 

@@ -68,6 +68,20 @@ function moneyForInput(value) {
   });
 }
 
+function normalizeFiscalNcm(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeFiscalOriginCode(value) {
+  const clean = String(value || "").trim();
+  return /^[0-8]$/.test(clean) ? clean : "";
+}
+
+function fiscalReviewStatus(ncm, originCode, currentStatus = "") {
+  if (currentStatus === "divergent") return "divergent";
+  return normalizeFiscalNcm(ncm).length === 8 && normalizeFiscalOriginCode(originCode) ? "complete" : "incomplete";
+}
+
 function normalizeVariation(variation = {}, index = 0) {
   return {
     id: variation.id || `variation-${Date.now()}-${index}`,
@@ -137,6 +151,15 @@ function fromSupabase(row, categories = [], variations = []) {
     blingStockSyncStatus: row.bling_stock_sync_status || "not_synced",
     blingStockSyncError: row.bling_stock_sync_error || "",
     blingStockSyncMetadata: row.bling_stock_sync_metadata || {},
+    fiscalNcm: row.fiscal_ncm || "",
+    fiscalNcmInitial: row.fiscal_ncm || "",
+    fiscalOriginCode: row.fiscal_origin_code || "",
+    fiscalOriginCodeInitial: row.fiscal_origin_code || "",
+    fiscalReviewStatus: row.fiscal_review_status || "incomplete",
+    fiscalSource: row.fiscal_source || "",
+    fiscalReviewedAt: row.fiscal_reviewed_at || "",
+    fiscalImportedFromBlingAt: row.fiscal_imported_from_bling_at || "",
+    fiscalMetadata: row.fiscal_metadata || {},
     updatedAt: row.updated_at || row.created_at,
   };
 }
@@ -146,6 +169,21 @@ function toSupabase(product, categories = []) {
   const [mainImage = ""] = normalizeImageList([product.mainImage]);
   const galleryImages = product.gallery !== undefined ? normalizeImageList(product.gallery) : normalizeImageList(product.images);
   const images = normalizeImageList([mainImage, ...galleryImages]);
+  const fiscalNcm = normalizeFiscalNcm(product.fiscalNcm);
+  const fiscalOriginCode = normalizeFiscalOriginCode(product.fiscalOriginCode);
+  if (fiscalNcm && fiscalNcm.length !== 8) {
+    throw new Error("O NCM deve estar vazio ou conter exatamente 8 digitos.");
+  }
+  const fiscalChanged = fiscalNcm !== normalizeFiscalNcm(product.fiscalNcmInitial)
+    || fiscalOriginCode !== normalizeFiscalOriginCode(product.fiscalOriginCodeInitial);
+  const nextFiscalStatus = fiscalReviewStatus(
+    fiscalNcm,
+    fiscalOriginCode,
+    fiscalChanged ? "" : product.fiscalReviewStatus,
+  );
+  const fiscalSource = fiscalChanged
+    ? (fiscalNcm || fiscalOriginCode ? "manual" : null)
+    : product.fiscalSource || null;
 
   return {
     name: product.name,
@@ -165,6 +203,13 @@ function toSupabase(product, categories = []) {
     main_image: mainImage || images[0] || "",
     images,
     internal_notes: product.internalNotes || "",
+    fiscal_ncm: fiscalNcm || null,
+    fiscal_origin_code: fiscalOriginCode || null,
+    fiscal_review_status: nextFiscalStatus,
+    fiscal_source: fiscalSource,
+    fiscal_reviewed_at: product.fiscalReviewedAt || null,
+    fiscal_imported_from_bling_at: product.fiscalImportedFromBlingAt || null,
+    fiscal_metadata: product.fiscalMetadata || {},
     updated_at: new Date().toISOString(),
   };
 }
@@ -215,6 +260,15 @@ function normalizeLocalProduct(product, categories = []) {
     stock: Number(product.stock || 0),
     featured: Boolean(product.featured),
     status: product.status || "rascunho",
+    fiscalNcm: normalizeFiscalNcm(product.fiscalNcm),
+    fiscalNcmInitial: normalizeFiscalNcm(product.fiscalNcmInitial),
+    fiscalOriginCode: normalizeFiscalOriginCode(product.fiscalOriginCode),
+    fiscalOriginCodeInitial: normalizeFiscalOriginCode(product.fiscalOriginCodeInitial),
+    fiscalReviewStatus: fiscalReviewStatus(product.fiscalNcm, product.fiscalOriginCode, product.fiscalReviewStatus),
+    fiscalSource: product.fiscalSource || "",
+    fiscalReviewedAt: product.fiscalReviewedAt || "",
+    fiscalImportedFromBlingAt: product.fiscalImportedFromBlingAt || "",
+    fiscalMetadata: product.fiscalMetadata || {},
   };
 }
 
