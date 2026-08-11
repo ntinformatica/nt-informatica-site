@@ -318,7 +318,7 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
             {order.bling_order_number ? <p className="text-sm text-slate-300">Numero Bling: <strong className="text-white">{order.bling_order_number}</strong></p> : null}
             {order.bling_synced_at ? <p className="text-sm text-slate-300">Enviado em: <strong className="text-white">{formatStoreDateTime(order.bling_synced_at)}</strong></p> : null}
             {order.bling_sync_error ? <p className="mt-2 text-sm text-red-100">{order.bling_sync_error}</p> : null}
-            <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria apenas o pedido de venda no Bling. Nenhuma nota fiscal sera emitida automaticamente.</p>
+            <p className="mt-3 text-xs leading-5 text-slate-500">Esta acao cria ou atualiza o pedido de venda no Bling. Nenhuma nota fiscal sera emitida automaticamente.</p>
           </div>
           <button
             type="button"
@@ -326,7 +326,7 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
             onClick={() => onSendBling(order)}
             className="inline-flex min-h-10 items-center justify-center rounded-md border border-nt-cyan/40 bg-nt-cyan/10 px-4 py-2 text-sm font-black text-nt-cyan transition hover:bg-nt-cyan/20 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {blingSaving ? (blingLinked ? "Atualizando cliente..." : "Enviando...") : blingLinked ? "Atualizar cliente no Bling" : "Enviar ao Bling"}
+            {blingSaving ? (blingLinked ? "Atualizando no Bling..." : "Enviando...") : blingLinked ? "Atualizar pedido no Bling" : "Enviar ao Bling"}
           </button>
         </div>
       </div>
@@ -487,7 +487,7 @@ export function StoreOrdersPage() {
     const blingLinked = Boolean(order.bling_order_id);
     const confirmed = window.confirm(
       blingLinked
-        ? "Os dados fiscais do cliente serao atualizados no Bling sem criar outro pedido. Deseja continuar?"
+        ? "O pedido vinculado sera atualizado no Bling sem criar outro pedido. Deseja continuar?"
         : "Este pedido sera criado no Bling. Nenhuma nota fiscal sera emitida automaticamente nesta etapa. Deseja continuar?",
     );
     if (!confirmed) return;
@@ -498,7 +498,7 @@ export function StoreOrdersPage() {
     try {
       const result = await sendStoreOrderToBling(order.id);
       if (result?.order) mergeUpdatedOrder(result.order);
-      setNotice(blingLinked || result?.already_linked ? "Dados fiscais atualizados no Bling." : "Pedido enviado ao Bling com sucesso.");
+      setNotice(blingLinked || result?.already_linked ? "Pedido atualizado no Bling." : "Pedido enviado ao Bling com sucesso.");
     } catch (blingError) {
       console.error(blingError);
       setError(blingError?.message || "Nao foi possivel enviar o pedido ao Bling.");
