@@ -76,6 +76,29 @@ type BlingProduct = {
   nome?: string | null;
 };
 
+type BlingContact = {
+  id?: number | string | null;
+  nome?: string | null;
+  numeroDocumento?: string | null;
+};
+
+type BlingContactResolution = {
+  id: number;
+  action: "existing_contact" | "updated_contact" | "created_contact";
+};
+
+type BlingCreateOrderStage =
+  | "idle"
+  | "find_existing_order"
+  | "find_contact"
+  | "create_contact"
+  | "get_contact"
+  | "update_contact"
+  | "find_product"
+  | "create_order";
+
+type StageTracker = (stage: BlingCreateOrderStage) => void;
+
 const SYNC_LOCK_STALE_MS = 10 * 60 * 1000;
 const STORE_ORDER_SELECT = [
   "*",
@@ -383,6 +406,17 @@ function validationMessage(code: string) {
     invalid_order_total: "Pedido sem valor total valido.",
     missing_customer_data: "Pedido sem nome do cliente.",
     missing_customer_document: "Pedido sem CPF/CNPJ valido para enviar ao Bling.",
+    missing_bling_contact_name: "Pedido sem nome do cliente para criar contato no Bling.",
+    missing_bling_contact_document: "Pedido sem CPF/CNPJ valido para criar contato no Bling.",
+    missing_billing_street: "Endereco de faturamento incompleto: endereco ausente.",
+    missing_billing_number: "Endereco de faturamento incompleto: numero ausente.",
+    missing_billing_district: "Endereco de faturamento incompleto: bairro ausente.",
+    missing_billing_postal_code: "Endereco de faturamento incompleto: CEP ausente ou invalido.",
+    missing_billing_city: "Endereco de faturamento incompleto: cidade ausente.",
+    missing_billing_state: "Endereco de faturamento incompleto: UF ausente ou invalida.",
+    multiple_bling_contacts: "Mais de um contato no Bling possui o mesmo CPF/CNPJ. Revise manualmente antes de enviar o pedido.",
+    bling_contact_without_id: "O Bling retornou um contato sem ID.",
+    bling_contact_response_without_id: "O Bling criou uma resposta sem ID de contato.",
     invalid_item_quantity: "Pedido possui item com quantidade invalida.",
     invalid_item_price: "Pedido possui item com valor invalido.",
     missing_product_sku: "Pedido possui item sem SKU/codigo para localizar no Bling.",
@@ -390,6 +424,20 @@ function validationMessage(code: string) {
     bling_response_without_order_id: "O Bling criou uma resposta sem ID de pedido.",
   };
   return messages[code] || "Pedido nao esta completo para envio ao Bling.";
+}
+
+function isBlingContactError(code: string) {
+  return code === "missing_bling_contact_name"
+    || code === "missing_bling_contact_document"
+    || code === "missing_billing_street"
+    || code === "missing_billing_number"
+    || code === "missing_billing_district"
+    || code === "missing_billing_postal_code"
+    || code === "missing_billing_city"
+    || code === "missing_billing_state"
+    || code === "multiple_bling_contacts"
+    || code === "bling_contact_without_id"
+    || code === "bling_contact_response_without_id";
 }
 
 function paymentDescription(order: StoreOrder) {
@@ -420,11 +468,166 @@ function buildContact(order: StoreOrder) {
   };
 }
 
-async function findBlingProductByCode(context: BlingAccessContext, code: string) {
+function compactObject(value: JsonObject): JsonObject {
+  const compacted: JsonObject = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (Array.isArray(raw)) {
+      const items = raw
+        .map((item) => isObject(item) ? compactObject(item) : item)
+        .filter((item) => item !== "" && item !== null && item !== undefined);
+      if (items.length) compacted[key] = items;
+      continue;
+    }
+    if (isObject(raw)) {
+      const nested = compactObject(raw);
+      if (Object.keys(nested).length) compacted[key] = nested;
+      continue;
+    }
+    if (raw !== "" && raw !== null && raw !== undefined) compacted[key] = raw;
+  }
+  return compacted;
+}
+
+function blingContactId(value: unknown) {
+  const id = Number(value);
+  return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+function contactDocument(contact: unknown) {
+  if (!isObject(contact)) return "";
+  return cleanDigits(contact.numeroDocumento || contact.documento || contact.cpf || contact.cnpj);
+}
+
+function buildBlingContactPayload(order: StoreOrder) {
+  const contact = buildContact(order);
+  if (!contact.nome) throw new Error("missing_bling_contact_name");
+  if (![11, 14].includes(contact.numeroDocumento.length)) throw new Error("missing_bling_contact_document");
+  validateFiscalAddress(contact.endereco);
+
+  const enderecoGeral = compactObject({
+    endereco: contact.endereco.endereco,
+    cep: contact.endereco.cep,
+    bairro: contact.endereco.bairro,
+    municipio: contact.endereco.municipio,
+    uf: contact.endereco.uf,
+    numero: contact.endereco.numero,
+    complemento: contact.endereco.complemento,
+  });
+
+  return compactObject({
+    nome: contact.nome,
+    situacao: "A",
+    numeroDocumento: contact.numeroDocumento,
+    telefone: contact.telefone,
+    tipo: contact.tipoPessoa,
+    email: contact.email,
+    endereco: Object.keys(enderecoGeral).length ? { geral: enderecoGeral } : undefined,
+  });
+}
+
+async function findBlingContactByDocument(context: BlingAccessContext, document: string, setStage?: StageTracker) {
+  const query = new URLSearchParams();
+  query.set("pagina", "1");
+  query.set("limite", "10");
+  query.set("numeroDocumento", document);
+  setStage?.("find_contact");
+  const response = await blingRequestWithTokenRefresh(context, `/contatos?${query.toString()}`, { method: "GET" });
+  const rows = isObject(response) && Array.isArray(response.data) ? response.data : [];
+  const matches = rows.filter((item) => contactDocument(item) === document);
+
+  if (matches.length > 1) throw new Error("multiple_bling_contacts");
+  if (matches.length === 1) {
+    const contact = matches[0] as BlingContact;
+    const id = blingContactId(contact.id);
+    if (!id) throw new Error("bling_contact_without_id");
+    return id;
+  }
+  return null;
+}
+
+async function loadBlingContactById(context: BlingAccessContext, contactId: number, setStage?: StageTracker) {
+  setStage?.("get_contact");
+  const response = await blingRequestWithTokenRefresh(context, `/contatos/${encodeURIComponent(String(contactId))}`, { method: "GET" });
+  const data = isObject(response) && isObject(response.data) ? response.data : response;
+  return isObject(data) ? data : {};
+}
+
+function validateFiscalAddress(address: ReturnType<typeof buildContact>["endereco"]) {
+  if (!address.endereco) throw new Error("missing_billing_street");
+  if (!address.numero) throw new Error("missing_billing_number");
+  if (!address.bairro) throw new Error("missing_billing_district");
+  if (address.cep.length !== 8) throw new Error("missing_billing_postal_code");
+  if (!address.municipio) throw new Error("missing_billing_city");
+  if (!/^[A-Z]{2}$/.test(address.uf)) throw new Error("missing_billing_state");
+}
+
+function mergeBlingContactPayload(remoteContact: JsonObject, managedContact: JsonObject) {
+  const remoteAddress = isObject(remoteContact.endereco) ? remoteContact.endereco : {};
+  const remoteGeneralAddress = isObject(remoteAddress.geral) ? remoteAddress.geral : {};
+  const managedAddress = isObject(managedContact.endereco) ? managedContact.endereco : {};
+  const managedGeneralAddress = isObject(managedAddress.geral) ? managedAddress.geral : {};
+
+  return compactObject({
+    ...remoteContact,
+    ...managedContact,
+    endereco: {
+      ...remoteAddress,
+      ...managedAddress,
+      geral: {
+        ...remoteGeneralAddress,
+        ...managedGeneralAddress,
+      },
+    },
+  });
+}
+
+async function updateBlingContact(context: BlingAccessContext, contactId: number, order: StoreOrder, setStage?: StageTracker) {
+  const remoteContact = await loadBlingContactById(context, contactId, setStage);
+  const payload = mergeBlingContactPayload(remoteContact, buildBlingContactPayload(order));
+  setStage?.("update_contact");
+  await blingRequestWithTokenRefresh(context, `/contatos/${encodeURIComponent(String(contactId))}`, {
+    method: "PUT",
+    body: payload,
+  });
+}
+
+async function createBlingContact(context: BlingAccessContext, order: StoreOrder, setStage?: StageTracker) {
+  const payload = buildBlingContactPayload(order);
+  setStage?.("create_contact");
+  const response = await blingRequestWithTokenRefresh(context, "/contatos", {
+    method: "POST",
+    body: payload,
+  });
+  const data = isObject(response) && isObject(response.data) ? response.data : response;
+  const id = isObject(data) ? blingContactId(data.id) : null;
+  if (!id) throw new Error("bling_contact_response_without_id");
+  return id;
+}
+
+async function ensureBlingContactForOrder(
+  context: BlingAccessContext,
+  order: StoreOrder,
+  setStage?: StageTracker,
+): Promise<BlingContactResolution> {
+  const contact = buildContact(order);
+  if (![11, 14].includes(contact.numeroDocumento.length)) throw new Error("missing_bling_contact_document");
+
+  const existingId = await findBlingContactByDocument(context, contact.numeroDocumento, setStage);
+  if (existingId) {
+    await updateBlingContact(context, existingId, order, setStage);
+    return { id: existingId, action: "updated_contact" };
+  }
+
+  const createdId = await createBlingContact(context, order, setStage);
+  return { id: createdId, action: "created_contact" };
+}
+
+async function findBlingProductByCode(context: BlingAccessContext, code: string, setStage?: StageTracker) {
   const query = new URLSearchParams();
   query.set("pagina", "1");
   query.set("limite", "10");
   query.set("codigo", code);
+  setStage?.("find_product");
   const response = await blingRequestWithTokenRefresh(context, `/produtos?${query.toString()}`, { method: "GET" });
   const rows = isObject(response) && Array.isArray(response.data) ? response.data : [];
   return rows.find((item) => {
@@ -433,11 +636,11 @@ async function findBlingProductByCode(context: BlingAccessContext, code: string)
   }) as BlingProduct | undefined;
 }
 
-async function buildItems(context: BlingAccessContext, order: StoreOrder) {
+async function buildItems(context: BlingAccessContext, order: StoreOrder, setStage?: StageTracker) {
   const items = [];
   for (const item of order.store_order_items || []) {
     const code = cleanText(item.sku || item.internal_code);
-    const blingProduct = await findBlingProductByCode(context, code);
+    const blingProduct = await findBlingProductByCode(context, code, setStage);
     if (!blingProduct?.id) throw new Error("missing_bling_product");
 
     items.push({
@@ -455,11 +658,12 @@ async function buildItems(context: BlingAccessContext, order: StoreOrder) {
   return items;
 }
 
-async function findExistingBlingOrderByNumeroLoja(context: BlingAccessContext, orderNumber: string) {
+async function findExistingBlingOrderByNumeroLoja(context: BlingAccessContext, orderNumber: string, setStage?: StageTracker) {
   const query = new URLSearchParams();
   query.set("pagina", "1");
   query.set("limite", "10");
   query.set("numerosLojas[]", orderNumber);
+  setStage?.("find_existing_order");
   const response = await blingRequestWithTokenRefresh(context, `/pedidos/vendas?${query.toString()}`, { method: "GET" });
   const rows = isObject(response) && Array.isArray(response.data) ? response.data : [];
   return rows.find((item) => {
@@ -469,10 +673,12 @@ async function findExistingBlingOrderByNumeroLoja(context: BlingAccessContext, o
   });
 }
 
-function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[]) {
+function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[], contactId: number) {
   const total = money(order.total_amount) || 0;
   return {
-    contato: buildContact(order),
+    contato: {
+      id: contactId,
+    },
     itens: items,
     numeroLoja: order.order_number,
     data: dateOnly(order.created_at),
@@ -511,14 +717,15 @@ function buildBlingOrderPayload(order: StoreOrder, items: JsonObject[]) {
 
 function sanitizeBlingResponse(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sanitizeBlingResponse);
+  if (typeof value === "string") return maskSensitiveText(value);
   if (!isObject(value)) return value;
 
   const sanitized: JsonObject = {};
   for (const [key, raw] of Object.entries(value)) {
     const normalized = key.toLowerCase();
-    if (normalized.includes("token") || normalized === "authorization") continue;
-    if (["numerodocumento", "documento", "cpf", "cnpj"].includes(normalized)) {
-      sanitized[key] = maskDocument(raw);
+    if (isSensitiveSecretKey(normalized)) continue;
+    if (isSensitivePersonalKey(normalized)) {
+      sanitized[key] = maskPersonalValue(raw);
       continue;
     }
     sanitized[key] = sanitizeBlingResponse(raw);
@@ -526,11 +733,112 @@ function sanitizeBlingResponse(value: unknown): unknown {
   return sanitized;
 }
 
-function blingErrorMessage(error: BlingHttpError) {
+function isSensitiveSecretKey(normalizedKey: string) {
+  return normalizedKey.includes("token")
+    || normalizedKey.includes("authorization")
+    || normalizedKey.includes("apikey")
+    || normalizedKey.includes("api_key")
+    || normalizedKey.includes("secret")
+    || normalizedKey.includes("senha")
+    || normalizedKey.includes("password");
+}
+
+function isSensitivePersonalKey(normalizedKey: string) {
+  return normalizedKey.includes("documento")
+    || normalizedKey === "cpf"
+    || normalizedKey === "cnpj"
+    || normalizedKey.includes("cartao")
+    || normalizedKey.includes("cartão")
+    || normalizedKey.includes("card")
+    || normalizedKey.includes("cvv")
+    || normalizedKey.includes("validade")
+    || normalizedKey.includes("email")
+    || normalizedKey.includes("telefone")
+    || normalizedKey.includes("celular")
+    || normalizedKey.includes("phone")
+    || normalizedKey.includes("endereco")
+    || normalizedKey.includes("logradouro")
+    || normalizedKey.includes("bairro")
+    || normalizedKey.includes("cep")
+    || normalizedKey.includes("complemento");
+}
+
+function maskPersonalValue(value: unknown) {
+  if (Array.isArray(value)) return value.map(maskPersonalValue);
+  if (isObject(value)) return sanitizeBlingResponse(value);
+  if (typeof value === "number") return "***";
+  const text = cleanText(value);
+  if (!text) return "";
+  if (text.includes("@")) return text.replace(/(^.).*(@.*$)/, "$1***$2");
+  const digits = cleanDigits(text);
+  if (digits.length >= 8) return maskDocument(digits);
+  return "***";
+}
+
+function maskSensitiveText(value: string) {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, (match) => String(maskPersonalValue(match)))
+    .replace(/\b\d{11,19}\b/g, (match) => maskDocument(match));
+}
+
+function stringifySafe(value: unknown, maxLength = 500) {
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  if (!text) return "";
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function stringifyLog(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return stringifySafe(value, 2000);
+  }
+}
+
+function collectBlingMessages(value: unknown, messages: string[] = []) {
+  if (messages.length >= 4) return messages;
+  if (typeof value === "string") {
+    const text = maskSensitiveText(value).trim();
+    if (text) messages.push(text);
+    return messages;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectBlingMessages(item, messages);
+    return messages;
+  }
+  if (!isObject(value)) return messages;
+
+  const preferredKeys = ["message", "mensagem", "description", "descricao", "detail", "details", "error", "errors", "field", "fields", "campo", "campos"];
+  for (const key of preferredKeys) {
+    if (key in value) collectBlingMessages(value[key], messages);
+  }
+  if (!messages.length) {
+    for (const nested of Object.values(value)) collectBlingMessages(nested, messages);
+  }
+  return messages;
+}
+
+function summarizeBlingError(error: BlingHttpError) {
+  const sanitizedPayload = sanitizeBlingResponse(error.payload);
+  const messages = [...new Set(collectBlingMessages(sanitizedPayload).map((message) => message.trim()).filter(Boolean))];
+  const apiMessage = messages.join(" | ");
+  return {
+    status: error.status,
+    temporary: error.temporary,
+    message: apiMessage || stringifySafe(sanitizedPayload, 300) || "sem detalhes retornados pela API",
+    payload: sanitizedPayload,
+  };
+}
+
+function blingErrorMessage(error: BlingHttpError, apiMessage = "") {
   if (error.status === 401) return "Token do Bling invalido ou expirado.";
   if (error.status === 403) return "Escopo insuficiente para criar pedido de venda no Bling.";
   if (error.status === 404) return "Recurso nao encontrado no Bling.";
-  if (error.status === 422) return "O Bling recusou os dados do pedido. Revise os dados fiscais e SKUs.";
+  if (error.status === 400 || error.status === 422) {
+    return apiMessage
+      ? `Nao foi possivel criar o pedido no Bling: ${apiMessage}`
+      : "O Bling recusou os dados do pedido. Revise os dados fiscais e SKUs.";
+  }
   if (error.status === 429) return "Limite de requisicoes do Bling atingido. Tente novamente em instantes.";
   if (error.status >= 500) return "Erro temporario na API do Bling.";
   return "Nao foi possivel criar o pedido no Bling.";
@@ -543,6 +851,10 @@ Deno.serve(async (request) => {
   let orderId = "";
   let syncAttemptId = "";
   let ownsSyncAttempt = false;
+  let currentStage: BlingCreateOrderStage = "idle";
+  const setStage: StageTracker = (stage) => {
+    currentStage = stage;
+  };
 
   try {
     if (request.method !== "POST") return fail(request, "Metodo nao permitido.", 405);
@@ -564,6 +876,17 @@ Deno.serve(async (request) => {
     if (!order) return fail(request, "Pedido nao encontrado.", 404, { code: "order_not_found" });
 
     if (order.bling_order_id) {
+      const connection = await loadActiveBlingConnection();
+      const accessToken = await accessTokenForBlingConnection(connection);
+      const context = { connection, accessToken };
+      const contact = await ensureBlingContactForOrder(context, order, setStage);
+      console.info("bling-create-order contact resolved", {
+        orderId,
+        action: contact.action,
+        blingContactId: contact.id,
+        alreadyLinkedOrder: true,
+      });
+
       return ok(request, {
         success: true,
         already_linked: true,
@@ -592,7 +915,7 @@ Deno.serve(async (request) => {
     const connection = await loadActiveBlingConnection();
     const accessToken = await accessTokenForBlingConnection(connection);
     const context = { connection, accessToken };
-    const existingBlingOrder = await findExistingBlingOrderByNumeroLoja(context, order.order_number);
+    const existingBlingOrder = await findExistingBlingOrderByNumeroLoja(context, order.order_number, setStage);
 
     const lockAcquired = await markSyncing(orderId, syncAttemptId);
     ownsSyncAttempt = lockAcquired;
@@ -640,7 +963,7 @@ Deno.serve(async (request) => {
     }
 
     if (!lockAcquired && ownsSyncAttempt) {
-      const staleCheck = await findExistingBlingOrderByNumeroLoja(context, order.order_number);
+      const staleCheck = await findExistingBlingOrderByNumeroLoja(context, order.order_number, setStage);
       if (staleCheck) {
         const updatedOrder = await saveBlingLink(orderId, { data: staleCheck }, syncAttemptId);
         await insertOrderLog(orderId, user.id, "Pedido vinculado a pedido ja existente no Bling apos recuperar tentativa antiga.", {
@@ -657,8 +980,16 @@ Deno.serve(async (request) => {
       }
     }
 
-    const items = await buildItems(context, order);
-    const blingPayload = buildBlingOrderPayload(order, items);
+    const contact = await ensureBlingContactForOrder(context, order, setStage);
+    console.info("bling-create-order contact resolved", {
+      orderId,
+      action: contact.action,
+      blingContactId: contact.id,
+    });
+
+    const items = await buildItems(context, order, setStage);
+    const blingPayload = buildBlingOrderPayload(order, items, contact.id);
+    setStage("create_order");
     const blingResponse = await blingRequestWithTokenRefresh(context, "/pedidos/vendas", {
       method: "POST",
       body: blingPayload,
@@ -678,20 +1009,31 @@ Deno.serve(async (request) => {
       order: updatedOrder,
     });
   } catch (error) {
+    const blingError = error instanceof BlingHttpError ? summarizeBlingError(error) : null;
+
     if (orderId && ownsSyncAttempt && syncAttemptId) {
-      const message = error instanceof BlingHttpError ? blingErrorMessage(error) : "Nao foi possivel enviar o pedido ao Bling.";
+      const errorCode = error instanceof Error ? error.message : "";
+      const message = error instanceof BlingHttpError
+        ? blingErrorMessage(error, blingError?.message || "")
+        : isBlingContactError(errorCode)
+          ? validationMessage(errorCode)
+        : "Nao foi possivel enviar o pedido ao Bling.";
       await markSyncError(orderId, syncAttemptId, error instanceof BlingHttpError ? "bling_api_error" : "internal_error", message);
     }
 
     if (error instanceof BlingHttpError) {
-      console.error("bling-create-order BlingHttpError", {
+      console.error("bling-create-order BlingHttpError", stringifyLog({
         orderId,
+        stage: currentStage,
         status: error.status,
         temporary: error.temporary,
-      });
-      return fail(request, blingErrorMessage(error), error.temporary ? 503 : error.status, {
+        blingError,
+      }));
+      return fail(request, blingErrorMessage(error, blingError?.message || ""), error.temporary ? 503 : error.status, {
         code: "bling_api_error",
+        stage: currentStage,
         status: error.status,
+        bling_error: blingError,
       });
     }
 
@@ -705,6 +1047,9 @@ Deno.serve(async (request) => {
     if (message === "bling_refresh_in_progress") return fail(request, "Token do Bling esta sendo renovado. Tente novamente em instantes.", 409, { code: message });
     if (message === "bling_refresh_lock_lost") return fail(request, "Outra tentativa renovou a conexao Bling. Tente novamente.", 409, { code: message });
     if (message === "bling_sync_lock_lost") return fail(request, "Outra tentativa alterou o envio ao Bling. Atualize o pedido e tente novamente.", 409, { code: message });
+    if (isBlingContactError(message)) {
+      return fail(request, validationMessage(message), 422, { code: message });
+    }
 
     return fail(request, "Erro interno ao enviar pedido ao Bling.", 500);
   }
