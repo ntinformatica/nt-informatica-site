@@ -28,6 +28,9 @@ type StoreOrder = {
 };
 
 type InvoiceStatus = "pending" | "authorized" | "rejected" | "cancelled" | "error";
+type InvoiceDocuments = { xmlPath?: string; pdfPath?: string };
+type InvoiceDocumentFormat = "xml" | "pdf";
+type InvoiceDocumentContent = { bytes: ArrayBuffer; contentType: "application/xml" | "application/pdf"; source: string };
 
 const INVOICE_BUCKET = "store-invoices";
 const NFE_LOOKUP_LIMIT = 100;
@@ -318,10 +321,289 @@ function mapInvoiceStatus(invoice: JsonObject): InvoiceStatus {
   return "pending";
 }
 
+function arrayBufferToText(bytes: ArrayBuffer) {
+  return new TextDecoder().decode(bytes);
+}
+
+function bytesStartWith(bytes: ArrayBuffer, value: string) {
+  const prefix = new TextEncoder().encode(value);
+  const data = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, prefix.length));
+  return prefix.every((byte, index) => data[index] === byte);
+}
+
+function xmlStartIndex(value: string) {
+  const match = value.match(/<\?xml|<nfeProc|<NFe|<procEventoNFe/i);
+  return match?.index ?? -1;
+}
+
+function looksLikeXmlText(value: string) {
+  return xmlStartIndex(value.trim()) === 0;
+}
+
+function topLevelKeys(value: unknown) {
+  return isObject(value) ? Object.keys(value).slice(0, 20) : [];
+}
+
+function safeBodyType(value: unknown) {
+  if (Array.isArray(value)) return "array";
+  if (isObject(value)) return "json";
+  return typeof value;
+}
+
+function possibleBase64(value: string) {
+  let compact = value.replace(/^data:[^,]+,/, "").replace(/\s/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  if (compact.length < 32 || !/^[A-Za-z0-9+/=]+$/.test(compact)) return "";
+  const remainder = compact.length % 4;
+  if (remainder === 1) return "";
+  if (remainder > 0) compact = compact.padEnd(compact.length + (4 - remainder), "=");
+  return compact;
+}
+
+function decodeBase64(value: string) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+function validateDocumentBytes(bytes: ArrayBuffer, format: InvoiceDocumentFormat) {
+  if (format === "pdf") return bytesStartWith(bytes, "%PDF");
+  return looksLikeXmlText(arrayBufferToText(bytes));
+}
+
+function documentContentFromBytes(bytes: ArrayBuffer, contentType: string, format: InvoiceDocumentFormat, source: string): InvoiceDocumentContent | null {
+  const normalizedType = contentType.toLowerCase();
+  if (format === "pdf" && (normalizedType.includes("application/pdf") || bytesStartWith(bytes, "%PDF"))) {
+    return { bytes, contentType: "application/pdf", source };
+  }
+  if (format === "xml" && (normalizedType.includes("xml") || looksLikeXmlText(arrayBufferToText(bytes)))) {
+    return { bytes, contentType: "application/xml", source };
+  }
+  return null;
+}
+
+function documentContentFromString(value: string, format: InvoiceDocumentFormat, source: string): InvoiceDocumentContent | null {
+  const text = cleanText(value);
+  if (format === "xml" && looksLikeXmlText(text)) {
+    const bytes = new TextEncoder().encode(text);
+    return { bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), contentType: "application/xml", source };
+  }
+  const xmlIndex = format === "xml" ? xmlStartIndex(text) : -1;
+  if (xmlIndex > 0) return documentContentFromString(text.slice(xmlIndex), format, source);
+  const encoded = possibleBase64(text);
+  if (!encoded) return null;
+  try {
+    const bytes = decodeBase64(encoded);
+    return validateDocumentBytes(bytes, format)
+      ? { bytes, contentType: format === "xml" ? "application/xml" : "application/pdf", source }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringLooksLikeUrl(value: string) {
+  try {
+    const url = new URL(cleanText(value));
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function findDocumentUrl(value: unknown, format: InvoiceDocumentFormat, depth = 0): string {
+  if (depth > 5) return "";
+  if (typeof value === "string" && stringLooksLikeUrl(value)) return cleanText(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDocumentUrl(item, format, depth + 1);
+      if (found) return found;
+    }
+  }
+  if (!isObject(value)) return "";
+
+  const preferredKeys = format === "pdf"
+    ? ["linkPDF", "linkPdf", "linkDanfe", "danfe", "pdf", "url", "link"]
+    : ["xml", "linkXml", "linkXML", "url", "link"];
+  for (const key of preferredKeys) {
+    const found = findDocumentUrl(value[key], format, depth + 1);
+    if (found) return found;
+  }
+  for (const key of Object.keys(value)) {
+    const found = findDocumentUrl(value[key], format, depth + 1);
+    if (found) return found;
+  }
+  return "";
+}
+
+function findDocumentContent(value: unknown, format: InvoiceDocumentFormat, depth = 0): InvoiceDocumentContent | null {
+  if (depth > 5) return null;
+  if (typeof value === "string") {
+    if (stringLooksLikeUrl(value)) return null;
+    return documentContentFromString(value, format, "json_payload");
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDocumentContent(item, format, depth + 1);
+      if (found) return found;
+    }
+  }
+  if (!isObject(value)) return null;
+
+  const preferredKeys = format === "pdf"
+    ? ["base64", "content", "conteudo", "arquivo", "documento", "pdf", "data"]
+    : ["xml", "base64", "content", "conteudo", "arquivo", "documento", "data"];
+  for (const key of preferredKeys) {
+    const found = findDocumentContent(value[key], format, depth + 1);
+    if (found) return found;
+  }
+  for (const key of Object.keys(value)) {
+    const found = findDocumentContent(value[key], format, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function documentLinksFromInvoice(invoice: JsonObject) {
+  const xmlLink = stringLooksLikeUrl(cleanText(invoice.xml)) ? cleanText(invoice.xml) : "";
+  const linkPDF = stringLooksLikeUrl(cleanText(invoice.linkPDF || invoice.linkPdf)) ? cleanText(invoice.linkPDF || invoice.linkPdf) : "";
+  const linkDanfe = stringLooksLikeUrl(cleanText(invoice.linkDanfe || invoice.danfe)) ? cleanText(invoice.linkDanfe || invoice.danfe) : "";
+  return { xmlLink, linkPDF, linkDanfe };
+}
+
+function logInvoiceDocumentLinkPresence(order: StoreOrder, invoice: JsonObject) {
+  const links = documentLinksFromInvoice(invoice);
+  console.info("bling-sync-order-invoice invoice document links", {
+    orderId: order.id,
+    stage: "invoice_document_links",
+    blingOrderId: order.bling_order_id,
+    blingInvoiceId: cleanText(invoice.id),
+    hasXmlLink: Boolean(links.xmlLink),
+    hasLinkDanfe: Boolean(links.linkDanfe),
+    hasLinkPDF: Boolean(links.linkPDF),
+  });
+  return links;
+}
+
+function parseJsonPayload(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function hasKnownDocumentField(value: unknown, field: string): boolean {
+  if (!isObject(value)) return false;
+  return Object.prototype.hasOwnProperty.call(value, field);
+}
+
+function dataDiagnostics(payload: unknown, format: InvoiceDocumentFormat) {
+  const data = isObject(payload) ? payload.data : undefined;
+  const dataIsArray = Array.isArray(data);
+  const dataIsObject = isObject(data);
+  const dataString = typeof data === "string" ? data : "";
+  const dataContent = findDocumentContent(data, format);
+  const dataUrl = findDocumentUrl(data, format);
+  return {
+    dataType: dataIsArray ? "array" : typeof data,
+    dataIsArray,
+    dataKeys: dataIsObject ? Object.keys(data).slice(0, 20) : [],
+    dataLength: dataString.length || 0,
+    startsWithXml: dataString ? looksLikeXmlText(dataString) : false,
+    containsXml: dataString ? xmlStartIndex(dataString) >= 0 : false,
+    looksBase64: dataString ? Boolean(possibleBase64(dataString)) : false,
+    hasUrl: Boolean(dataUrl),
+    hasBase64OrContent: Boolean(dataContent),
+    knownFields: {
+      url: hasKnownDocumentField(data, "url"),
+      link: hasKnownDocumentField(data, "link"),
+      documento: hasKnownDocumentField(data, "documento"),
+      conteudo: hasKnownDocumentField(data, "conteudo"),
+      content: hasKnownDocumentField(data, "content"),
+      xml: hasKnownDocumentField(data, "xml"),
+      pdf: hasKnownDocumentField(data, "pdf"),
+      arquivo: hasKnownDocumentField(data, "arquivo"),
+      base64: hasKnownDocumentField(data, "base64"),
+    },
+  };
+}
+
+function isEmptyDocumentDataResponse(payload: unknown) {
+  return isObject(payload) && Array.isArray(payload.data) && payload.data.length === 0;
+}
+
+function logDocumentResponseInspection(
+  order: StoreOrder,
+  invoice: JsonObject,
+  format: InvoiceDocumentFormat,
+  response: Response,
+  bytes: ArrayBuffer,
+  payload: unknown,
+) {
+  const payloadText = payload === null ? arrayBufferToText(bytes) : "";
+  const bodyLooksJson = payload !== null;
+  console.info("bling-sync-order-invoice inspect_invoice_document_response", {
+    orderId: order.id,
+    stage: "inspect_invoice_document_response",
+    blingOrderId: order.bling_order_id,
+    blingInvoiceId: cleanText(invoice.id),
+    format,
+    httpStatus: response.status,
+    contentType: response.headers.get("content-type") || "",
+    contentLength: response.headers.get("content-length") || "",
+    redirected: response.redirected,
+    endpoint: "/nfe/documento/{chaveAcesso}",
+    bodyType: bodyLooksJson ? safeBodyType(payload) : "binary_or_text",
+    topLevelKeys: topLevelKeys(payload),
+    hasUrl: Boolean(findDocumentUrl(payload, format)),
+    hasBase64: Boolean(findDocumentContent(payload, format)),
+    data: dataDiagnostics(payload, format),
+    bodyApproxBytes: bytes.byteLength || payloadText.length,
+  });
+}
+
+async function fetchDocumentUrl(context: BlingAccessContext, url: string, format: InvoiceDocumentFormat) {
+  const request = async () => {
+    const parsed = new URL(url);
+    const isBling = parsed.hostname.endsWith("bling.com.br");
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: format === "xml" ? "application/xml, text/xml" : "application/pdf",
+        ...(isBling ? { Authorization: `Bearer ${context.accessToken}`, "enable-jwt": "1" } : {}),
+      },
+    });
+    const bytes = await response.arrayBuffer();
+    if (!response.ok) throw new BlingHttpError(response.status, parseJsonPayload(arrayBufferToText(bytes)) || { message: "Falha ao baixar URL do documento." });
+    const contentType = response.headers.get("content-type") || "";
+    const directContent = documentContentFromBytes(bytes, contentType, format, "document_url");
+    if (directContent) return directContent;
+
+    const text = arrayBufferToText(bytes);
+    const payload = parseJsonPayload(text);
+    const content = findDocumentContent(payload ?? text, format);
+    if (!content) throw new Error("invalid_document_url_response");
+    return content;
+  };
+
+  try {
+    return await request();
+  } catch (error) {
+    if (error instanceof BlingHttpError && error.status === 401 && context.connection.refresh_token_encrypted) {
+      context.accessToken = await accessTokenForBlingConnection(context.connection, true);
+      return await request();
+    }
+    throw error;
+  }
+}
+
 async function fetchBlingDocument(
   context: BlingAccessContext,
   accessKey: string,
-  format: "xml" | "pdf",
+  format: InvoiceDocumentFormat,
+  order: StoreOrder,
+  invoice: JsonObject,
 ) {
   const path = `/nfe/documento/${encodeURIComponent(accessKey)}?formato=${format}`;
   const request = async () => {
@@ -329,16 +611,35 @@ async function fetchBlingDocument(
       method: "GET",
       headers: {
         Authorization: `Bearer ${context.accessToken}`,
-        Accept: format === "xml" ? "application/xml,text/xml,application/json" : "application/pdf,application/json",
+        Accept: format === "xml" ? "application/xml, text/xml" : "application/pdf",
         "enable-jwt": "1",
       },
     });
-    const contentType = response.headers.get("content-type") || (format === "xml" ? "application/xml" : "application/pdf");
+    const contentType = response.headers.get("content-type") || "";
+    const bytes = await response.arrayBuffer();
     if (!response.ok) {
-      const payload = await parseResponse(response);
+      const payload = parseJsonPayload(arrayBufferToText(bytes)) || { message: "Falha ao baixar documento da NF-e." };
       throw new BlingHttpError(response.status, payload);
     }
-    return { bytes: await response.arrayBuffer(), contentType };
+
+    const directContent = documentContentFromBytes(bytes, contentType, format, "bling_document_endpoint");
+    if (directContent) {
+      logDocumentResponseInspection(order, invoice, format, response, bytes, null);
+      return directContent;
+    }
+
+    const text = arrayBufferToText(bytes);
+    const payload = parseJsonPayload(text);
+    logDocumentResponseInspection(order, invoice, format, response, bytes, payload);
+    if (isEmptyDocumentDataResponse(payload)) throw new Error("document_not_available_from_endpoint");
+
+    const embeddedContent = findDocumentContent(payload ?? text, format);
+    if (embeddedContent) return embeddedContent;
+
+    const documentUrl = findDocumentUrl(payload ?? text, format);
+    if (documentUrl) return await fetchDocumentUrl(context, documentUrl, format);
+
+    throw new Error("unsupported_document_response");
   };
 
   try {
@@ -374,6 +675,18 @@ async function uploadInvoiceDocument(path: string, bytes: ArrayBuffer, contentTy
   }
 }
 
+function sanitizeDocumentDownloadError(error: unknown) {
+  if (error instanceof BlingHttpError) {
+    return {
+      status: error.status,
+      temporary: error.temporary,
+    };
+  }
+  return {
+    message: error instanceof Error ? error.message : "document_download_failed",
+  };
+}
+
 async function downloadAndStoreInvoiceDocuments(context: BlingAccessContext, order: StoreOrder, invoice: JsonObject) {
   const accessKey = invoiceAccessKey(invoice);
   if (!accessKey) throw new Error("bling_invoice_access_key_missing");
@@ -381,42 +694,96 @@ async function downloadAndStoreInvoiceDocuments(context: BlingAccessContext, ord
   const basePath = `${safeStorageSegment(order.order_number || order.id)}/bling-${safeStorageSegment(invoiceNumber(invoice) || invoice.id)}-${accessKey.slice(-8)}`;
   const xmlPath = `${basePath}.xml`;
   const pdfPath = `${basePath}.pdf`;
+  const documents: InvoiceDocuments = {};
+  const links = logInvoiceDocumentLinkPresence(order, invoice);
 
-  const xmlFromDetail = xmlBytesFromInvoice(invoice);
-  if (xmlFromDetail) {
-    await uploadInvoiceDocument(xmlPath, xmlFromDetail, "application/xml");
-  } else {
-    const xmlDocument = await fetchBlingDocument(context, accessKey, "xml");
-    await uploadInvoiceDocument(xmlPath, xmlDocument.bytes, xmlDocument.contentType || "application/xml");
+  console.info("bling-sync-order-invoice invoice document download started", {
+    orderId: order.id,
+    stage: "download_documents",
+    blingOrderId: order.bling_order_id,
+    blingInvoiceId: cleanText(invoice.id),
+    formats: ["xml", "pdf"],
+  });
+
+  try {
+    const xmlFromDetail = xmlBytesFromInvoice(invoice);
+    if (xmlFromDetail) {
+      await uploadInvoiceDocument(xmlPath, xmlFromDetail, "application/xml");
+    } else if (links.xmlLink) {
+      const xmlDocument = await fetchDocumentUrl(context, links.xmlLink, "xml");
+      await uploadInvoiceDocument(xmlPath, xmlDocument.bytes, xmlDocument.contentType);
+    } else {
+      const xmlDocument = await fetchBlingDocument(context, accessKey, "xml", order, invoice);
+      await uploadInvoiceDocument(xmlPath, xmlDocument.bytes, xmlDocument.contentType);
+    }
+    documents.xmlPath = xmlPath;
+    console.info("bling-sync-order-invoice invoice document downloaded", {
+      orderId: order.id,
+      stage: "download_documents",
+      blingOrderId: order.bling_order_id,
+      blingInvoiceId: cleanText(invoice.id),
+      format: "xml",
+    });
+  } catch (error) {
+    console.warn("bling-sync-order-invoice invoice document download failed", {
+      orderId: order.id,
+      stage: "download_documents",
+      blingOrderId: order.bling_order_id,
+      blingInvoiceId: cleanText(invoice.id),
+      format: "xml",
+      error: sanitizeDocumentDownloadError(error),
+    });
   }
 
-  const pdfDocument = await fetchBlingDocument(context, accessKey, "pdf");
-  await uploadInvoiceDocument(pdfPath, pdfDocument.bytes, pdfDocument.contentType || "application/pdf");
+  try {
+    const pdfLink = links.linkPDF || links.linkDanfe;
+    const pdfDocument = pdfLink
+      ? await fetchDocumentUrl(context, pdfLink, "pdf")
+      : await fetchBlingDocument(context, accessKey, "pdf", order, invoice);
+    await uploadInvoiceDocument(pdfPath, pdfDocument.bytes, pdfDocument.contentType);
+    documents.pdfPath = pdfPath;
+    console.info("bling-sync-order-invoice invoice document downloaded", {
+      orderId: order.id,
+      stage: "download_documents",
+      blingOrderId: order.bling_order_id,
+      blingInvoiceId: cleanText(invoice.id),
+      format: "pdf",
+    });
+  } catch (error) {
+    console.warn("bling-sync-order-invoice invoice document download failed", {
+      orderId: order.id,
+      stage: "download_documents",
+      blingOrderId: order.bling_order_id,
+      blingInvoiceId: cleanText(invoice.id),
+      format: "pdf",
+      error: sanitizeDocumentDownloadError(error),
+    });
+  }
 
-  console.info("bling-sync-order-invoice invoice documents fetched", {
+  console.info("bling-sync-order-invoice invoice documents persisted", {
     orderId: order.id,
     stage: "download_documents",
     blingOrderId: order.bling_order_id,
     blingInvoiceId: cleanText(invoice.id),
     documents: {
-      xml: true,
-      pdf: true,
+      xml: Boolean(documents.xmlPath),
+      pdf: Boolean(documents.pdfPath),
     },
   });
 
-  return { xmlPath, pdfPath };
+  return documents;
 }
 
 async function upsertInvoice(
   order: StoreOrder,
   invoice: JsonObject,
   status: InvoiceStatus,
-  documents: { xmlPath: string; pdfPath: string } | null,
+  documents?: InvoiceDocuments,
 ) {
   const accessKey = invoiceAccessKey(invoice) || null;
   const issuedAt = invoiceIssueDate(invoice);
   const storeFiscalStatus = status === "authorized" ? "issued" : status;
-  const payload = {
+  const payload: JsonObject = {
     order_id: order.id,
     provider: "bling",
     bling_invoice_id: cleanText(invoice.id),
@@ -427,12 +794,6 @@ async function upsertInvoice(
     access_key: accessKey,
     issued_at: issuedAt,
     authorized_at: status === "authorized" ? issuedAt || nowIso() : null,
-    xml_storage_path: documents?.xmlPath || "",
-    pdf_storage_path: documents?.pdfPath || "",
-    xml_original_name: documents?.xmlPath ? `${safeStorageSegment(invoiceNumber(invoice)) || "nfe"}.xml` : "",
-    pdf_original_name: documents?.pdfPath ? `${safeStorageSegment(invoiceNumber(invoice)) || "danfe"}.pdf` : "",
-    xml_mime_type: documents?.xmlPath ? "application/xml" : "",
-    pdf_mime_type: documents?.pdfPath ? "application/pdf" : "",
     metadata: {
       provider: "bling",
       bling_invoice_id: cleanText(invoice.id),
@@ -442,6 +803,18 @@ async function upsertInvoice(
       last_synced_at: nowIso(),
     },
   };
+
+  if (documents?.xmlPath) {
+    payload.xml_storage_path = documents.xmlPath;
+    payload.xml_original_name = `${safeStorageSegment(invoiceNumber(invoice)) || "nfe"}.xml`;
+    payload.xml_mime_type = "application/xml";
+  }
+
+  if (documents?.pdfPath) {
+    payload.pdf_storage_path = documents.pdfPath;
+    payload.pdf_original_name = `${safeStorageSegment(invoiceNumber(invoice)) || "danfe"}.pdf`;
+    payload.pdf_mime_type = "application/pdf";
+  }
 
   const rows = await supabaseRest("/order_invoices?on_conflict=order_id", {
     method: "POST",
@@ -478,7 +851,7 @@ async function upsertInvoice(
     rawStatusCode: invoiceStatusCode(invoice),
     mappedStatus: status,
     fiscalStatus: storeFiscalStatus,
-    documentsSaved: Boolean(documents),
+    documentsSaved: Boolean(documents?.xmlPath || documents?.pdfPath),
   });
 
   return Array.isArray(rows) ? rows[0] || null : rows;
@@ -551,22 +924,40 @@ Deno.serve(async (request) => {
       source,
     });
 
-    let documents: { xmlPath: string; pdfPath: string } | null = null;
-    if (status === "authorized") {
-      if (!accessKey) return fail(request, "NF-e autorizada sem chave de acesso retornada pelo Bling.", 422, { code: "bling_invoice_access_key_missing" });
-      currentStage = "download_documents";
-      documents = await downloadAndStoreInvoiceDocuments(context, order, invoice);
-    }
-
     currentStage = "upsert_invoice";
-    const savedInvoice = await upsertInvoice(order, invoice, status, documents);
+    let documents: InvoiceDocuments | null = null;
+    let savedInvoice = await upsertInvoice(order, invoice, status);
+
+    if (status === "authorized") {
+      if (accessKey) {
+        currentStage = "download_documents";
+        documents = await downloadAndStoreInvoiceDocuments(context, order, invoice);
+        if (documents.xmlPath || documents.pdfPath) {
+          currentStage = "upsert_invoice_documents";
+          savedInvoice = await upsertInvoice(order, invoice, status, documents);
+        }
+      } else {
+        console.warn("bling-sync-order-invoice invoice document download failed", {
+          orderId,
+          stage: "download_documents",
+          blingOrderId: order.bling_order_id,
+          blingInvoiceId: cleanText(invoice.id),
+          format: "all",
+          error: { message: "bling_invoice_access_key_missing" },
+        });
+      }
+    }
 
     return ok(request, {
       success: true,
       invoice: savedInvoice,
       bling_invoice_id: cleanText(invoice.id),
       invoice_status: status,
-      documents_saved: Boolean(documents),
+      documents_saved: Boolean(documents?.xmlPath || documents?.pdfPath),
+      documents: {
+        xml: Boolean(documents?.xmlPath),
+        pdf: Boolean(documents?.pdfPath),
+      },
     });
   } catch (error) {
     if (error instanceof BlingHttpError) {
