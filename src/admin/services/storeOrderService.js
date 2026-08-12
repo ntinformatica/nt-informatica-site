@@ -51,7 +51,7 @@ export const storeOperationalFlow = [
 export const storeFiscalLabels = {
   pending: "Aguardando emissao",
   issued: "Nota emitida",
-  authorized: "Nota autorizada",
+  authorized: "Autorizada",
   cancelled: "Nota cancelada",
   not_applicable: "Sem emissao fiscal",
   error: "Problema fiscal",
@@ -136,6 +136,12 @@ export function allowedStoreOperationalStatuses(order) {
   return [...new Set([current, ...allowed].filter((status) => storeOperationalOptions.includes(status)))];
 }
 
+function relationRows(value) {
+  if (Array.isArray(value)) return [...value];
+  if (value && typeof value === "object") return [value];
+  return [];
+}
+
 export async function listStoreOrders() {
   const rows = await supabaseRequest(
     `/store_orders?select=${encodeURIComponent(orderSelect)}&order=created_at.desc&limit=500`,
@@ -143,11 +149,11 @@ export async function listStoreOrders() {
 
   return (rows || []).map((order) => ({
     ...order,
-    store_order_items: order.store_order_items || [],
-    store_payments: (order.store_payments || []).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
-    store_order_logs: (order.store_order_logs || []).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
-    order_billing_snapshots: order.order_billing_snapshots || [],
-    order_invoices: (order.order_invoices || []).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
+    store_order_items: relationRows(order.store_order_items),
+    store_payments: relationRows(order.store_payments).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
+    store_order_logs: relationRows(order.store_order_logs).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
+    order_billing_snapshots: relationRows(order.order_billing_snapshots),
+    order_invoices: relationRows(order.order_invoices).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
   }));
 }
 

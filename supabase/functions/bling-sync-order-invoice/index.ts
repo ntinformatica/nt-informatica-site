@@ -27,6 +27,8 @@ type StoreOrder = {
   order_invoices?: JsonObject[];
 };
 
+type InvoiceStatus = "pending" | "authorized" | "rejected" | "cancelled" | "error";
+
 const INVOICE_BUCKET = "store-invoices";
 const NFE_LOOKUP_LIMIT = 100;
 
@@ -194,6 +196,13 @@ async function findBlingInvoiceForOrder(context: BlingAccessContext, order: Stor
   const invoiceIdFromOrder = extractInvoiceId(remoteOrder);
   if (invoiceIdFromOrder) {
     const detail = await loadBlingInvoiceDetail(context, invoiceIdFromOrder);
+    console.info("bling-sync-order-invoice invoice detail fetched", {
+      orderId: order.id,
+      stage: "fetch_invoice_detail",
+      blingOrderId: order.bling_order_id,
+      blingInvoiceId: cleanText(detail.id || invoiceIdFromOrder),
+      rawStatus: invoiceStatusDiagnostic(detail),
+    });
     return { invoice: detail, source: "order_detail" };
   }
 
@@ -208,7 +217,16 @@ async function findBlingInvoiceForOrder(context: BlingAccessContext, order: Stor
     if (matchesOrderReference(candidate, order)) {
       const candidateId = positiveInteger(isObject(candidate) ? candidate.id : null);
       const detail = candidateId ? await loadBlingInvoiceDetail(context, candidateId) : candidate;
-      if (matchesOrderReference(detail, order)) return { invoice: detail, source: "nfe_list" };
+      if (isObject(detail) && matchesOrderReference(detail, order)) {
+        console.info("bling-sync-order-invoice invoice detail fetched", {
+          orderId: order.id,
+          stage: "fetch_invoice_detail",
+          blingOrderId: order.bling_order_id,
+          blingInvoiceId: cleanText(detail.id || candidateId),
+          rawStatus: invoiceStatusDiagnostic(detail),
+        });
+        return { invoice: detail, source: "nfe_list" };
+      }
     }
   }
 
@@ -216,7 +234,16 @@ async function findBlingInvoiceForOrder(context: BlingAccessContext, order: Stor
     const candidateId = positiveInteger(isObject(candidate) ? candidate.id : null);
     if (!candidateId) continue;
     const detail = await loadBlingInvoiceDetail(context, candidateId);
-    if (matchesOrderReference(detail, order)) return { invoice: detail, source: "nfe_detail_scan" };
+    if (matchesOrderReference(detail, order)) {
+      console.info("bling-sync-order-invoice invoice detail fetched", {
+        orderId: order.id,
+        stage: "fetch_invoice_detail",
+        blingOrderId: order.bling_order_id,
+        blingInvoiceId: cleanText(detail.id || candidateId),
+        rawStatus: invoiceStatusDiagnostic(detail),
+      });
+      return { invoice: detail, source: "nfe_detail_scan" };
+    }
   }
 
   throw new Error("bling_invoice_not_found");
@@ -244,15 +271,50 @@ function invoiceIssueDate(invoice: JsonObject) {
 
 function invoiceStatusText(invoice: JsonObject) {
   const situacao = invoice.situacao;
-  if (isObject(situacao)) return cleanText(situacao.descricao || situacao.nome || situacao.situacao || situacao.valor);
+  if (isObject(situacao)) {
+    return cleanText(situacao.descricao || situacao.nome || situacao.label || situacao.status || situacao.situacao || situacao.valor || situacao.id || situacao.codigo);
+  }
   return cleanText(situacao);
 }
 
-function mapInvoiceStatus(invoice: JsonObject) {
+function invoiceStatusCode(invoice: JsonObject) {
+  const situacao = invoice.situacao;
+  if (isObject(situacao)) {
+    return positiveInteger(situacao.id || situacao.codigo || situacao.code || situacao.valor || situacao.situacao);
+  }
+  return positiveInteger(situacao);
+}
+
+function invoiceStatusDiagnostic(invoice: JsonObject) {
+  const situacao = invoice.situacao;
+  if (isObject(situacao)) {
+    return {
+      type: "object",
+      id: positiveInteger(situacao.id),
+      codigo: positiveInteger(situacao.codigo),
+      code: positiveInteger(situacao.code),
+      valor: cleanText(situacao.valor),
+      descricao: cleanText(situacao.descricao || situacao.nome || situacao.label || situacao.status || situacao.situacao),
+    };
+  }
+  return {
+    type: typeof situacao,
+    value: cleanText(situacao),
+  };
+}
+
+function mapInvoiceStatus(invoice: JsonObject): InvoiceStatus {
+  const statusCode = invoiceStatusCode(invoice);
+  if ([5, 6, 7].includes(statusCode || 0)) return "authorized";
+  if (statusCode === 2) return "cancelled";
+  if ([4, 9].includes(statusCode || 0)) return "rejected";
+  if (statusCode === 11) return "error";
+
   const statusText = invoiceStatusText(invoice).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (statusText.includes("autoriz") || statusText.includes("emitid")) return "issued";
+  if (statusText.includes("autoriz") || statusText.includes("emitid") || statusText.includes("registrad")) return "authorized";
   if (statusText.includes("cancel")) return "cancelled";
-  if (statusText.includes("rejeit") || statusText.includes("erro")) return "error";
+  if (statusText.includes("rejeit") || statusText.includes("deneg")) return "rejected";
+  if (statusText.includes("erro") || statusText.includes("bloque")) return "error";
   return "pending";
 }
 
@@ -331,13 +393,29 @@ async function downloadAndStoreInvoiceDocuments(context: BlingAccessContext, ord
   const pdfDocument = await fetchBlingDocument(context, accessKey, "pdf");
   await uploadInvoiceDocument(pdfPath, pdfDocument.bytes, pdfDocument.contentType || "application/pdf");
 
+  console.info("bling-sync-order-invoice invoice documents fetched", {
+    orderId: order.id,
+    stage: "download_documents",
+    blingOrderId: order.bling_order_id,
+    blingInvoiceId: cleanText(invoice.id),
+    documents: {
+      xml: true,
+      pdf: true,
+    },
+  });
+
   return { xmlPath, pdfPath };
 }
 
-async function upsertInvoice(order: StoreOrder, invoice: JsonObject, documents: { xmlPath: string; pdfPath: string } | null) {
-  const status = mapInvoiceStatus(invoice);
+async function upsertInvoice(
+  order: StoreOrder,
+  invoice: JsonObject,
+  status: InvoiceStatus,
+  documents: { xmlPath: string; pdfPath: string } | null,
+) {
   const accessKey = invoiceAccessKey(invoice) || null;
   const issuedAt = invoiceIssueDate(invoice);
+  const storeFiscalStatus = status === "authorized" ? "issued" : status;
   const payload = {
     order_id: order.id,
     provider: "bling",
@@ -348,7 +426,7 @@ async function upsertInvoice(order: StoreOrder, invoice: JsonObject, documents: 
     invoice_series: invoiceSeries(invoice),
     access_key: accessKey,
     issued_at: issuedAt,
-    authorized_at: status === "issued" ? issuedAt || nowIso() : null,
+    authorized_at: status === "authorized" ? issuedAt || nowIso() : null,
     xml_storage_path: documents?.xmlPath || "",
     pdf_storage_path: documents?.pdfPath || "",
     xml_original_name: documents?.xmlPath ? `${safeStorageSegment(invoiceNumber(invoice)) || "nfe"}.xml` : "",
@@ -359,6 +437,8 @@ async function upsertInvoice(order: StoreOrder, invoice: JsonObject, documents: 
       provider: "bling",
       bling_invoice_id: cleanText(invoice.id),
       bling_status: invoiceStatusText(invoice),
+      bling_status_code: invoiceStatusCode(invoice),
+      mapped_status: status,
       last_synced_at: nowIso(),
     },
   };
@@ -371,7 +451,7 @@ async function upsertInvoice(order: StoreOrder, invoice: JsonObject, documents: 
 
   await supabaseRest(`/store_orders?id=eq.${encodeURIComponent(order.id)}`, {
     method: "PATCH",
-    body: JSON.stringify({ fiscal_status: status }),
+    body: JSON.stringify({ fiscal_status: storeFiscalStatus }),
   });
 
   await supabaseRest("/store_order_logs", {
@@ -389,6 +469,17 @@ async function upsertInvoice(order: StoreOrder, invoice: JsonObject, documents: 
       },
     }),
   }).catch(() => null);
+
+  console.info("bling-sync-order-invoice invoice persisted", {
+    orderId: order.id,
+    stage: "upsert_invoice",
+    blingOrderId: order.bling_order_id,
+    blingInvoiceId: payload.bling_invoice_id,
+    rawStatusCode: invoiceStatusCode(invoice),
+    mappedStatus: status,
+    fiscalStatus: storeFiscalStatus,
+    documentsSaved: Boolean(documents),
+  });
 
   return Array.isArray(rows) ? rows[0] || null : rows;
 }
@@ -443,19 +534,32 @@ Deno.serve(async (request) => {
       stage: currentStage,
       blingOrderId: order.bling_order_id,
       blingInvoiceId: cleanText(invoice.id),
+      rawStatus: invoiceStatusDiagnostic(invoice),
       invoiceStatus: status,
+      mappedStatus: status,
+      source,
+    });
+
+    console.info("bling-sync-order-invoice invoice status mapped", {
+      orderId,
+      stage: "map_invoice_status",
+      blingOrderId: order.bling_order_id,
+      blingInvoiceId: cleanText(invoice.id),
+      rawStatusCode: invoiceStatusCode(invoice),
+      invoiceStatus: status,
+      mappedStatus: status,
       source,
     });
 
     let documents: { xmlPath: string; pdfPath: string } | null = null;
-    if (status === "issued") {
+    if (status === "authorized") {
       if (!accessKey) return fail(request, "NF-e autorizada sem chave de acesso retornada pelo Bling.", 422, { code: "bling_invoice_access_key_missing" });
       currentStage = "download_documents";
       documents = await downloadAndStoreInvoiceDocuments(context, order, invoice);
     }
 
     currentStage = "upsert_invoice";
-    const savedInvoice = await upsertInvoice(order, invoice, documents);
+    const savedInvoice = await upsertInvoice(order, invoice, status, documents);
 
     return ok(request, {
       success: true,
