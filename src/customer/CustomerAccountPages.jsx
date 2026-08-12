@@ -74,6 +74,7 @@ const customerOperationalLabels = {
 const fiscalLabels = {
   pending: "Aguardando emissão",
   issued: "Emitida",
+  authorized: "Autorizada",
   cancelled: "Cancelada",
   not_applicable: "Sem emissão fiscal",
   error: "Problema fiscal",
@@ -192,7 +193,7 @@ function paymentStatusLabel(payment, order) {
 }
 
 function displayFiscalStatus(order, invoice = null) {
-  if (invoice?.status === "issued") return "issued";
+  if (["issued", "authorized"].includes(invoice?.status)) return "issued";
   if (invoice?.status === "cancelled") return "cancelled";
   if (invoice?.status === "error") return "error";
   if (order?.operational_status === "cancelled") return "not_applicable";
@@ -496,6 +497,7 @@ function OrdersPanel({ path = "", navigateTo }) {
     const installments = Number(payment?.installments || selected.installments || 1);
     const installmentAmount = Number(payment?.installment_amount || (installments > 1 ? Number(selected.total_amount || 0) / installments : 0));
     const invoice = Array.isArray(selected.order_invoices) ? selected.order_invoices[0] || null : null;
+    const invoiceAuthorized = ["issued", "authorized"].includes(invoice?.status);
     const fiscalStatus = displayFiscalStatus(selected, invoice);
 
     return (
@@ -578,19 +580,21 @@ function OrdersPanel({ path = "", navigateTo }) {
           <p className="text-lg font-black text-white">Nota fiscal</p>
           <div className="mt-3 grid gap-2 text-sm text-slate-300">
             <p>Status: <strong className="text-white">{fiscalLabels[fiscalStatus] || fiscalStatus}</strong></p>
-            {invoice ? (
+            {invoiceAuthorized ? (
               <>
                 <p>Numero: <strong className="text-white">{invoice.invoice_number || "-"}</strong></p>
                 <p>Serie: <strong className="text-white">{invoice.invoice_series || "-"}</strong></p>
                 <p>Data de emissao: <strong className="text-white">{formatDate(invoice.issued_at)}</strong></p>
                 <p>Chave de acesso: <strong className="break-all text-white">{invoice.access_key}</strong></p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {invoice.pdf_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "pdf")} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan transition hover:bg-nt-cyan/10">Visualizar DANFE</button> : null}
-                  {invoice.pdf_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "pdf")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Baixar DANFE PDF</button> : null}
-                  {invoice.xml_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "xml")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Baixar XML</button> : null}
+                  {invoiceAuthorized && invoice.pdf_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "pdf")} className="rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan transition hover:bg-nt-cyan/10">Visualizar DANFE</button> : null}
+                  {invoiceAuthorized && invoice.pdf_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "pdf")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Baixar DANFE PDF</button> : null}
+                  {invoiceAuthorized && invoice.xml_storage_path ? <button type="button" onClick={() => openInvoiceDocument(invoice, "xml")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Baixar XML</button> : null}
                   <button type="button" onClick={() => copyInvoiceAccessKey(invoice.access_key)} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10">Copiar chave de acesso</button>
                 </div>
               </>
+            ) : invoice ? (
+              <p className="text-slate-400">A nota fiscal ainda nao esta autorizada para disponibilizacao.</p>
             ) : fiscalStatus === "not_applicable" ? (
               <p className="text-slate-400">Este pedido foi cancelado, expirado ou recusado e nao possui emissao fiscal prevista.</p>
             ) : (

@@ -17,6 +17,7 @@ import {
   storeOperationalFlow,
   storeOperationalLabels,
   storeOperationalOptions,
+  syncStoreOrderInvoiceFromBling,
   updateStoreOrderInternalNotes,
   updateStoreOrderOperationalStatus,
 } from "../../services/storeOrderService";
@@ -191,11 +192,12 @@ async function copyText(value) {
   await navigator.clipboard?.writeText(String(value || ""));
 }
 
-function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, onInvoiceSaved, onSendBling, blingSaving = false }) {
+function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, onInvoiceSaved, onSyncInvoice, onSendBling, blingSaving = false, invoiceSyncSaving = false }) {
   const payment = orderPayment(order);
   const allowedStatuses = allowedStoreOperationalStatuses(order);
   const billing = orderBilling(order);
   const invoice = order.order_invoices?.[0] || null;
+  const invoiceAuthorized = ["issued", "authorized"].includes(invoice?.status);
   const fiscalStatus = displayStoreFiscalStatus(order, invoice);
   const canAttachInvoice = fiscalStatus !== "not_applicable";
   const blingLinked = Boolean(order.bling_order_id);
@@ -358,12 +360,13 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
             {invoice ? (
               <>
                 <p className="font-black text-white">NF-e {invoice.invoice_number || "-"}</p>
+                <p>Status: {storeFiscalLabels[invoice.status] || invoice.status || "-"}</p>
                 <p>Serie: {invoice.invoice_series || "-"}</p>
                 <p>Chave: <span className="break-all">{invoice.access_key}</span></p>
                 <p>Emissao: {formatStoreDateTime(invoice.issued_at)}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => openInvoice("pdf")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Abrir DANFE</button>
-                  <button type="button" onClick={() => openInvoice("xml")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Baixar XML</button>
+                  {invoiceAuthorized && invoice.pdf_storage_path ? <button type="button" onClick={() => openInvoice("pdf")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Abrir DANFE</button> : null}
+                  {invoiceAuthorized && invoice.xml_storage_path ? <button type="button" onClick={() => openInvoice("xml")} className="rounded-md border border-white/10 px-3 py-2 text-xs font-black text-slate-200 hover:bg-white/10">Baixar XML</button> : null}
                 </div>
               </>
             ) : fiscalStatus === "not_applicable" ? (
@@ -371,6 +374,16 @@ function OrderDetails({ order, notes, setNotes, saving, onStatus, onSaveNotes, o
             ) : (
               <p>Nenhuma nota fiscal anexada ainda.</p>
             )}
+            {order.bling_order_id && fiscalStatus !== "not_applicable" ? (
+              <button
+                type="button"
+                onClick={() => onSyncInvoice(order)}
+                disabled={invoiceSyncSaving || saving}
+                className="mt-4 min-h-10 rounded-md border border-nt-cyan/40 px-3 py-2 text-xs font-black text-nt-cyan transition hover:bg-nt-cyan/10 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {invoiceSyncSaving ? "Atualizando NF-e..." : "Atualizar NF-e do Bling"}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -431,6 +444,7 @@ export function StoreOrdersPage() {
   const [savingNotes, setSavingNotes] = useState(false);
   const [savingStatusId, setSavingStatusId] = useState("");
   const [blingSavingId, setBlingSavingId] = useState("");
+  const [invoiceSyncSavingId, setInvoiceSyncSavingId] = useState("");
   const detailsRef = useRef(null);
   const pendingScrollOrderIdRef = useRef("");
   const selectedOrder = orders.find((order) => order.id === selectedId) || null;
@@ -513,11 +527,34 @@ export function StoreOrdersPage() {
       order.id === orderId
         ? {
             ...order,
-            fiscal_status: invoice?.status === "issued" ? "issued" : order.fiscal_status,
+            fiscal_status: ["issued", "authorized"].includes(invoice?.status) ? "issued" : invoice?.status || order.fiscal_status,
             order_invoices: invoice ? [invoice] : order.order_invoices,
           }
         : order
     )));
+  }
+
+  async function syncInvoice(order) {
+    if (!order?.id) return;
+    if (!order.bling_order_id) {
+      setError("Pedido ainda nao esta vinculado ao Bling.");
+      return;
+    }
+
+    setInvoiceSyncSavingId(order.id);
+    setError("");
+    setNotice("");
+    try {
+      const result = await syncStoreOrderInvoiceFromBling(order.id);
+      if (result?.invoice) mergeInvoice(order.id, result.invoice);
+      setNotice(result?.documents_saved ? "NF-e sincronizada do Bling." : "Status da NF-e atualizado do Bling.");
+      await load();
+    } catch (invoiceError) {
+      console.error(invoiceError);
+      setError(invoiceError?.message || "Nao foi possivel atualizar a NF-e do Bling.");
+    } finally {
+      setInvoiceSyncSavingId("");
+    }
   }
 
   function openOrder(orderId) {
@@ -713,8 +750,10 @@ export function StoreOrdersPage() {
             onStatus={(status) => changeStatus(selectedOrder, status)}
             onSaveNotes={saveNotes}
             onInvoiceSaved={mergeInvoice}
+            onSyncInvoice={syncInvoice}
             onSendBling={sendBling}
             blingSaving={blingSavingId === selectedOrder.id}
+            invoiceSyncSaving={invoiceSyncSavingId === selectedOrder.id}
           />
         </div>
       ) : null}

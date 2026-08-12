@@ -51,6 +51,7 @@ export const storeOperationalFlow = [
 export const storeFiscalLabels = {
   pending: "Aguardando emissao",
   issued: "Nota emitida",
+  authorized: "Nota autorizada",
   cancelled: "Nota cancelada",
   not_applicable: "Sem emissao fiscal",
   error: "Problema fiscal",
@@ -86,7 +87,7 @@ export function orderItemCount(order) {
 }
 
 export function displayStoreFiscalStatus(order, invoice = null) {
-  if (invoice?.status === "issued") return "issued";
+  if (["issued", "authorized"].includes(invoice?.status)) return "issued";
   if (invoice?.status === "cancelled") return "cancelled";
   if (invoice?.status === "error") return "error";
   if (order?.operational_status === "cancelled") return "not_applicable";
@@ -211,6 +212,14 @@ export async function updateStoreOrderInternalNotes(orderId, notes) {
 export async function sendStoreOrderToBling(orderId) {
   if (!orderId) throw new Error("Pedido invalido.");
   return supabaseFunction("bling-create-order", {
+    method: "POST",
+    body: JSON.stringify({ order_id: orderId }),
+  });
+}
+
+export async function syncStoreOrderInvoiceFromBling(orderId) {
+  if (!orderId) throw new Error("Pedido invalido.");
+  return supabaseFunction("bling-sync-order-invoice", {
     method: "POST",
     body: JSON.stringify({ order_id: orderId }),
   });
