@@ -117,6 +117,15 @@ import {
   updateProductStatus,
 } from "./services/productService";
 import { createStockMovement, listStockMovements, previewStockMovement } from "./services/stockService";
+import {
+  PIX_DISCOUNT_PERCENTAGE,
+  STORE_INSTALLMENT_COUNT,
+  calculatePixPriceFromNormal,
+  calculatePricingFromPix,
+  formatStoreMoneyInput,
+  parseStoreMoney,
+  pricingValidationMessage,
+} from "../utils/storePricing.js";
 
 const menuItems = [
   ["Dashboard", "/admin", Home],
@@ -298,33 +307,7 @@ const emptyCodexAssistantVariation = {
 };
 
 function parseMoney(value) {
-  if (value === "" || value === null || value === undefined) return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-
-  const raw = String(value)
-    .trim()
-    .replace(/[R$\s]/g, "");
-  if (!raw) return null;
-
-  const lastComma = raw.lastIndexOf(",");
-  const lastDot = raw.lastIndexOf(".");
-  let normalized = raw;
-
-  if (lastComma !== -1 && lastDot !== -1) {
-    normalized = lastComma > lastDot
-      ? raw.replace(/\./g, "").replace(",", ".")
-      : raw.replace(/,/g, "");
-  } else if (lastComma !== -1) {
-    normalized = raw.replace(/\./g, "").replace(",", ".");
-  } else if (lastDot !== -1) {
-    const [integerPart, decimalPart = ""] = raw.split(".");
-    normalized = decimalPart.length === 3 && integerPart.length <= 3
-      ? raw.replace(/\./g, "")
-      : raw;
-  }
-
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
+  return parseStoreMoney(value);
 }
 
 function formatCurrency(value) {
@@ -336,11 +319,6 @@ function formatCurrency(value) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(parsed);
-}
-
-function calculateCashPrice(value) {
-  const parsed = parseMoney(value);
-  return parsed === null ? "" : (parsed * 0.85).toFixed(2);
 }
 
 function routeInfo(pathname) {
@@ -385,17 +363,33 @@ function routeInfo(pathname) {
 function normalizeProductForm(product, categories) {
   const firstCategory = categories[0];
   const category = categories.find((item) => item.id === product?.categoryId || item.name === product?.category);
+  const hasPixPrice = parseStoreMoney(product?.promoPrice) !== null;
+  const legacyPixPrice = hasPixPrice ? null : calculatePixPriceFromNormal(product?.price);
   return {
     ...emptyProduct,
     ...product,
     categoryId: category?.id || product?.categoryId || firstCategory?.id || "",
     category: category?.name || product?.category || firstCategory?.name || "",
-    variations: Array.isArray(product?.variations) ? product.variations : [],
+    promoPrice: hasPixPrice ? product.promoPrice : formatStoreMoneyInput(legacyPixPrice),
+    _pricingDerivedFromNormal: !hasPixPrice && legacyPixPrice !== null,
+    _pixPriceEdited: false,
+    variations: Array.isArray(product?.variations) ? product.variations.map((variation) => {
+      const variationHasPixPrice = parseStoreMoney(variation?.promoPrice) !== null;
+      const variationLegacyPixPrice = variationHasPixPrice ? null : calculatePixPriceFromNormal(variation?.price);
+      return {
+        ...variation,
+        promoPrice: variationHasPixPrice ? variation.promoPrice : formatStoreMoneyInput(variationLegacyPixPrice),
+        _pricingDerivedFromNormal: !variationHasPixPrice && variationLegacyPixPrice !== null,
+        _pixPriceEdited: false,
+      };
+    }) : [],
   };
 }
 
 function normalizePcForm(pc) {
   const benchmark = normalizeProductBenchmark(pc || {});
+  const hasPixPrice = parseStoreMoney(pc?.promoPrice) !== null;
+  const legacyPixPrice = hasPixPrice ? null : calculatePixPriceFromNormal(pc?.price);
   return {
     ...emptyPc,
     ...pc,
@@ -404,6 +398,9 @@ function normalizePcForm(pc) {
     ntTestaEpisode: benchmark.ntTestaEpisode,
     fullBenchmarkVideoUrl: benchmark.fullBenchmarkVideoUrl,
     benchmarkGames: benchmark.benchmarkGames,
+    promoPrice: hasPixPrice ? pc?.promoPrice : formatStoreMoneyInput(legacyPixPrice),
+    _pricingDerivedFromNormal: !hasPixPrice && legacyPixPrice !== null,
+    _pixPriceEdited: false,
   };
 }
 
@@ -1065,6 +1062,21 @@ function normalizeFiscalNcmInput(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 8);
 }
 
+function PixPricingPreview({ pixPrice, compact = false }) {
+  const pricing = calculatePricingFromPix(pixPrice);
+
+  return (
+    <div className={`rounded-md border border-slate-700 bg-slate-950 text-sm ${compact ? "p-3" : "p-4"}`}>
+      <p className="font-bold text-slate-200">Cálculo automático</p>
+      <p className="mt-2 text-slate-400">Preço no Pix: <strong className="text-lime-200">{formatCurrency(pricing?.pixPrice)}</strong></p>
+      <p className="mt-1 text-slate-400">Preço em até 10x sem juros: <strong className="text-white">{formatCurrency(pricing?.normalPrice)}</strong></p>
+      <p className="mt-1 text-slate-400">Desconto no Pix: <strong className="text-white">{PIX_DISCOUNT_PERCENTAGE}%</strong></p>
+      <p className="mt-1 text-slate-400">Economia no Pix: <strong className="text-white">{formatCurrency(pricing?.discountValue)}</strong></p>
+      <p className="mt-1 text-slate-400">Parcelamento: <strong className="text-white">{STORE_INSTALLMENT_COUNT}x de {formatCurrency(pricing?.installmentValue)} sem juros</strong></p>
+    </div>
+  );
+}
+
 function fiscalStatusInfo(form) {
   if (form.fiscalReviewStatus === "divergent") {
     return {
@@ -1118,8 +1130,6 @@ function ProductFormPage({
   const [blingStockStatus, setBlingStockStatus] = useState("");
   const [blingStockLoading, setBlingStockLoading] = useState(false);
   const [fiscalError, setFiscalError] = useState("");
-  const installmentBase = form.price || form.promoPrice;
-  const cashPrice = calculateCashPrice(form.price);
   const stockMetadata = existingProduct?.blingStockSyncMetadata || {};
   const configuredDepositName = blingConfiguredDeposit?.nome || stockMetadata.depositName || "";
   const configuredDepositId = blingConfiguredDeposit?.id || stockMetadata.depositId || "";
@@ -1160,6 +1170,12 @@ function ProductFormPage({
   function updateField(field, value) {
     setForm((current) => {
       const next = { ...current, [field]: field === "fiscalNcm" ? normalizeFiscalNcmInput(value) : value };
+      if (field === "promoPrice") {
+        const pricing = calculatePricingFromPix(value);
+        next.price = pricing ? formatStoreMoneyInput(pricing.normalPrice) : "";
+        next._pricingDerivedFromNormal = false;
+        next._pixPriceEdited = true;
+      }
       if (field === "name" && !isEdit) next.slug = slugify(value);
       if (field === "mainImage") next.images = listToText([value, ...textToList(current.gallery)]);
       if (field === "gallery") next.images = listToText([current.mainImage, ...textToList(value)]);
@@ -1180,7 +1196,16 @@ function ProductFormPage({
     setForm((current) => ({
       ...current,
       variations: current.variations.map((variation, itemIndex) => (
-        itemIndex === index ? { ...variation, [field]: value } : variation
+        itemIndex === index ? (() => {
+          const nextVariation = { ...variation, [field]: value };
+          if (field === "promoPrice") {
+            const pricing = calculatePricingFromPix(value);
+            nextVariation.price = pricing ? formatStoreMoneyInput(pricing.normalPrice) : "";
+            nextVariation._pricingDerivedFromNormal = false;
+            nextVariation._pixPriceEdited = true;
+          }
+          return nextVariation;
+        })() : variation
       )),
     }));
   }
@@ -1196,6 +1221,20 @@ function ProductFormPage({
   async function handleSubmit(event) {
     event.preventDefault();
     setFiscalError("");
+    const pricingError = pricingValidationMessage(form.promoPrice);
+    if (pricingError) {
+      setFiscalError(pricingError);
+      return;
+    }
+    const invalidVariationIndex = form.variations.findIndex((variation) => {
+      const hasOwnPricing = [variation.price, variation.promoPrice]
+        .some((value) => value !== "" && value !== null && value !== undefined);
+      return hasOwnPricing && pricingValidationMessage(variation.promoPrice);
+    });
+    if (invalidVariationIndex !== -1) {
+      setFiscalError(`Variação ${invalidVariationIndex + 1}: ${pricingValidationMessage(form.variations[invalidVariationIndex].promoPrice)}`);
+      return;
+    }
     const fiscalNcm = normalizeFiscalNcmInput(form.fiscalNcm);
     if (fiscalNcm && fiscalNcm.length !== 8) {
       setFiscalError("O NCM deve estar vazio ou conter exatamente 8 digitos.");
@@ -1278,16 +1317,12 @@ function ProductFormPage({
         <TextField label="Marca" value={form.brand} onChange={(value) => updateField("brand", value)} />
         <TextField label="Modelo" value={form.model} onChange={(value) => updateField("model", value)} />
         <TextField label="SKU" value={form.sku} onChange={(value) => updateField("sku", value)} />
-        <TextField label="Preço em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 500" />
-        <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 425" />
+        <TextField label="Preço no Pix" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 150,00" inputMode="decimal" required />
+        <TextField label="Preço em até 10x sem juros" value={form.price} onChange={() => {}} readOnly aria-readonly="true" />
         <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} min="0" step="1" />
         <SelectField label="Status do produto" value={form.status} onChange={(value) => updateField("status", value)} options={adminStatuses.map((item) => [item, item])} />
         <TextField label="Garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} />
-        <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
-          <p className="font-bold text-slate-200">Cálculo automático</p>
-          <p className="mt-2 text-slate-400">10x sem juros: <strong className="text-white">{formatCurrency(installmentBase)}</strong></p>
-          <p className="mt-1 text-slate-400">À vista com 15% off: <strong className="text-lime-200">{formatCurrency(cashPrice || form.promoPrice)}</strong></p>
-        </div>
+        <PixPricingPreview pixPrice={form.promoPrice} />
         <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-bold text-slate-200">
           <input type="checkbox" checked={form.status !== "rascunho"} onChange={(event) => updateField("status", event.target.checked ? "disponível" : "rascunho")} />
           Produto publicado
@@ -1353,8 +1388,8 @@ function ProductFormPage({
                 <TextField label="Nome da variação" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} />
                 <TextField label="Cor" value={variation.color} onChange={(value) => updateVariation(index, "color", value)} />
                 <TextField label="SKU da variação" value={variation.sku} onChange={(value) => updateVariation(index, "sku", value)} />
-                <TextField label="Preço" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
-                <TextField label="Preço promocional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
+                <TextField label="Preço no Pix" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} inputMode="decimal" />
+                <TextField label="Preço em até 10x sem juros" value={variation.price} onChange={() => {}} readOnly aria-readonly="true" />
                 <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} min="0" step="1" />
                 <TextField label="Imagem da variação" value={variation.image} onChange={(value) => updateVariation(index, "image", value)} />
                 <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200">
@@ -1365,6 +1400,7 @@ function ProductFormPage({
                   <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => removeVariation(index)}>Remover</AdminButton>
                 </div>
               </div>
+              {(variation.price || variation.promoPrice) ? <div className="mt-4"><PixPricingPreview pixPrice={variation.promoPrice} compact /></div> : null}
             </div>
           ))}
           {!form.variations.length ? <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">Nenhuma variação cadastrada para este produto.</p> : null}
@@ -2065,8 +2101,6 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => normalizePcForm(isEdit ? existingPc : emptyPc));
   const [formError, setFormError] = useState("");
-  const installmentBase = form.price || form.promoPrice;
-  const cashPrice = calculateCashPrice(form.price);
   const selectedUses = textToList(form.targetUses);
   const selectedChecks = textToList(form.qualityChecks);
 
@@ -2078,6 +2112,12 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
   function updateField(field, value) {
     setForm((current) => {
       const next = { ...current, [field]: value };
+      if (field === "promoPrice") {
+        const pricing = calculatePricingFromPix(value);
+        next.price = pricing ? formatStoreMoneyInput(pricing.normalPrice) : "";
+        next._pricingDerivedFromNormal = false;
+        next._pixPriceEdited = true;
+      }
       if (field === "name" && !isEdit) next.slug = slugify(value);
       if (field === "pcType") next.category = pcTypeLabel(value);
       return next;
@@ -2098,7 +2138,8 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
     if (!form.processor.trim()) return "Informe o processador.";
     if (!form.memory.trim()) return "Informe a memória RAM.";
     if (!form.storage.trim()) return "Informe o armazenamento principal.";
-    if (parseMoney(form.price) === null) return "Informe o preço em 10x sem juros.";
+    const pricingError = pricingValidationMessage(form.promoPrice);
+    if (pricingError) return pricingError;
     if (Number(form.stock) < 0 || !Number.isInteger(Number(form.stock))) return "O estoque precisa ser um número inteiro maior ou igual a zero.";
     if (form.published && !form.mainImage) return "Para publicar, envie ou informe uma imagem principal.";
     return "";
@@ -2197,16 +2238,12 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
         <div className="lg:col-span-2">
           <h2 className="text-xl font-black text-white">Preço, estoque e garantia</h2>
         </div>
-        <TextField label="Preço em 10x sem juros" value={form.price} onChange={(value) => updateField("price", value)} placeholder="Ex.: 2500" required />
-        <TextField label="Preço promocional" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 2125" />
+        <TextField label="Preço no Pix" value={form.promoPrice} onChange={(value) => updateField("promoPrice", value)} placeholder="Ex.: 2.125,00" inputMode="decimal" required />
+        <TextField label="Preço em até 10x sem juros" value={form.price} onChange={() => {}} readOnly aria-readonly="true" />
         <TextField label="Estoque" type="number" value={form.stock} onChange={(value) => updateField("stock", Number(value))} min="0" step="1" />
         <TextField label="Garantia em meses" type="number" value={form.warrantyMonths} onChange={(value) => updateField("warrantyMonths", Number(value))} min="0" step="1" />
         <TextField label="Texto de garantia" value={form.warranty} onChange={(value) => updateField("warranty", value)} placeholder="Ex.: 3 meses pela loja" />
-        <div className="rounded-md border border-slate-700 bg-slate-950 p-4 text-sm">
-          <p className="font-bold text-slate-200">Cálculo automático</p>
-          <p className="mt-2 text-slate-400">10x sem juros: <strong className="text-white">{formatCurrency(installmentBase)}</strong></p>
-          <p className="mt-1 text-slate-400">À vista com 15% off: <strong className="text-lime-200">{formatCurrency(cashPrice || form.promoPrice)}</strong></p>
-        </div>
+        <PixPricingPreview pixPrice={form.promoPrice} />
       </section>
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5 lg:grid-cols-2">
@@ -2527,8 +2564,8 @@ function buildCodexAssistantPrompt(form, variations, options = {}) {
 Variacao ${index + 1}:
 - Nome da variacao informado pela loja: ${variation.name || "Nao informado"}
 - Link da variacao: ${variation.link || "Nao informado"}
-- Preco de venda: ${variation.price || "Nao informado"}
-- Preco promocional opcional: ${variation.promoPrice || "Nao informado"}
+- Preco no Pix (product_variations.promo_price): ${variation.promoPrice || "Nao informado"}
+- Preco normal / ate 10x sem juros (product_variations.price): ${variation.price || "Nao informado"}
 - Estoque: ${variation.stock ?? 0}
 - Garantia opcional: ${variation.warranty || "Nao informado"}`)
     .join("\n");
@@ -2686,7 +2723,14 @@ function CodexAssistantPage() {
 
   function updateVariation(index, field, value) {
     setVariations((current) => current.map((variation, itemIndex) => (
-      itemIndex === index ? { ...variation, [field]: value } : variation
+      itemIndex === index ? (() => {
+        const nextVariation = { ...variation, [field]: value };
+        if (field === "promoPrice") {
+          const pricing = calculatePricingFromPix(value);
+          nextVariation.price = pricing ? formatStoreMoneyInput(pricing.normalPrice) : "";
+        }
+        return nextVariation;
+      })() : variation
     )));
     setValidation({ valid: false, errors: [], success: "" });
   }
@@ -2809,11 +2853,12 @@ function CodexAssistantPage() {
               <div className="grid gap-4 lg:grid-cols-3">
                 <TextField label="Nome da variação" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} placeholder="Preto, Branco, Vermelho..." />
                 <TextField label="Link da variação" value={variation.link} onChange={(value) => updateVariation(index, "link", value)} placeholder="https://..." />
-                <TextField label="Preço de venda" value={variation.price} onChange={(value) => updateVariation(index, "price", value)} />
-                <TextField label="Preço promocional opcional" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} />
+                <TextField label="Preço no Pix" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} inputMode="decimal" />
+                <TextField label="Preço em até 10x sem juros" value={variation.price} onChange={() => {}} readOnly aria-readonly="true" />
                 <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} />
                 <TextField label="Garantia opcional" value={variation.warranty} onChange={(value) => updateVariation(index, "warranty", value)} />
               </div>
+              {(variation.price || variation.promoPrice) ? <div className="mt-4"><PixPricingPreview pixPrice={variation.promoPrice} compact /></div> : null}
             </div>
           ))}
         </div>

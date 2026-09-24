@@ -12,6 +12,7 @@ import { onlyDigits } from "../customer/customerValidation";
 import { useCart } from "./CartContext";
 import { cartTotals, itemKey } from "./cartStorage";
 import { billingAddressPayload, createCheckoutAttemptKey, createStoreCheckout, getOrderPaymentStatus, missingBillingAddressFields, missingCheckoutProfileFields, pickupInfo } from "../store/storeCheckoutService";
+import { PIX_DISCOUNT_PERCENTAGE } from "../utils/storePricing.js";
 
 function formatCurrency(value) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value || 0));
@@ -483,7 +484,7 @@ export function CheckoutPage({ onNavigate, getNavHref, navigateTo }) {
             <Card>
               <h2 className="text-xl font-black text-white">Forma de pagamento</h2>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <button type="button" onClick={() => setPaymentMethod("pix")} className={`rounded-md border px-4 py-4 text-left transition ${paymentMethod === "pix" ? "border-lime-300/50 bg-lime-300/10 text-lime-100" : "border-white/10 bg-white/5 text-slate-200"}`}><QrCode className="mb-2" />Pix com 15% OFF</button>
+                <button type="button" onClick={() => setPaymentMethod("pix")} className={`rounded-md border px-4 py-4 text-left transition ${paymentMethod === "pix" ? "border-lime-300/50 bg-lime-300/10 text-lime-100" : "border-white/10 bg-white/5 text-slate-200"}`}><QrCode className="mb-2" />Pix com {PIX_DISCOUNT_PERCENTAGE}% OFF</button>
                 <button type="button" onClick={() => setPaymentMethod("card")} className={`rounded-md border px-4 py-4 text-left transition ${paymentMethod === "card" ? "border-nt-cyan/50 bg-nt-cyan/10 text-nt-cyan" : "border-white/10 bg-white/5 text-slate-200"}`}><CreditCard className="mb-2" />Cartão em até 10x</button>
               </div>
               {paymentMethod === "pix" ? <button type="button" disabled={processing} onClick={() => finishCheckout()} className="mt-5 w-full rounded-md bg-nt-blue px-5 py-3 text-sm font-black text-white shadow-glow transition hover:bg-nt-cyan disabled:cursor-wait disabled:opacity-60">{processing ? "Gerando Pix..." : "Gerar Pix"}</button> : null}

@@ -1,3 +1,5 @@
+import { calculatePixPriceFromNormal, roundStoreMoney } from "../utils/storePricing.js";
+
 export const CART_STORAGE_KEY = "nt-store-cart-v1";
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -40,15 +42,16 @@ export function moneyValue(value) {
 }
 
 export function cartTotals(items) {
-  const subtotal = items.reduce((sum, item) => sum + moneyValue(item.unitPrice) * Number(item.quantity || 0), 0);
-  const pixTotal = items.reduce((sum, item) => {
+  const subtotal = roundStoreMoney(items.reduce((sum, item) => sum + moneyValue(item.unitPrice) * Number(item.quantity || 0), 0));
+  const pixTotal = roundStoreMoney(items.reduce((sum, item) => {
     const cash = moneyValue(item.cashPrice);
     const regular = moneyValue(item.unitPrice);
-    return sum + (cash || regular * 0.85) * Number(item.quantity || 0);
-  }, 0);
+    const fallbackPix = calculatePixPriceFromNormal(regular) || 0;
+    return sum + (cash || fallbackPix) * Number(item.quantity || 0);
+  }, 0));
   return {
     subtotal,
-    pixDiscount: Math.max(0, subtotal - pixTotal),
+    pixDiscount: roundStoreMoney(Math.max(0, subtotal - pixTotal)),
     pixTotal,
     cardTotal: subtotal,
     count: items.reduce((sum, item) => sum + Number(item.quantity || 0), 0),

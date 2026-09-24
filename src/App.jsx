@@ -28,6 +28,7 @@
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import heroImage from "./assets/hero-nt-gaming.png";
+import { PIX_DISCOUNT_PERCENTAGE, calculatePixPriceFromNormal } from "./utils/storePricing.js";
 import arenaImage from "./assets/arena-gamer-banner.png";
 import { Button, WhatsAppButton, whatsappLink } from "./components/Button";
 import { Card, IconBadge } from "./components/Card";
@@ -135,8 +136,7 @@ function formatCurrency(value) {
 }
 
 function cashValue(value) {
-  const parsed = parseMoney(value);
-  return parsed === null ? null : parsed * 0.85;
+  return calculatePixPriceFromNormal(value);
 }
 
 function pcCashPrice(pc) {
@@ -277,7 +277,7 @@ function PcPriceBlock({ pc, detail = false }) {
         <span className={(detail ? "text-4xl" : "text-3xl") + " font-black text-nt-cyan"}>
           {formatCurrency(cashPrice)}
         </span>
-        <span className="text-sm font-bold uppercase tracking-[0.08em] text-lime-200">À vista com 15% OFF</span>
+        <span className="text-sm font-bold uppercase tracking-[0.08em] text-lime-200">À vista com {PIX_DISCOUNT_PERCENTAGE}% OFF</span>
       </div>
       <p className="mt-1 text-sm font-semibold text-slate-300">
         {formatCurrency(installmentPrice)} em 10x sem juros

@@ -1,6 +1,7 @@
 import { isSupabaseConfigured, supabaseFunction, supabaseRequest } from "../../lib/supabase";
 import { adminStorageKey, initialAdminProducts } from "../adminData";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
+import { calculatePricingFromPix, pricingValidationMessage } from "../../utils/storePricing.js";
 
 function arrayFromText(value) {
   if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
@@ -93,6 +94,8 @@ function normalizeVariation(variation = {}, index = 0) {
     sku: variation.sku || "",
     image: variation.image || "",
     active: variation.active !== false,
+    _pricingDerivedFromNormal: Boolean(variation._pricingDerivedFromNormal),
+    _pixPriceEdited: Boolean(variation._pixPriceEdited),
   };
 }
 
@@ -164,7 +167,7 @@ function fromSupabase(row, categories = [], variations = []) {
   };
 }
 
-function toSupabase(product, categories = []) {
+function toSupabase(product, categories = [], options = {}) {
   const category = categories.find((item) => item.id === product.categoryId || item.name === product.category);
   const [mainImage = ""] = normalizeImageList([product.mainImage]);
   const galleryImages = product.gallery !== undefined ? normalizeImageList(product.gallery) : normalizeImageList(product.images);
@@ -184,6 +187,9 @@ function toSupabase(product, categories = []) {
   const fiscalSource = fiscalChanged
     ? (fiscalNcm || fiscalOriginCode ? "manual" : null)
     : product.fiscalSource || null;
+  const calculatedPricing = (options.forcePixPricing || product._pixPriceEdited)
+    ? calculatePricingFromPix(product.promoPrice)
+    : null;
 
   return {
     name: product.name,
@@ -193,8 +199,10 @@ function toSupabase(product, categories = []) {
     model: product.model || "",
     short_description: product.shortDescription || "",
     full_description: product.fullDescription || "",
-    price: moneyOrNull(product.price),
-    promo_price: moneyOrNull(product.promoPrice),
+    price: moneyOrNull(calculatedPricing?.normalPrice ?? product.price),
+    promo_price: product._pricingDerivedFromNormal && !product._pixPriceEdited
+      ? null
+      : moneyOrNull(calculatedPricing?.pixPrice ?? product.promoPrice),
     status: product.status || "rascunho",
     stock: Number(product.stock || 0),
     featured: Boolean(product.featured),
@@ -222,13 +230,18 @@ function hasExplicitImagePayload(product) {
 
 function toSupabaseVariation(variation, productId) {
   const normalized = normalizeVariation(variation);
+  const calculatedPricing = (variation._pixPriceEdited || !isUuid(variation.id))
+    ? calculatePricingFromPix(variation.promoPrice)
+    : null;
   return {
     product_id: productId,
     name: normalized.name || normalized.color || "Variação",
     value: normalized.color || normalized.name || "",
     color: normalized.color || "",
-    price: moneyOrNull(normalized.price),
-    promo_price: moneyOrNull(normalized.promoPrice),
+    price: moneyOrNull(calculatedPricing?.normalPrice ?? normalized.price),
+    promo_price: variation._pricingDerivedFromNormal && !variation._pixPriceEdited
+      ? null
+      : moneyOrNull(calculatedPricing?.pixPrice ?? normalized.promoPrice),
     stock: Number(normalized.stock || 0),
     sku: normalized.sku || "",
     image: normalized.image || "",
@@ -237,6 +250,19 @@ function toSupabaseVariation(variation, productId) {
     status: normalized.active === false ? "inativo" : "ativo",
     updated_at: new Date().toISOString(),
   };
+}
+
+function validateProductPricing(product) {
+  const productError = pricingValidationMessage(product.promoPrice);
+  if (productError) throw new Error(productError);
+
+  parseVariations(product.variations).forEach((variation, index) => {
+    const hasOwnPricing = [variation.price, variation.promoPrice]
+      .some((value) => value !== "" && value !== null && value !== undefined);
+    if (!hasOwnPricing) return;
+    const variationError = pricingValidationMessage(variation.promoPrice, `Preço no Pix da variação ${index + 1}`);
+    if (variationError) throw new Error(variationError);
+  });
 }
 
 function normalizeLocalProduct(product, categories = []) {
@@ -364,10 +390,11 @@ export async function listProducts(categories = []) {
 }
 
 export async function createProduct(product, categories = []) {
+  validateProductPricing(product);
   if (isSupabaseConfigured) {
     try {
       const payload = {
-        ...toSupabase(product, categories),
+        ...toSupabase(product, categories, { forcePixPricing: true }),
         bling_sync_status: "not_sent",
         bling_stock_sync_status: "not_synced",
       };
@@ -398,6 +425,7 @@ export async function createProduct(product, categories = []) {
 }
 
 export async function updateProduct(id, product, categories = []) {
+  validateProductPricing(product);
   if (isSupabaseConfigured) {
     try {
       const payload = toSupabase(product, categories);

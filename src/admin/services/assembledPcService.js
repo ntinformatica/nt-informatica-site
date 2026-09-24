@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabaseRequest } from "../../lib/supabase";
 import { benchmarkGameToSupabase, normalizeProductBenchmark } from "../../utils/pcBenchmark";
+import { calculatePricingFromPix, pricingValidationMessage } from "../../utils/storePricing.js";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
 
 const pcStorageKey = "nt-admin-assembled-pcs-v1";
@@ -149,12 +150,15 @@ function normalizeLocalPc(pc = {}) {
   };
 }
 
-function toSupabase(pc) {
+function toSupabase(pc, options = {}) {
   const images = [...new Set([pc.mainImage, ...arrayFromText(pc.images), ...arrayFromText(pc.gallery)].filter(Boolean))];
   const stock = Number(pc.stock || 0);
   const published = Boolean(pc.published);
   const status = pc.status || (published ? (stock > 0 ? "publicado" : "esgotado") : "rascunho");
   const benchmark = normalizeProductBenchmark(pc);
+  const calculatedPricing = (options.forcePixPricing || pc._pixPriceEdited)
+    ? calculatePricingFromPix(pc.promoPrice)
+    : null;
 
   return {
     name: pc.name || "",
@@ -183,8 +187,10 @@ function toSupabase(pc) {
     rgb: Boolean(pc.rgb),
     office_included: Boolean(pc.officeIncluded),
     windows_included: Boolean(pc.windowsIncluded),
-    price: moneyOrNull(pc.price),
-    promo_price: moneyOrNull(pc.promoPrice),
+    price: moneyOrNull(calculatedPricing?.normalPrice ?? pc.price),
+    promo_price: pc._pricingDerivedFromNormal && !pc._pixPriceEdited
+      ? null
+      : moneyOrNull(calculatedPricing?.pixPrice ?? pc.promoPrice),
     stock,
     warranty: pc.warranty || "",
     warranty_months: Number(pc.warrantyMonths || 3),
@@ -268,10 +274,12 @@ export async function listPublicAssembledPcs() {
 }
 
 export async function createAssembledPc(pc) {
+  const pricingError = pricingValidationMessage(pc.promoPrice);
+  if (pricingError) throw new Error(pricingError);
   if (isSupabaseConfigured) {
     const [row] = await supabaseRequest("/assembled_pcs", {
       method: "POST",
-      body: JSON.stringify(toSupabase(pc)),
+      body: JSON.stringify(toSupabase(pc, { forcePixPricing: true })),
     });
     return fromSupabase(row);
   }
@@ -283,6 +291,8 @@ export async function createAssembledPc(pc) {
 }
 
 export async function updateAssembledPc(id, pc) {
+  const pricingError = pricingValidationMessage(pc.promoPrice);
+  if (pricingError) throw new Error(pricingError);
   if (isSupabaseConfigured) {
     const [row] = await supabaseRequest(`/assembled_pcs?id=eq.${encodeURIComponent(id)}`, {
       method: "PATCH",
