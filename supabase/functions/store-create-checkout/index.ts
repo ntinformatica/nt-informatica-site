@@ -681,6 +681,44 @@ function providerErrorMessage(status: number) {
   return "Falha ao criar pagamento no Mercado Pago.";
 }
 
+async function resolveLegacyVariationItems(items: StoreItem[]) {
+  const variationIds = [...new Set(items
+    .map((item) => cleanText(item.variation_id))
+    .filter((variationId) => isUuid(variationId)))];
+  if (!variationIds.length) return items;
+
+  const mappingRows = await supabaseRest(
+    `/product_variation_migration_map?old_variation_id=in.(${variationIds.join(",")})`
+      + "&select=old_variation_id,new_product_id",
+  );
+  if (!Array.isArray(mappingRows) || !mappingRows.length) return items;
+
+  const newProductIds = [...new Set(mappingRows
+    .map((row) => isObject(row) ? cleanText(row.new_product_id) : "")
+    .filter((productId) => isUuid(productId)))];
+  const productRows = await supabaseRest(
+    `/products?id=in.(${newProductIds.join(",")})&select=id,status`,
+  );
+  const activeProductIds = new Set((Array.isArray(productRows) ? productRows : [])
+    .filter((row) => isObject(row) && cleanText(row.status).toLowerCase() !== "rascunho")
+    .map((row) => cleanText((row as JsonObject).id)));
+  const mappingByVariation = new Map(mappingRows
+    .filter((row) => isObject(row) && activeProductIds.has(cleanText(row.new_product_id)))
+    .map((row) => [cleanText((row as JsonObject).old_variation_id), cleanText((row as JsonObject).new_product_id)]));
+
+  const merged = new Map<string, StoreItem>();
+  items.forEach((item) => {
+    const mappedProductId = item.variation_id ? mappingByVariation.get(item.variation_id) : "";
+    const resolved = mappedProductId
+      ? { item_type: "product" as const, product_id: mappedProductId, quantity: item.quantity }
+      : item;
+    const key = [resolved.item_type, resolved.product_id || "", resolved.variation_id || "", resolved.assembled_pc_id || ""].join(":");
+    const current = merged.get(key);
+    merged.set(key, current ? { ...resolved, quantity: current.quantity + resolved.quantity } : resolved);
+  });
+  return [...merged.values()];
+}
+
 function isInsufficientAmountProviderError(payload: unknown) {
   if (cleanText(payload).toLowerCase().includes("insufficient_amount")) return true;
   return findDeepStrings(payload, (_key, value) => value.toLowerCase().includes("insufficient_amount")).length > 0;
@@ -827,9 +865,10 @@ Deno.serve(async (request) => {
     if (request.method !== "POST") return fail(request, "Metodo nao permitido.", 405);
 
     const input = validateCheckoutPayload(await readLimitedJson(request));
+    const resolvedItems = await resolveLegacyVariationItems(input.items);
     const rpcResult = await supabaseRpc("create_store_order_from_cart", {
       p_customer: input.customer,
-      p_items: input.items,
+      p_items: resolvedItems,
       p_payment_method: input.payment_method,
       p_installments: input.installments,
       p_order_source: "site",

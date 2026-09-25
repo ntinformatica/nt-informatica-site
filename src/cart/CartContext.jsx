@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { cartTotals, itemKey, readCartItems, writeCartItems } from "./cartStorage";
+import { cartTotals, itemKey, readCartItems, resolveLegacyCartItems, writeCartItems } from "./cartStorage";
 
 const CartContext = createContext(null);
 
@@ -37,6 +37,27 @@ export function CartProvider({ children }) {
     return () => {
       window.removeEventListener("storage", sync);
       window.removeEventListener("nt-cart-updated", sync);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const initialItems = readCartItems();
+    const initialFingerprint = JSON.stringify(initialItems);
+    resolveLegacyCartItems(initialItems)
+      .then((resolvedItems) => {
+        if (cancelled) return;
+        const currentItems = readCartItems();
+        if (JSON.stringify(currentItems) !== initialFingerprint) return;
+        if (JSON.stringify(resolvedItems) !== initialFingerprint) {
+          writeCartItems(resolvedItems);
+        }
+      })
+      .catch((error) => {
+        console.warn("Nao foi possivel atualizar referencias antigas do carrinho.", error);
+      });
+    return () => {
+      cancelled = true;
     };
   }, []);
 
