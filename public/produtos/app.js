@@ -2566,39 +2566,7 @@ function requestedProductParam() {
   return String(new URLSearchParams(window.location.search).get("produto") || "").trim();
 }
 
-function activeProductVariants(product) {
-  return (product.variants ?? []).filter((variant) => variant.active !== false);
-}
-
-function variantStock(variant) {
-  const stock = Number(variant?.stock ?? 0);
-  return Number.isFinite(stock) ? stock : 0;
-}
-
-function variantAvailable(variant) {
-  return variantStock(variant) >= 1;
-}
-
-function visualProductVariants(product) {
-  const variants = activeProductVariants(product);
-  return variants
-    .map((variant, index) => ({ variant, index }))
-    .sort((first, second) => {
-      const firstAvailable = variantAvailable(first.variant);
-      const secondAvailable = variantAvailable(second.variant);
-      if (firstAvailable !== secondAvailable) return firstAvailable ? -1 : 1;
-      return first.index - second.index;
-    })
-    .map((item) => item.variant);
-}
-
-function productVariant(product, index = 0) {
-  return visualProductVariants(product)[index] ?? null;
-}
-
 function productAvailable(product) {
-  const variants = activeProductVariants(product);
-  if (variants.length) return variants.some(variantAvailable);
   const stock = Number(product.stock ?? 0);
   return Number.isFinite(stock) && stock >= 1;
 }
@@ -2634,9 +2602,8 @@ function parsePriceValue(value) {
 }
 
 function productSortPrice(product) {
-  const variant = productVariant(product);
-  const promoPrice = parsePriceValue(productField(product, variant, "cashPrice"));
-  const regularPrice = parsePriceValue(productField(product, variant, "price"));
+  const promoPrice = parsePriceValue(product.cashPrice);
+  const regularPrice = parsePriceValue(product.price);
   return promoPrice ?? regularPrice ?? Number.POSITIVE_INFINITY;
 }
 
@@ -2661,15 +2628,9 @@ function sortProducts(items) {
     .map((item) => item.product);
 }
 
-function productImages(product, variant = productVariant(product)) {
+function productImages(product) {
   const productGallery = (product.images ?? []).map(assetPath);
-  const variantGallery = (variant?.images ?? []).map(assetPath);
-  if (!variantGallery.length) return productGallery;
-  return [...new Set([...variantGallery, ...productGallery])];
-}
-
-function productField(product, variant, field) {
-  return variant?.[field] ?? product[field];
+  return productGallery;
 }
 
 const CART_STORAGE_KEY = "nt-store-cart-v1";
@@ -2700,31 +2661,29 @@ function updateCatalogCartCount(items = readStoreCart()) {
   badge.textContent = String(total);
 }
 
-function productCartItem(product, variant = productVariant(product)) {
-  const images = productImages(product, variant);
-  const stock = Number(productField(product, variant, "stock") || 0);
+function productCartItem(product) {
+  const images = productImages(product);
+  const stock = Number(product.stock || 0);
   return {
     itemType: "product",
     productId: product.supabaseId || product.id,
-    variationId: variant?.id || "",
     name: product.name,
-    variationName: variant?.name || variant?.color || "",
     image: images[0] || "",
-    unitPrice: parsePriceValue(productField(product, variant, "price")) || 0,
-    cashPrice: parsePriceValue(productField(product, variant, "cashPrice")) || 0,
+    unitPrice: parsePriceValue(product.price) || 0,
+    cashPrice: parsePriceValue(product.cashPrice) || 0,
     stock: Number.isFinite(stock) ? stock : 0,
-    sku: productField(product, variant, "sku") || product.sku || "",
+    sku: product.sku || "",
     slug: product.slug || product.id || "",
     quantity: 1,
   };
 }
 
-function addProductToCart(product, variant = productVariant(product), buyNow = false) {
-  if (!stockStatus(product, variant).available) {
+function addProductToCart(product, buyNow = false) {
+  if (!stockStatus(product).available) {
     alert("Produto indisponível para compra online.");
     return;
   }
-  const item = productCartItem(product, variant);
+  const item = productCartItem(product);
   const items = readStoreCart();
   const key = cartItemKey(item);
   const existing = items.find((entry) => cartItemKey(entry) === key);
@@ -2743,9 +2702,8 @@ updateCatalogCartCount();
 window.addEventListener("storage", () => updateCatalogCartCount());
 window.addEventListener("nt-cart-updated", (event) => updateCatalogCartCount(event.detail?.items));
 
-function stockStatus(product, variant = productVariant(product)) {
-  const rawStock = productField(product, variant, "stock");
-  const stock = Number(rawStock ?? 0);
+function stockStatus(product) {
+  const stock = Number(product.stock ?? 0);
 
   if (Number.isFinite(stock) && stock >= 1) {
     return { label: "🟢 Em estoque", className: "stock-in", available: true };
@@ -2754,17 +2712,17 @@ function stockStatus(product, variant = productVariant(product)) {
   return { label: "🔴 Esgotado", className: "stock-out", available: false };
 }
 
-function renderStockStatus(product, variant = productVariant(product)) {
-  const status = stockStatus(product, variant);
+function renderStockStatus(product) {
+  const status = stockStatus(product);
   return `<span class="stock-badge ${status.className}">${status.label}</span>`;
 }
 
-function buyButtonLabel(product, variant = productVariant(product)) {
-  return stockStatus(product, variant).available ? "Adicionar ao carrinho" : "Consulte disponibilidade";
+function buyButtonLabel(product) {
+  return stockStatus(product).available ? "Adicionar ao carrinho" : "Consulte disponibilidade";
 }
 
-function whatsappHref(product, variant = productVariant(product)) {
-  const text = productField(product, variant, "whatsappMessage") ?? `Olá, NT Informática. Tenho interesse em ${product.name}.`;
+function whatsappHref(product) {
+  const text = product.whatsappMessage ?? `Olá, NT Informática. Tenho interesse em ${product.name}.`;
   return `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(text)}`;
 }
 
@@ -2830,9 +2788,9 @@ function renderProductSpecs(product) {
   `;
 }
 
-function renderPrice(product, variant = productVariant(product)) {
-  const cashPrice = productField(product, variant, "cashPrice");
-  const cashLabel = productField(product, variant, "cashLabel");
+function renderPrice(product) {
+  const cashPrice = product.cashPrice;
+  const cashLabel = product.cashLabel;
 
   if (!cashPrice) return `<div class="price">${product.price}</div>`;
 
@@ -2844,8 +2802,8 @@ function renderPrice(product, variant = productVariant(product)) {
   `;
 }
 
-function renderTerms(product, variant = productVariant(product)) {
-  return `<div class="terms">${productField(product, variant, "installmentText") ?? "10x sem juros ou 15% OFF no Pix/dinheiro"}</div>`;
+function renderTerms(product) {
+  return `<div class="terms">${product.installmentText ?? "10x sem juros ou 15% OFF no Pix/dinheiro"}</div>`;
 }
 
 function setShareFeedback(button, text) {
@@ -2901,8 +2859,8 @@ async function shareProduct(button) {
   }
 }
 
-function renderDetailThumbs(product, variant = productVariant(product)) {
-  const images = productImages(product, variant);
+function renderDetailThumbs(product) {
+  const images = productImages(product);
   if (!images.length) return "";
 
   return images
@@ -2931,69 +2889,8 @@ function renderDetailMainImage(product, image) {
   `;
 }
 
-function renderVariantSelector(product) {
-  if (!product.variants?.length) return "";
-  const variants = visualProductVariants(product);
-
-  return `
-    <div class="variant-selector" aria-label="Escolha a cor">
-      <span>Cor: <strong id="selectedVariantName">${variants[0].name}</strong></span>
-      <div class="variant-options">
-        ${variants
-          .map((variant, index) => `
-            <button class="variant-button ${index === 0 ? "active" : ""}" type="button" data-variant-index="${index}" aria-label="Selecionar cor ${variant.name}">
-              <span class="variant-swatch" style="background:${variant.swatch ?? "#38bdf8"}"></span>
-              ${variant.name}
-              ${variantAvailable(variant) ? "" : "<small>Esgotado</small>"}
-            </button>
-          `)
-          .join("")}
-      </div>
-    </div>
-  `;
-}
-
-function updateDetailVariant(product, index) {
-  const variant = productVariant(product, index);
-  if (!variant) return;
-
-  const images = productImages(product, variant);
-  const gallery = document.querySelector(".detail-gallery");
-  if (gallery) {
-    const frame = document.querySelector("#detailImageFrame");
-    if (frame) frame.outerHTML = renderDetailMainImage(product, images[0]);
-  }
-
-  const thumbs = document.querySelector("#detailThumbs");
-  if (thumbs) thumbs.innerHTML = renderDetailThumbs(product, variant);
-
-  const price = document.querySelector("#detailPrice");
-  if (price) price.innerHTML = renderPrice(product, variant);
-
-  const terms = document.querySelector("#detailTerms");
-  if (terms) terms.innerHTML = renderTerms(product, variant);
-
-  const stock = document.querySelector("#detailStock");
-  if (stock) stock.outerHTML = renderStockStatus(product, variant).replace("<span", "<span id=\"detailStock\"");
-
-  const buyButton = document.querySelector("#detailBuyButton");
-  if (buyButton) {
-    buyButton.dataset.variantIndex = String(index);
-    buyButton.textContent = buyButtonLabel(product, variant);
-    buyButton.disabled = !stockStatus(product, variant).available;
-  }
-
-  const selectedVariantName = document.querySelector("#selectedVariantName");
-  if (selectedVariantName) selectedVariantName.textContent = variant.name;
-
-  document.querySelectorAll(".variant-button").forEach((button) => {
-    button.classList.toggle("active", Number(button.dataset.variantIndex) === index);
-  });
-}
-
 function renderProductDetail(product) {
-  const variant = productVariant(product);
-  const [mainImage] = productImages(product, variant);
+  const [mainImage] = productImages(product);
 
   title.textContent = product.name;
   pageTitle.textContent = product.name;
@@ -3008,21 +2905,20 @@ function renderProductDetail(product) {
       <div class="detail-gallery">
         ${renderDetailMainImage(product, mainImage)}
         <div id="detailThumbs" class="detail-thumbs" aria-label="Fotos do produto">
-          ${renderDetailThumbs(product, variant)}
+          ${renderDetailThumbs(product)}
         </div>
       </div>
       <div class="detail-body">
         <small>${product.category}</small>
         <h3>${product.name}</h3>
         <p>${product.description}</p>
-        ${renderVariantSelector(product)}
         ${renderProductSpecs(product)}
-        ${renderStockStatus(product, variant).replace("<span", "<span id=\"detailStock\"")}
-        <div id="detailPrice">${renderPrice(product, variant)}</div>
-        <div id="detailTerms">${renderTerms(product, variant)}</div>
+        ${renderStockStatus(product).replace("<span", "<span id=\"detailStock\"")}
+        <div id="detailPrice">${renderPrice(product)}</div>
+        <div id="detailTerms">${renderTerms(product)}</div>
         <div class="detail-actions">
-          ${stockStatus(product, variant).available ? `<button id="detailBuyButton" class="buy-button" type="button" data-product-id="${product.id}" data-variant-index="0">${buyButtonLabel(product, variant)}</button>` : `<a id="detailBuyButton" class="buy-button" href="${whatsappHref(product, variant)}" target="_blank" rel="noreferrer">${buyButtonLabel(product, variant)}</a>`}
-          <a class="secondary-button" href="${whatsappHref(product, variant)}" target="_blank" rel="noreferrer">Falar pelo WhatsApp</a>
+          ${stockStatus(product).available ? `<button id="detailBuyButton" class="buy-button" type="button" data-product-id="${product.id}">${buyButtonLabel(product)}</button>` : `<a id="detailBuyButton" class="buy-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">${buyButtonLabel(product)}</a>`}
+          <a class="secondary-button" href="${whatsappHref(product)}" target="_blank" rel="noreferrer">Falar pelo WhatsApp</a>
           <button class="share-button" type="button" data-share-url="${absoluteProductHref(product)}" data-share-title="${product.name}">Compartilhar</button>
           <a class="secondary-button" href="${categoryHref(product.category)}">Voltar para ${product.category}</a>
         </div>
@@ -3197,7 +3093,7 @@ function setCategory(category, options = {}) {
       <article class="empty-category">
         <strong>Produtos em cadastro</strong>
         <p>Estamos cadastrando novos produtos nesta categoria. Entre em contato pelo WhatsApp para consultar disponibilidade.</p>
-        <a class="buy-button" href="${whatsappHref({ name: selectedCategory, whatsappMessage: message }, null)}" target="_blank" rel="noreferrer">Consultar no WhatsApp</a>
+        <a class="buy-button" href="${whatsappHref({ name: selectedCategory, whatsappMessage: message })}" target="_blank" rel="noreferrer">Consultar no WhatsApp</a>
       </article>
     `;
     if (options.scroll) {
@@ -3256,20 +3152,13 @@ grid.addEventListener("click", (event) => {
   const cartButton = event.target.closest(".add-cart-button, #detailBuyButton[data-product-id]");
   if (cartButton) {
     const product = products.find((item) => item.id === cartButton.dataset.productId) || productFromUrl();
-    if (product) addProductToCart(product, productVariant(product, Number(cartButton.dataset.variantIndex || 0)));
+    if (product) addProductToCart(product);
     return;
   }
 
   const shareButton = event.target.closest(".share-button");
   if (shareButton) {
     shareProduct(shareButton);
-    return;
-  }
-
-  const variantButton = event.target.closest(".variant-button");
-  if (variantButton) {
-    const product = productFromUrl();
-    updateDetailVariant(product, Number(variantButton.dataset.variantIndex));
     return;
   }
 

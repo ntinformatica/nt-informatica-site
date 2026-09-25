@@ -50,6 +50,7 @@ function mergeCartItems(items) {
 }
 
 export async function resolveLegacyCartItems(items) {
+  // Compatibility bridge for carts persisted before variations became independent products.
   const variationIds = [...new Set(items
     .map((item) => String(item.variationId || item.variation_id || "").trim())
     .filter(isUuid))];
@@ -85,13 +86,12 @@ export async function resolveLegacyCartItems(items) {
     if (!newProductId || !product) return item;
     const availability = availabilityByProduct.get(newProductId);
     const stock = Number(availability?.available_stock ?? product.stock ?? 0);
+    const { variationId: _variationId, variation_id: _variationIdSnake, variationName: _variationName, variation_name: _variationNameSnake, ...itemWithoutVariation } = item;
     return {
-      ...item,
+      ...itemWithoutVariation,
       itemType: "product",
       productId: newProductId,
-      variationId: "",
       name: product.name || item.name,
-      variationName: "",
       image: product.main_image || product.images?.[0] || item.image || "",
       unitPrice: Number(product.price || 0),
       cashPrice: Number(product.promo_price || 0),

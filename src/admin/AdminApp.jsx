@@ -159,7 +159,8 @@ const emptyProduct = {
   mainImage: "",
   images: "",
   gallery: "",
-  variations: [],
+  legacyVariations: [],
+  hasLegacyVariations: false,
   stock: 0,
   status: "rascunho",
   featured: false,
@@ -175,17 +176,6 @@ const emptyProduct = {
   fiscalReviewedAt: "",
   fiscalImportedFromBlingAt: "",
   fiscalMetadata: {},
-};
-
-const emptyVariation = {
-  name: "",
-  color: "",
-  price: "",
-  promoPrice: "",
-  stock: 0,
-  sku: "",
-  image: "",
-  active: true,
 };
 
 const emptyPc = {
@@ -297,15 +287,6 @@ const emptyCodexAssistantForm = {
   notes: "",
 };
 
-const emptyCodexAssistantVariation = {
-  name: "",
-  link: "",
-  price: "",
-  promoPrice: "",
-  stock: 0,
-  warranty: "",
-};
-
 function parseMoney(value) {
   return parseStoreMoney(value);
 }
@@ -373,16 +354,8 @@ function normalizeProductForm(product, categories) {
     promoPrice: hasPixPrice ? product.promoPrice : formatStoreMoneyInput(legacyPixPrice),
     _pricingDerivedFromNormal: !hasPixPrice && legacyPixPrice !== null,
     _pixPriceEdited: false,
-    variations: Array.isArray(product?.variations) ? product.variations.map((variation) => {
-      const variationHasPixPrice = parseStoreMoney(variation?.promoPrice) !== null;
-      const variationLegacyPixPrice = variationHasPixPrice ? null : calculatePixPriceFromNormal(variation?.price);
-      return {
-        ...variation,
-        promoPrice: variationHasPixPrice ? variation.promoPrice : formatStoreMoneyInput(variationLegacyPixPrice),
-        _pricingDerivedFromNormal: !variationHasPixPrice && variationLegacyPixPrice !== null,
-        _pixPriceEdited: false,
-      };
-    }) : [],
+    legacyVariations: Array.isArray(product?.legacyVariations) ? product.legacyVariations : [],
+    hasLegacyVariations: Boolean(product?.hasLegacyVariations || product?.legacyVariations?.length),
   };
 }
 
@@ -684,7 +657,6 @@ function ImportModal({ open, onClose }) {
 
 function StockMovementModal({ product, open, onClose, onMove }) {
   const [form, setForm] = useState({
-    variationId: "",
     type: "entrada",
     quantity: 1,
     reason: "",
@@ -694,7 +666,6 @@ function StockMovementModal({ product, open, onClose, onMove }) {
   useEffect(() => {
     if (open) {
       setForm({
-        variationId: "",
         type: "entrada",
         quantity: 1,
         reason: "",
@@ -705,10 +676,7 @@ function StockMovementModal({ product, open, onClose, onMove }) {
 
   if (!open || !product) return null;
 
-  const selectedVariation = form.variationId
-    ? product.variations?.find((variation) => variation.id === form.variationId)
-    : null;
-  const currentStock = Number(selectedVariation ? selectedVariation.stock : product.stock) || 0;
+  const currentStock = Number(product.stock) || 0;
   const previewStock = previewStockMovement(currentStock, form.type, form.quantity);
 
   function updateField(field, value) {
@@ -736,15 +704,6 @@ function StockMovementModal({ product, open, onClose, onMove }) {
         </div>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
-          <SelectField
-            label="Item"
-            value={form.variationId}
-            onChange={(value) => updateField("variationId", value)}
-            options={[
-              ["", "Produto principal"],
-              ...(product.variations || []).map((variation) => [variation.id, `${variation.name || variation.color || "Variacao"} - estoque ${variation.stock ?? 0}`]),
-            ]}
-          />
           <SelectField
             label="Tipo"
             value={form.type}
@@ -921,38 +880,16 @@ function productIsActiveForStockSheet(product) {
   return !["rascunho", "despublicado", "inativo", "draft", "unpublished"].includes(status);
 }
 
-function stockSheetVariationName(product, variation) {
-  const variationName = variation.name || variation.color || variation.value || variation.sku || "Variação";
-  return `${product.name} — ${variationName}`;
-}
-
 function buildStockSheetRows(products) {
-  return products.flatMap((product) => {
-    const variations = Array.isArray(product.variations) ? product.variations : [];
-    if (variations.length) {
-      return variations.map((variation) => ({
-        id: `variation-${variation.id || product.id}-${variation.name || variation.color || variation.sku}`,
-        category: product.category || "Sem categoria",
-        categoryId: product.categoryId || "",
-        name: stockSheetVariationName(product, variation),
-        productName: product.name || "",
-        variationName: variation.name || variation.color || variation.value || "",
-        stock: Number(variation.stock || 0),
-        active: productIsActiveForStockSheet(product) && variation.active !== false,
-      }));
-    }
-
-    return [{
+  return products.map((product) => ({
       id: `product-${product.id}`,
       category: product.category || "Sem categoria",
       categoryId: product.categoryId || "",
       name: product.name || "Produto sem nome",
       productName: product.name || "",
-      variationName: "",
       stock: Number(product.stock || 0),
       active: productIsActiveForStockSheet(product),
-    }];
-  });
+    }));
 }
 
 function StockSheetPage({ products, categories }) {
@@ -972,9 +909,7 @@ function StockSheetPage({ products, categories }) {
     .sort((first, second) => {
       const byCategory = first.category.localeCompare(second.category, "pt-BR", { sensitivity: "base" });
       if (byCategory) return byCategory;
-      const byProduct = first.productName.localeCompare(second.productName, "pt-BR", { sensitivity: "base" });
-      if (byProduct) return byProduct;
-      return first.variationName.localeCompare(second.variationName, "pt-BR", { sensitivity: "base" });
+      return first.productName.localeCompare(second.productName, "pt-BR", { sensitivity: "base" });
     }), [products, search, category, onlyActive, stockFilter]);
 
   return (
@@ -984,7 +919,7 @@ function StockSheetPage({ products, categories }) {
           <label className="relative">
             <Search className="pointer-events-none absolute left-3 top-10 text-slate-500" size={18} />
             <span className="text-sm font-bold text-slate-200">Buscar por nome</span>
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Produto ou variação" className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Produto" className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 py-3 pl-10 pr-4 text-white outline-none focus:border-nt-cyan" />
           </label>
           <SelectField label="Categoria" value={category} onChange={setCategory} options={[["Todas", "Todas categorias"], ...categories.map((item) => [item.id, item.name])]} />
           <SelectField label="Estoque" value={stockFilter} onChange={setStockFilter} options={[["todos", "Todos"], ["com-estoque", "Com estoque"]]} />
@@ -1006,7 +941,7 @@ function StockSheetPage({ products, categories }) {
         <table className="stock-sheet-table">
           <thead>
             <tr>
-              <th>Produto / Variação</th>
+              <th>Produto</th>
               <th>Estoque sistema</th>
               <th>Estoque contado</th>
             </tr>
@@ -1130,6 +1065,7 @@ function ProductFormPage({
   const [blingStockStatus, setBlingStockStatus] = useState("");
   const [blingStockLoading, setBlingStockLoading] = useState(false);
   const [fiscalError, setFiscalError] = useState("");
+  const [imageImportStatus, setImageImportStatus] = useState(null);
   const stockMetadata = existingProduct?.blingStockSyncMetadata || {};
   const configuredDepositName = blingConfiguredDeposit?.nome || stockMetadata.depositName || "";
   const configuredDepositId = blingConfiguredDeposit?.id || stockMetadata.depositId || "";
@@ -1192,32 +1128,6 @@ function ProductFormPage({
     });
   }
 
-  function updateVariation(index, field, value) {
-    setForm((current) => ({
-      ...current,
-      variations: current.variations.map((variation, itemIndex) => (
-        itemIndex === index ? (() => {
-          const nextVariation = { ...variation, [field]: value };
-          if (field === "promoPrice") {
-            const pricing = calculatePricingFromPix(value);
-            nextVariation.price = pricing ? formatStoreMoneyInput(pricing.normalPrice) : "";
-            nextVariation._pricingDerivedFromNormal = false;
-            nextVariation._pixPriceEdited = true;
-          }
-          return nextVariation;
-        })() : variation
-      )),
-    }));
-  }
-
-  function addVariation() {
-    setForm((current) => ({ ...current, variations: [...current.variations, { ...emptyVariation }] }));
-  }
-
-  function removeVariation(index) {
-    setForm((current) => ({ ...current, variations: current.variations.filter((_, itemIndex) => itemIndex !== index) }));
-  }
-
   async function handleSubmit(event) {
     event.preventDefault();
     setFiscalError("");
@@ -1226,22 +1136,22 @@ function ProductFormPage({
       setFiscalError(pricingError);
       return;
     }
-    const invalidVariationIndex = form.variations.findIndex((variation) => {
-      const hasOwnPricing = [variation.price, variation.promoPrice]
-        .some((value) => value !== "" && value !== null && value !== undefined);
-      return hasOwnPricing && pricingValidationMessage(variation.promoPrice);
-    });
-    if (invalidVariationIndex !== -1) {
-      setFiscalError(`Variação ${invalidVariationIndex + 1}: ${pricingValidationMessage(form.variations[invalidVariationIndex].promoPrice)}`);
-      return;
-    }
     const fiscalNcm = normalizeFiscalNcmInput(form.fiscalNcm);
     if (fiscalNcm && fiscalNcm.length !== 8) {
       setFiscalError("O NCM deve estar vazio ou conter exatamente 8 digitos.");
       return;
     }
-    const saved = await onSave(isEdit ? existingProduct.id : null, form);
-    if (saved) window.location.href = "/admin/produtos";
+    setImageImportStatus(null);
+    const saved = await onSave(isEdit ? existingProduct.id : null, form, {
+      onImageImportStatus: setImageImportStatus,
+    });
+    if (saved) {
+      if (saved.imageImportCount) {
+        window.setTimeout(() => { window.location.href = "/admin/produtos"; }, 700);
+      } else {
+        window.location.href = "/admin/produtos";
+      }
+    }
   }
 
   async function handleSendBling() {
@@ -1338,6 +1248,11 @@ function ProductFormPage({
         <TextareaField label="Descrição completa" value={form.fullDescription} onChange={(value) => updateField("fullDescription", value)} rows={6} />
         <TextField label="Imagem principal" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="URL da imagem principal" />
         <TextareaField label="Galeria de imagens por URL" value={form.gallery} onChange={(value) => updateField("gallery", value)} placeholder="Uma URL por linha" />
+        {imageImportStatus ? (
+          <p className={`rounded-md border p-3 text-sm ${imageImportStatus.tone === "error" ? "border-red-400/40 bg-red-500/10 text-red-100" : imageImportStatus.tone === "success" ? "border-lime-300/30 bg-lime-300/10 text-lime-100" : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"}`}>
+            {imageImportStatus.message}
+          </p>
+        ) : null}
         <TextareaField label="Observações internas" value={form.internalNotes} onChange={(value) => updateField("internalNotes", value)} />
       </section>
 
@@ -1373,39 +1288,21 @@ function ProductFormPage({
         </div>
       </section>
 
-      <section className="rounded-lg border border-white/10 bg-white/5 p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-xl font-black">Variações do produto</h2>
-            <p className="mt-1 text-sm text-slate-400">Use para cores, versões e preços diferentes dentro do mesmo produto.</p>
-          </div>
-          <AdminButton type="button" variant="secondary" icon={Plus} onClick={addVariation}>Adicionar variação</AdminButton>
-        </div>
-        <div className="mt-5 grid gap-4">
-          {form.variations.map((variation, index) => (
-            <div key={`${variation.sku || variation.name}-${index}`} className="rounded-lg border border-white/10 bg-slate-950 p-4">
-              <div className="grid gap-4 lg:grid-cols-3">
-                <TextField label="Nome da variação" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} />
-                <TextField label="Cor" value={variation.color} onChange={(value) => updateVariation(index, "color", value)} />
-                <TextField label="SKU da variação" value={variation.sku} onChange={(value) => updateVariation(index, "sku", value)} />
-                <TextField label="Preço no Pix" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} inputMode="decimal" />
-                <TextField label="Preço em até 10x sem juros" value={variation.price} onChange={() => {}} readOnly aria-readonly="true" />
-                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} min="0" step="1" />
-                <TextField label="Imagem da variação" value={variation.image} onChange={(value) => updateVariation(index, "image", value)} />
-                <label className="flex items-center gap-3 rounded-md border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200">
-                  <input type="checkbox" checked={variation.active !== false} onChange={(event) => updateVariation(index, "active", event.target.checked)} />
-                  Status ativo
-                </label>
-                <div className="flex items-end">
-                  <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => removeVariation(index)}>Remover</AdminButton>
-                </div>
-              </div>
-              {(variation.price || variation.promoPrice) ? <div className="mt-4"><PixPricingPreview pixPrice={variation.promoPrice} compact /></div> : null}
-            </div>
-          ))}
-          {!form.variations.length ? <p className="rounded-md border border-dashed border-slate-700 p-4 text-sm text-slate-400">Nenhuma variação cadastrada para este produto.</p> : null}
-        </div>
-      </section>
+      {form.hasLegacyVariations ? (
+        <section className="rounded-lg border border-amber-300/30 bg-amber-300/10 p-5">
+          <h2 className="text-xl font-black text-amber-100">Produto legado com variações</h2>
+          <p className="mt-2 text-sm leading-6 text-amber-100/80">
+            As {form.legacyVariations.length} variações históricas permanecem preservadas para pedidos, reservas e auditoria. Elas não podem ser criadas, editadas ou removidas neste cadastro.
+          </p>
+          <ul className="mt-4 grid gap-2 text-sm text-amber-50/80 sm:grid-cols-2">
+            {form.legacyVariations.map((variation) => (
+              <li key={variation.id} className="rounded-md border border-amber-200/20 bg-slate-950/30 px-3 py-2">
+                {variation.name || variation.color || "Variação histórica"}{variation.sku ? ` · ${variation.sku}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {isEdit ? (
         <section className="rounded-lg border border-white/10 bg-white/5 p-5">
@@ -2101,6 +1998,7 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
   const isEdit = mode === "edit";
   const [form, setForm] = useState(() => normalizePcForm(isEdit ? existingPc : emptyPc));
   const [formError, setFormError] = useState("");
+  const [imageImportStatus, setImageImportStatus] = useState(null);
   const selectedUses = textToList(form.targetUses);
   const selectedChecks = textToList(form.qualityChecks);
 
@@ -2159,8 +2057,17 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
       benchmarkGames: Array.isArray(form.benchmarkGames) ? form.benchmarkGames.map(normalizeAdminBenchmarkGame) : [],
       status: form.published ? (Number(form.stock || 0) > 0 ? "publicado" : "esgotado") : form.status,
     };
-    const saved = await onSave(isEdit ? existingPc.id : null, payload);
-    if (saved) window.location.href = "/admin/pcs";
+    setImageImportStatus(null);
+    const saved = await onSave(isEdit ? existingPc.id : null, payload, {
+      onImageImportStatus: setImageImportStatus,
+    });
+    if (saved) {
+      if (saved.imageImportCount) {
+        window.setTimeout(() => { window.location.href = "/admin/pcs"; }, 700);
+      } else {
+        window.location.href = "/admin/pcs";
+      }
+    }
   }
 
   if (isEdit && !existingPc) {
@@ -2274,7 +2181,7 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
 
       <BenchmarkAdminSection form={form} pcs={pcs} gameLibrary={gameLibrary} updateField={updateField} onSaveGameToLibrary={onSaveGameToLibrary} />
 
-      <PcImageUploader form={form} updateField={updateField} />
+      <PcImageUploader form={form} updateField={updateField} externalImportStatus={imageImportStatus} />
 
       <section className="grid gap-4 rounded-lg border border-white/10 bg-white/5 p-5">
         <h2 className="text-xl font-black text-white">Observações internas</h2>
@@ -2289,7 +2196,7 @@ function PcFormPage({ mode, pcId, pcs, gameLibrary, onSave, onSaveGameToLibrary,
   );
 }
 
-function PcImageUploader({ form, updateField }) {
+function PcImageUploader({ form, updateField, externalImportStatus }) {
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -2441,6 +2348,11 @@ function PcImageUploader({ form, updateField }) {
               </div>
             ) : null}
             {message ? <p className="mt-4 rounded-md border border-white/10 bg-white/5 p-3 text-sm text-slate-200">{message}</p> : null}
+            {externalImportStatus ? (
+              <p className={`mt-4 rounded-md border p-3 text-sm ${externalImportStatus.tone === "error" ? "border-red-400/40 bg-red-500/10 text-red-100" : externalImportStatus.tone === "success" ? "border-lime-300/30 bg-lime-300/10 text-lime-100" : "border-cyan-300/30 bg-cyan-300/10 text-cyan-100"}`}>
+                {externalImportStatus.message}
+              </p>
+            ) : null}
           </div>
         </div>
       </div>
@@ -2478,24 +2390,14 @@ function PcImageUploader({ form, updateField }) {
       </div>
 
       <details open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)} className="rounded-lg border border-slate-700 bg-slate-950 p-4">
-        <summary className="cursor-pointer text-sm font-bold text-slate-200">Opções avançadas: usar URL externa</summary>
+        <summary className="cursor-pointer text-sm font-bold text-slate-200">Opções avançadas: importar de URL externa</summary>
         <div className="mt-4 grid gap-4">
-          <TextField label="URL externa da imagem principal" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="https://..." />
-          <TextareaField label="URLs externas da galeria" value={form.gallery || form.images} onChange={updateExternalGallery} placeholder="Uma URL por linha" />
+          <TextField label="URL de origem da imagem principal" value={form.mainImage} onChange={(value) => updateField("mainImage", value)} placeholder="https://..." />
+          <TextareaField label="URLs de origem da galeria" value={form.gallery || form.images} onChange={updateExternalGallery} placeholder="Uma URL por linha" />
+          <p className="text-xs leading-5 text-slate-400">Ao salvar, URLs externas são copiadas para o Storage da NT e não permanecem como referência definitiva.</p>
         </div>
       </details>
     </section>
-  );
-}
-
-function hasVariationData(variation) {
-  return Boolean(
-    variation.name
-    || variation.link
-    || variation.price
-    || variation.promoPrice
-    || Number(variation.stock || 0)
-    || variation.warranty,
   );
 }
 
@@ -2508,67 +2410,27 @@ function isValidHttpUrl(value) {
   }
 }
 
-function validateCodexAssistantLinks(form, variations) {
+function validateCodexAssistantLinks(form) {
   const errors = [];
-  const links = [];
 
   if (!form.mainLink.trim()) {
     errors.push("Informe o link principal do produto.");
   } else if (!isValidHttpUrl(form.mainLink.trim())) {
     errors.push("O link principal deve começar com http:// ou https://.");
-  } else {
-    links.push(["Link principal", form.mainLink.trim()]);
-  }
-
-  variations.forEach((variation, index) => {
-    if (!hasVariationData(variation)) return;
-
-    if (!variation.link.trim()) {
-      errors.push(`A variação ${index + 1} tem dados preenchidos, mas está sem link.`);
-      return;
-    }
-
-    if (!isValidHttpUrl(variation.link.trim())) {
-      errors.push(`O link da variação ${index + 1} deve começar com http:// ou https://.`);
-      return;
-    }
-
-    links.push([`Variação ${index + 1}`, variation.link.trim()]);
-  });
-
-  const seen = new Map();
-  for (const [label, link] of links) {
-    const normalized = link.replace(/\/+$/, "").toLowerCase();
-    if (seen.has(normalized)) {
-      errors.push(`Link duplicado encontrado em ${seen.get(normalized)} e ${label}.`);
-    } else {
-      seen.set(normalized, label);
-    }
   }
 
   return {
     valid: errors.length === 0,
     errors,
     success: errors.length === 0
-      ? `Links validados com sucesso. ${links.length} link(s) pronto(s) para o prompt.`
+      ? "Link validado com sucesso. Produto simples pronto para o prompt."
       : "",
   };
 }
 
-function buildCodexAssistantPrompt(form, variations, options = {}) {
-  const validVariations = variations.filter(hasVariationData);
+function buildCodexAssistantPrompt(form, options = {}) {
   const requireValidImages = options.requireValidImages !== false;
   const minimumImages = Math.max(1, Number(options.minimumImages) || 4);
-  const variationLines = validVariations
-    .map((variation, index) => `
-Variacao ${index + 1}:
-- Nome da variacao informado pela loja: ${variation.name || "Nao informado"}
-- Link da variacao: ${variation.link || "Nao informado"}
-- Preco no Pix (product_variations.promo_price): ${variation.promoPrice || "Nao informado"}
-- Preco normal / ate 10x sem juros (product_variations.price): ${variation.price || "Nao informado"}
-- Estoque: ${variation.stock ?? 0}
-- Garantia opcional: ${variation.warranty || "Nao informado"}`)
-    .join("\n");
 
   return `Acesse os links abaixo e gere um SQL seguro de importacao para o Supabase da NT Informatica.
 
@@ -2582,24 +2444,21 @@ IMPORTANTE:
 Tabelas permitidas:
 - categories
 - products
-- product_variations
 
 Contrato obrigatorio do schema:
-- Usar exatamente os nomes reais acima. Nao usar nomes traduzidos como categorias, produtos ou variacoes_do_produto.
-- products.images e product_variations.images sao text[]. Usar ARRAY['url1','url2']::text[] ou equivalente text[], nunca jsonb.
+- Usar exatamente os nomes reais acima. Nao usar nomes traduzidos como categorias ou produtos.
+- products.images e text[]. Usar ARRAY['url1','url2']::text[] ou equivalente text[], nunca jsonb.
 - products.status publicado deve ser exatamente 'disponível' com acento. Nao usar 'disponivel' sem acento.
-- product_variations.status deve ser 'ativo' ou 'inativo'.
+- Cada cor, capacidade, tamanho ou versao vendavel deve ser cadastrada como um produto simples independente em products, com seu proprio nome, slug, SKU, preco, estoque e imagens.
+- Nunca consultar, inserir, atualizar ou excluir product_variations.
 
 Links e dados fornecidos pela loja:
 - Link principal do produto: ${form.mainLink || "Nao informado"}
 - Observacoes opcionais: ${form.notes || "Sem observacoes."}
 
-Variacoes informadas:
-${variationLines || "Sem variacoes informadas. Use o link principal como fonte unica."}
-
 Tarefas para o Codex:
-1. Acessar o link principal e os links de variacoes informados.
-2. Extrair automaticamente dos links:
+1. Acessar o link principal.
+2. Extrair automaticamente do link:
    - nome do produto;
    - marca;
    - modelo;
@@ -2609,7 +2468,6 @@ Tarefas para o Codex:
    - especificacoes tecnicas;
    - imagem principal;
    - galeria completa de imagens;
-   - imagens especificas de cada variacao;
    - cores;
    - capacidade, quando existir;
    - caracteristicas relevantes.
@@ -2632,8 +2490,6 @@ Tarefas para o Codex:
 4. Preencher obrigatoriamente no SQL:
    - products.main_image com a melhor imagem principal encontrada, ou null se nenhuma imagem valida for encontrada;
    - products.images com a galeria completa de imagens validas, ou ARRAY[]::text[] se nenhuma imagem valida for encontrada;
-   - product_variations.image com a imagem correspondente de cada variacao;
-   - product_variations.images com a galeria especifica da variacao, quando houver;
    - descriptions, slug, categoria, preco, estoque, garantia e demais campos disponiveis.
 5. Regras para products.main_image:
    - deve receber a melhor imagem principal encontrada;
@@ -2654,20 +2510,13 @@ Tarefas para o Codex:
    - nao pode conter logos, banners, avaliacoes, selos, icones ou imagens genericas;
    - nao duplicar a mesma imagem para tentar atingir a quantidade minima;
    - nao usar imagem de outro produto para tentar atingir a quantidade minima.
-7. Regras para variacoes:
-   - cada variacao deve receber a imagem correspondente a sua cor/modelo;
-   - preencher product_variations.image;
-   - preencher product_variations.images com todas as imagens especificas daquela variacao quando houver galeria especifica;
-   - nao misturar imagens de cores/modelos diferentes;
-   - nao usar imagem de outra cor/modelo.
-8. Antes de devolver o SQL, conferir obrigatoriamente:
+7. Antes de devolver o SQL, conferir obrigatoriamente:
    - products.main_image esta preenchida quando houver imagem valida, ou esta null quando nenhuma imagem valida foi encontrada;
    - products.images contem a galeria completa encontrada, ou ARRAY[]::text[] quando nenhuma imagem valida foi encontrada;
    - products.images contem pelo menos ${minimumImages} imagens validas quando o anuncio disponibilizar essa quantidade;
-   - imagens das variacoes estao relacionadas corretamente;
    - nao existem URLs duplicadas;
    - nao existem aspas ou caracteres que quebrem o SQL.
-9. Se nao conseguir extrair imagens:
+8. Se nao conseguir extrair imagens:
    - nao fingir que o cadastro esta completo;
    - informar claramente: "Nao foi possivel extrair imagens publicas e permanentes deste link.";
    - nao usar imagens inventadas;
@@ -2676,32 +2525,30 @@ Tarefas para o Codex:
    - cadastrar o produto mesmo assim com products.main_image = null e products.images = ARRAY[]::text[];
    - adicionar em products.internal_notes: "Produto cadastrado sem imagens. Adicionar imagens manualmente no Admin.";
    - nunca gerar placeholders como COLE_AQUI_A_URL_DA_IMAGEM.
-10. Regra de imagem:
+9. Regra de imagem:
    - Quantidade minima de imagens exigida pela loja: ${minimumImages}.
    ${requireValidImages ? `- Se forem encontradas menos de ${minimumImages} imagens validas, informar no resumo que a quantidade minima nao foi atingida, mas ainda assim gerar o INSERT/UPDATE final ativo.` : `- Se forem encontradas menos de ${minimumImages} imagens validas, informar claramente no resumo, mas ainda assim gerar o INSERT/UPDATE final ativo.`}
    - Se o anuncio realmente tiver menos imagens que o minimo, nao inventar imagens, nao duplicar a mesma imagem e nao usar imagem de outro produto.
    - Nunca comentar o WITH, INSERT, UPSERT ou SELECT final por ausencia ou quantidade insuficiente de imagens.
-11. Gerar SQL seguro usando apenas categories, products e product_variations.
-12. Nao duplicar produtos por slug.
-13. Nao duplicar categorias por slug.
-14. Nao duplicar variacoes pela combinacao produto + SKU + nome + cor.
-15. Atualizar produto existente quando necessario.
-16. Criar o produto como 'disponível' exatamente com acento.
-17. Usar upsert/on conflict quando fizer sentido.
-18. O SQL precisa ser seguro para executar mais de uma vez.
-19. Nao usar ON CONFLICT DO NOTHING no produto principal. Se o slug ja existir, usar DO UPDATE para atualizar os campos atuais.
-20. Todo SQL gerado para execucao deve conter o INSERT/UPSERT ativo, sem prefixo --.
-21. O SQL deve terminar com um SELECT de verificacao retornando exatamente:
+10. Gerar SQL seguro usando apenas categories e products.
+11. Nao duplicar produtos por slug.
+12. Nao duplicar categorias por slug.
+13. Atualizar produto existente quando necessario.
+14. Criar o produto como 'disponível' exatamente com acento.
+15. Usar upsert/on conflict quando fizer sentido.
+16. O SQL precisa ser seguro para executar mais de uma vez.
+17. Nao usar ON CONFLICT DO NOTHING no produto principal. Se o slug ja existir, usar DO UPDATE para atualizar os campos atuais.
+18. Todo SQL gerado para execucao deve conter o INSERT/UPSERT ativo, sem prefixo --.
+19. O SQL deve terminar com um SELECT de verificacao retornando exatamente:
    id, name, sku, slug, status, featured, main_image, images, created_at, updated_at
    da linha em products correspondente ao slug importado.
-22. Se usar INSERT ... RETURNING em CTE, tambem devolver no final a linha final de products para confirmar que o Admin conseguira carregar o registro.
+20. Se usar INSERT ... RETURNING em CTE, tambem devolver no final a linha final de products para confirmar que o Admin conseguira carregar o registro.
 
 Resultado esperado:
 - Primeiro retorne este resumo curto:
   Imagem principal encontrada: SIM/NAO
   Total de imagens validas encontradas: X
   Total de imagens usadas em products.images: X
-  Variacoes com imagem propria: X de Y
   Quantidade minima exigida atingida: SIM/NAO
 - Depois retorne o SQL completo pronto para colar no Supabase SQL Editor.
 - Nao inclua explicacoes fora do resumo de imagens e do SQL.`;
@@ -2709,7 +2556,6 @@ Resultado esperado:
 
 function CodexAssistantPage() {
   const [form, setForm] = useState(emptyCodexAssistantForm);
-  const [variations, setVariations] = useState([{ ...emptyCodexAssistantVariation }]);
   const [prompt, setPrompt] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const [validation, setValidation] = useState({ valid: false, errors: [], success: "" });
@@ -2721,30 +2567,8 @@ function CodexAssistantPage() {
     setValidation({ valid: false, errors: [], success: "" });
   }
 
-  function updateVariation(index, field, value) {
-    setVariations((current) => current.map((variation, itemIndex) => (
-      itemIndex === index ? (() => {
-        const nextVariation = { ...variation, [field]: value };
-        if (field === "promoPrice") {
-          const pricing = calculatePricingFromPix(value);
-          nextVariation.price = pricing ? formatStoreMoneyInput(pricing.normalPrice) : "";
-        }
-        return nextVariation;
-      })() : variation
-    )));
-    setValidation({ valid: false, errors: [], success: "" });
-  }
-
-  function addVariation() {
-    setVariations((current) => [...current, { ...emptyCodexAssistantVariation }]);
-  }
-
-  function removeVariation(index) {
-    setVariations((current) => current.length === 1 ? current : current.filter((_, itemIndex) => itemIndex !== index));
-  }
-
   function validateLinks() {
-    const result = validateCodexAssistantLinks(form, variations);
+    const result = validateCodexAssistantLinks(form);
     setValidation(result);
     return result.valid;
   }
@@ -2752,12 +2576,12 @@ function CodexAssistantPage() {
   function generatePrompt() {
     if (!validateLinks()) return;
     setCopyStatus("");
-    setPrompt(buildCodexAssistantPrompt(form, variations, { requireValidImages, minimumImages }));
+    setPrompt(buildCodexAssistantPrompt(form, { requireValidImages, minimumImages }));
   }
 
   async function copyPrompt() {
     if (!prompt && !validateLinks()) return;
-    const text = prompt || buildCodexAssistantPrompt(form, variations, { requireValidImages, minimumImages });
+    const text = prompt || buildCodexAssistantPrompt(form, { requireValidImages, minimumImages });
     setPrompt(text);
 
     try {
@@ -2776,7 +2600,7 @@ function CodexAssistantPage() {
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-nt-cyan">Cadastro assistido</p>
             <h2 className="mt-2 text-2xl font-black">Assistente Codex</h2>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
-              Informe apenas os links do fornecedor, preços e estoque. O Codex utilizará esses links para extrair automaticamente nome, marca, modelo, descrições, especificações, imagens e variações.
+              Informe o link do fornecedor. O Codex extrairá os dados e gerará SQL somente para produtos simples; cada versão vendável deve ser um produto independente.
             </p>
             <p className="mt-3 max-w-3xl rounded-md border border-amber-300/30 bg-amber-300/10 p-3 text-sm leading-6 text-amber-100">
               O Codex tentará extrair as imagens diretamente dos links. Alguns fornecedores bloqueiam ou utilizam URLs temporárias. Confira sempre se o resumo informa que as imagens foram encontradas antes de executar o SQL.
@@ -2833,35 +2657,6 @@ function CodexAssistantPage() {
             </small>
           </span>
         </label>
-      </section>
-
-      <section className="rounded-lg border border-white/10 bg-white/5 p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-xl font-black">Variacoes</h2>
-            <p className="mt-1 text-sm text-slate-400">Informe nome, link, preço, estoque e garantia quando houver variação.</p>
-          </div>
-          <AdminButton type="button" variant="secondary" icon={Plus} onClick={addVariation}>Adicionar variação</AdminButton>
-        </div>
-        <div className="mt-5 grid gap-4">
-          {variations.map((variation, index) => (
-            <div key={index} className="rounded-lg border border-white/10 bg-slate-950 p-4">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h3 className="font-black">Variação {index + 1}</h3>
-                <AdminButton type="button" variant="danger" icon={Trash2} onClick={() => removeVariation(index)}>Remover</AdminButton>
-              </div>
-              <div className="grid gap-4 lg:grid-cols-3">
-                <TextField label="Nome da variação" value={variation.name} onChange={(value) => updateVariation(index, "name", value)} placeholder="Preto, Branco, Vermelho..." />
-                <TextField label="Link da variação" value={variation.link} onChange={(value) => updateVariation(index, "link", value)} placeholder="https://..." />
-                <TextField label="Preço no Pix" value={variation.promoPrice} onChange={(value) => updateVariation(index, "promoPrice", value)} inputMode="decimal" />
-                <TextField label="Preço em até 10x sem juros" value={variation.price} onChange={() => {}} readOnly aria-readonly="true" />
-                <TextField label="Estoque" type="number" value={variation.stock} onChange={(value) => updateVariation(index, "stock", Number(value))} />
-                <TextField label="Garantia opcional" value={variation.warranty} onChange={(value) => updateVariation(index, "warranty", value)} />
-              </div>
-              {(variation.price || variation.promoPrice) ? <div className="mt-4"><PixPricingPreview pixPrice={variation.promoPrice} compact /></div> : null}
-            </div>
-          ))}
-        </div>
       </section>
 
       {(validation.errors.length || validation.success) ? (
@@ -4381,7 +4176,7 @@ function BlingIntegrationCard({ products = [], onProductsRefresh }) {
   async function runBlingBatch(type, mode = "pending") {
     const isProductBatch = type === "products";
     const confirmation = isProductBatch
-      ? "Os produtos elegiveis do NT Admin serao criados ou vinculados no Bling pelo SKU. Produtos com erro ou variacoes serao ignorados e poderao ser revisados depois. O estoque sera tratado separadamente. Deseja continuar?"
+      ? "Os produtos elegiveis do NT Admin serao criados ou vinculados no Bling pelo SKU. Produtos com erro serao ignorados e poderao ser revisados depois. O estoque sera tratado separadamente. Deseja continuar?"
       : "Os saldos do Bling serao ajustados para refletir o estoque atual do NT Admin no deposito principal configurado.";
     if (!window.confirm(confirmation)) return;
 
@@ -5087,10 +4882,11 @@ export function AdminApp() {
   async function runAction(action, successMessage = "") {
     setError("");
     try {
-      await action();
+      const result = await action();
       await loadAdminData();
-      if (successMessage) setNotice(successMessage);
-      return true;
+      const message = typeof successMessage === "function" ? successMessage(result) : successMessage;
+      if (message) setNotice(message);
+      return result ?? true;
     } catch (actionError) {
       console.error(actionError);
       setError(actionError.message || "Não foi possível concluir a ação.");
@@ -5098,11 +4894,13 @@ export function AdminApp() {
     }
   }
 
-  async function saveProduct(id, product) {
+  async function saveProduct(id, product, options = {}) {
     return runAction(async () => {
-      if (id) await updateProduct(id, product, categories);
-      else await createProduct(product, categories);
-    }, "Produto salvo com sucesso.");
+      if (id) return updateProduct(id, product, categories, options);
+      return createProduct(product, categories, options);
+    }, (result) => result?.imageImportCount
+      ? "Produto salvo. Imagem importada e salva na NT."
+      : "Produto salvo com sucesso.");
   }
 
   async function removeProduct(id) {
@@ -5174,11 +4972,13 @@ export function AdminApp() {
     return runAction(async () => createStockMovement({ product, ...movement }), "Estoque atualizado com sucesso.");
   }
 
-  async function savePc(id, pc) {
+  async function savePc(id, pc, options = {}) {
     return runAction(async () => {
-      if (id) await updateAssembledPc(id, pc);
-      else await createAssembledPc(pc);
-    }, "PC salvo com sucesso.");
+      if (id) return updateAssembledPc(id, pc, options);
+      return createAssembledPc(pc, options);
+    }, (result) => result?.imageImportCount
+      ? "PC salvo. Imagem importada e salva na NT."
+      : "PC salvo com sucesso.");
   }
 
   async function removePc(id) {

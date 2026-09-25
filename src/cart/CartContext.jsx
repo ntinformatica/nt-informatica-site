@@ -6,13 +6,12 @@ const CartContext = createContext(null);
 function normalizeItem(item) {
   const quantity = Math.max(1, Number(item.quantity || 1));
   const stock = Number(item.stock ?? 999);
-  return {
+  const variationId = item.variationId || item.variation_id || "";
+  const normalized = {
     itemType: item.itemType,
     productId: item.productId || "",
-    variationId: item.variationId || "",
     assembledPcId: item.assembledPcId || "",
     name: item.name || "Produto NT",
-    variationName: item.variationName || "",
     image: item.image || "",
     unitPrice: Number(item.unitPrice || 0),
     cashPrice: Number(item.cashPrice || 0),
@@ -21,6 +20,11 @@ function normalizeItem(item) {
     slug: item.slug || "",
     quantity,
   };
+  if (variationId) {
+    normalized.variationId = variationId;
+    normalized.variationName = item.variationName || item.variation_name || "";
+  }
+  return normalized;
 }
 
 export function CartProvider({ children }) {

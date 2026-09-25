@@ -2,6 +2,7 @@ import { isSupabaseConfigured, supabaseFunction, supabaseRequest } from "../../l
 import { adminStorageKey, initialAdminProducts } from "../adminData";
 import { readJson, slugify, writeJson } from "./localStorageHelpers";
 import { calculatePricingFromPix, pricingValidationMessage } from "../../utils/storePricing.js";
+import { prepareProductImagesForStorage } from "./catalogImageService";
 
 function arrayFromText(value) {
   if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
@@ -24,10 +25,6 @@ function textFromArray(value) {
 function serviceErrorMessage(action, error) {
   const detail = error?.message ? ` Detalhe: ${error.message}` : "";
   return `${action}${detail}`;
-}
-
-function isUuid(value) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || "").trim());
 }
 
 function moneyOrNull(value) {
@@ -83,7 +80,7 @@ function fiscalReviewStatus(ncm, originCode, currentStatus = "") {
   return normalizeFiscalNcm(ncm).length === 8 && normalizeFiscalOriginCode(originCode) ? "complete" : "incomplete";
 }
 
-function normalizeVariation(variation = {}, index = 0) {
+function normalizeLegacyVariation(variation = {}, index = 0) {
   return {
     id: variation.id || `variation-${Date.now()}-${index}`,
     name: variation.name || "",
@@ -94,21 +91,10 @@ function normalizeVariation(variation = {}, index = 0) {
     sku: variation.sku || "",
     image: variation.image || "",
     active: variation.active !== false,
-    _pricingDerivedFromNormal: Boolean(variation._pricingDerivedFromNormal),
-    _pixPriceEdited: Boolean(variation._pixPriceEdited),
   };
 }
 
-function parseVariations(value) {
-  if (Array.isArray(value)) return value.map(normalizeVariation);
-  if (!value) return [];
-  return String(value)
-    .split("\n")
-    .map((item, index) => normalizeVariation({ name: item.trim(), color: item.trim() }, index))
-    .filter((item) => item.name || item.color);
-}
-
-function fromSupabase(row, categories = [], variations = []) {
+function fromSupabase(row, categories = [], legacyVariations = []) {
   const category = categories.find((item) => item.id === row.category_id);
   const images = Array.isArray(row.images) ? row.images : [];
   const mainImage = row.main_image || images[0] || "";
@@ -128,7 +114,7 @@ function fromSupabase(row, categories = [], variations = []) {
     mainImage,
     images: textFromArray(images),
     gallery: textFromArray(images.filter((image) => image !== mainImage)),
-    variations: variations.map((variation) => normalizeVariation({
+    legacyVariations: legacyVariations.map((variation) => normalizeLegacyVariation({
       id: variation.id,
       name: variation.name,
       color: variation.color || variation.value,
@@ -139,6 +125,7 @@ function fromSupabase(row, categories = [], variations = []) {
       image: variation.image || variation.images?.[0] || "",
       active: variation.active !== false && variation.status !== "inativo",
     })),
+    hasLegacyVariations: legacyVariations.length > 0,
     stock: row.stock ?? 0,
     status: row.status || "rascunho",
     featured: Boolean(row.featured),
@@ -228,51 +215,25 @@ function hasExplicitImagePayload(product) {
     || Object.prototype.hasOwnProperty.call(product, "gallery");
 }
 
-function toSupabaseVariation(variation, productId) {
-  const normalized = normalizeVariation(variation);
-  const calculatedPricing = (variation._pixPriceEdited || !isUuid(variation.id))
-    ? calculatePricingFromPix(variation.promoPrice)
-    : null;
-  return {
-    product_id: productId,
-    name: normalized.name || normalized.color || "Variação",
-    value: normalized.color || normalized.name || "",
-    color: normalized.color || "",
-    price: moneyOrNull(calculatedPricing?.normalPrice ?? normalized.price),
-    promo_price: variation._pricingDerivedFromNormal && !variation._pixPriceEdited
-      ? null
-      : moneyOrNull(calculatedPricing?.pixPrice ?? normalized.promoPrice),
-    stock: Number(normalized.stock || 0),
-    sku: normalized.sku || "",
-    image: normalized.image || "",
-    images: normalized.image ? [normalized.image] : [],
-    active: normalized.active !== false,
-    status: normalized.active === false ? "inativo" : "ativo",
-    updated_at: new Date().toISOString(),
-  };
-}
-
 function validateProductPricing(product) {
   const productError = pricingValidationMessage(product.promoPrice);
   if (productError) throw new Error(productError);
-
-  parseVariations(product.variations).forEach((variation, index) => {
-    const hasOwnPricing = [variation.price, variation.promoPrice]
-      .some((value) => value !== "" && value !== null && value !== undefined);
-    if (!hasOwnPricing) return;
-    const variationError = pricingValidationMessage(variation.promoPrice, `Preço no Pix da variação ${index + 1}`);
-    if (variationError) throw new Error(variationError);
-  });
 }
 
 function normalizeLocalProduct(product, categories = []) {
+  const { variations: retiredVariations, ...productWithoutVariations } = product;
   const category = categories.find((item) => item.id === product.categoryId || item.name === product.category);
   const [mainImage = ""] = normalizeImageList([product.mainImage]);
   const galleryImages = product.gallery !== undefined ? normalizeImageList(product.gallery) : normalizeImageList(product.images);
   const images = normalizeImageList([mainImage, ...galleryImages]);
+  const legacyVariations = Array.isArray(product.legacyVariations)
+    ? product.legacyVariations.map(normalizeLegacyVariation)
+    : Array.isArray(retiredVariations)
+      ? retiredVariations.map(normalizeLegacyVariation)
+      : [];
 
   return {
-    ...product,
+    ...productWithoutVariations,
     id: product.id || slugify(product.name),
     slug: product.slug || slugify(product.name),
     categoryId: category?.id || product.categoryId || slugify(product.category || "sem-categoria"),
@@ -282,7 +243,8 @@ function normalizeLocalProduct(product, categories = []) {
     mainImage: mainImage || images[0] || "",
     images: textFromArray(images),
     gallery: textFromArray(images.slice(1)),
-    variations: parseVariations(product.variations),
+    legacyVariations,
+    hasLegacyVariations: Boolean(product.hasLegacyVariations || legacyVariations.length),
     stock: Number(product.stock || 0),
     featured: Boolean(product.featured),
     status: product.status || "rascunho",
@@ -306,62 +268,6 @@ function writeLocalProducts(products, categories = []) {
   writeJson(adminStorageKey, products.map((product) => normalizeLocalProduct(product, categories)));
 }
 
-async function hasVariationReferences(table, variationId) {
-  const rows = await supabaseRequest(`/${table}?select=id&variation_id=eq.${encodeURIComponent(variationId)}&limit=1`);
-  return Array.isArray(rows) && rows.length > 0;
-}
-
-async function ensureVariationCanBeDeleted(variation) {
-  const checks = [
-    ["store_stock_reservations", "reserva de estoque"],
-    ["store_order_items", "pedido"],
-    ["stock_movements", "movimentacao de estoque"],
-  ];
-
-  for (const [table, label] of checks) {
-    if (await hasVariationReferences(table, variation.id)) {
-      const name = variation.name || variation.value || variation.color || variation.sku || "esta variacao";
-      throw new Error(`Nao foi possivel excluir ${name}: a variacao possui ${label} vinculada. Desative a variacao em vez de remove-la.`);
-    }
-  }
-}
-
-async function saveVariations(productId, variations) {
-  const existing = await supabaseRequest(`/product_variations?select=*&product_id=eq.${encodeURIComponent(productId)}&order=created_at.asc`);
-  const existingById = new Map(existing.map((variation) => [variation.id, variation]));
-  const desired = parseVariations(variations);
-  const keptIds = new Set();
-
-  for (const variation of desired) {
-    const payload = toSupabaseVariation(variation, productId);
-    const existingId = isUuid(variation.id) && existingById.has(variation.id) ? variation.id : "";
-
-    if (existingId) {
-      keptIds.add(existingId);
-      await supabaseRequest(`/product_variations?id=eq.${encodeURIComponent(existingId)}`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
-    } else {
-      const [created] = await supabaseRequest("/product_variations", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      if (created?.id) keptIds.add(created.id);
-    }
-  }
-
-  for (const current of existing) {
-    if (keptIds.has(current.id)) continue;
-    await ensureVariationCanBeDeleted(current);
-    await supabaseRequest(`/product_variations?id=eq.${encodeURIComponent(current.id)}`, {
-      method: "DELETE",
-    });
-  }
-
-  return supabaseRequest(`/product_variations?select=*&product_id=eq.${encodeURIComponent(productId)}&order=created_at.asc`);
-}
-
 export async function listProducts(categories = []) {
   if (!isSupabaseConfigured) {
     return readLocalProducts(categories);
@@ -375,26 +281,29 @@ export async function listProducts(categories = []) {
     throw new Error("Nao foi possivel carregar os produtos do Supabase.");
   }
 
-  let variationRows = [];
+  // Legacy-only read: keeps retired parent products auditable without enabling variation writes.
+  let legacyVariationRows = [];
   try {
-    variationRows = await supabaseRequest("/product_variations?select=*&order=created_at.asc");
+    legacyVariationRows = await supabaseRequest("/product_variations?select=*&order=created_at.asc");
   } catch (error) {
-    console.warn("Nao foi possivel carregar variacoes do Supabase. Produtos serao exibidos sem variacoes:", error);
+    console.warn("Nao foi possivel carregar o historico de variacoes do Supabase:", error);
   }
 
   return rows.map((row) => fromSupabase(
     row,
     categories,
-    variationRows.filter((variation) => variation.product_id === row.id),
+    legacyVariationRows.filter((variation) => variation.product_id === row.id),
   ));
 }
 
-export async function createProduct(product, categories = []) {
+export async function createProduct(product, categories = [], options = {}) {
   validateProductPricing(product);
   if (isSupabaseConfigured) {
     try {
+      const prepared = await prepareProductImagesForStorage(product, options.onImageImportStatus);
+      const productToSave = prepared.value;
       const payload = {
-        ...toSupabase(product, categories, { forcePixPricing: true }),
+        ...toSupabase(productToSave, categories, { forcePixPricing: true }),
         bling_sync_status: "not_sent",
         bling_stock_sync_status: "not_synced",
       };
@@ -403,8 +312,7 @@ export async function createProduct(product, categories = []) {
         body: JSON.stringify(payload),
       });
       if (!row?.id) throw new Error("O Supabase nao retornou o produto criado.");
-      const variations = await saveVariations(row.id, product.variations);
-      return fromSupabase(row, categories, variations);
+      return { ...fromSupabase(row, categories), imageImportCount: prepared.importedCount };
     } catch (error) {
       console.error("Erro ao criar produto no Supabase:", error);
       throw new Error(serviceErrorMessage("Nao foi possivel criar o produto no Supabase.", error));
@@ -424,16 +332,19 @@ export async function createProduct(product, categories = []) {
   return item;
 }
 
-export async function updateProduct(id, product, categories = []) {
+export async function updateProduct(id, product, categories = [], options = {}) {
   validateProductPricing(product);
   if (isSupabaseConfigured) {
     try {
-      const payload = toSupabase(product, categories);
-      if (product.blingProductId) {
+      const hasImageChanges = hasExplicitImagePayload(product);
+      const prepared = await prepareProductImagesForStorage(product, options.onImageImportStatus);
+      const productToSave = prepared.value;
+      const payload = toSupabase(productToSave, categories);
+      if (productToSave.blingProductId) {
         payload.bling_sync_status = "dirty";
         payload.bling_sync_error = "";
       }
-      if (!hasExplicitImagePayload(product)) {
+      if (!hasImageChanges) {
         delete payload.main_image;
         delete payload.images;
       }
@@ -443,8 +354,10 @@ export async function updateProduct(id, product, categories = []) {
         body: JSON.stringify(payload),
       });
       if (!row?.id) throw new Error("O Supabase nao retornou o produto atualizado.");
-      const variations = await saveVariations(id, product.variations);
-      return fromSupabase(row, categories, variations);
+      return {
+        ...fromSupabase(row, categories, product.legacyVariations || []),
+        imageImportCount: prepared.importedCount,
+      };
     } catch (error) {
       console.error("Erro ao atualizar produto no Supabase:", error);
       throw new Error(serviceErrorMessage("Nao foi possivel atualizar o produto no Supabase.", error));

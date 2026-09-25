@@ -41,20 +41,6 @@ type ProductRow = {
   bling_sync_metadata?: JsonObject | null;
 };
 
-type VariationRow = {
-  id: string;
-  product_id: string;
-  name?: string | null;
-  value?: string | null;
-  color?: string | null;
-  price?: number | string | null;
-  promo_price?: number | string | null;
-  stock?: number | string | null;
-  sku?: string | null;
-  active?: boolean | null;
-  status?: string | null;
-};
-
 type CategoryRow = {
   id: string;
   name?: string | null;
@@ -106,7 +92,6 @@ export const PRODUCT_SELECT = [
 const PRODUCT_SYNC_STALE_MS = 10 * 60 * 1000;
 const UNSUPPORTED_PRODUCT_SYNC_CODES = new Set([
   "draft_product",
-  "product_variations_not_supported",
 ]);
 
 function isObject(value: unknown): value is JsonObject {
@@ -165,13 +150,6 @@ async function loadProduct(productId: string) {
   ) as ProductRow | null;
 }
 
-async function loadProductVariations(productId: string) {
-  const rows = await supabaseRest(
-    `/product_variations?product_id=eq.${encodeURIComponent(productId)}&select=*&order=created_at.asc`,
-  );
-  return Array.isArray(rows) ? rows as VariationRow[] : [];
-}
-
 async function loadCategory(categoryId: string | null | undefined) {
   if (!categoryId) return null;
   return await getSingle(
@@ -179,7 +157,7 @@ async function loadCategory(categoryId: string | null | undefined) {
   ) as CategoryRow | null;
 }
 
-function validateProduct(product: ProductRow, variations: VariationRow[], category: CategoryRow | null) {
+function validateProduct(product: ProductRow, category: CategoryRow | null) {
   const sku = cleanText(product.sku);
   const name = cleanText(product.name);
   const price = money(product.price);
@@ -194,7 +172,6 @@ function validateProduct(product: ProductRow, variations: VariationRow[], catego
   if (!["disponivel", "esgotado", "sob encomenda"].includes(status)) throw new Error("invalid_product_status");
   if (product.category_id && !category) throw new Error("invalid_product_category");
   if (category && category.active === false) throw new Error("inactive_product_category");
-  if (variations.length) throw new Error("product_variations_not_supported");
 }
 
 export function productSyncValidationMessage(code: string) {
@@ -208,7 +185,6 @@ export function productSyncValidationMessage(code: string) {
     invalid_product_status: "Status do produto nao e compativel com sincronizacao.",
     invalid_product_category: "Categoria do produto nao foi encontrada.",
     inactive_product_category: "Categoria do produto esta inativa.",
-    product_variations_not_supported: "Produto com variacoes ainda nao e sincronizado nesta etapa. Sincronize um produto simples primeiro.",
     linked_product_review_required: "Produto vinculado precisa de revisao administrativa antes de sincronizar.",
     linked_bling_product_not_found: "Produto vinculado nao foi encontrado no Bling. Revisao administrativa necessaria.",
     missing_bling_product_id: "O Bling retornou uma resposta sem ID de produto.",
@@ -531,11 +507,10 @@ export async function syncSingleProductToBling(productId: string): Promise<SyncP
       throw new Error("linked_product_review_required");
     }
 
-    const variations = await loadProductVariations(product.id);
     const category = await loadCategory(product.category_id);
 
     try {
-      validateProduct(product, variations, category);
+      validateProduct(product, category);
     } catch (validationError) {
       const code = validationError instanceof Error ? validationError.message : "invalid_product";
       await markPreflightError(product.id, code, productSyncValidationMessage(code), product.bling_sync_metadata);
@@ -582,11 +557,10 @@ export async function syncSingleProductToBling(productId: string): Promise<SyncP
     }
   }
 
-  const variations = await loadProductVariations(product.id);
   const category = await loadCategory(product.category_id);
 
   try {
-    validateProduct(product, variations, category);
+    validateProduct(product, category);
   } catch (validationError) {
     const code = validationError instanceof Error ? validationError.message : "invalid_product";
     await markPreflightError(product.id, code, productSyncValidationMessage(code), product.bling_sync_metadata);

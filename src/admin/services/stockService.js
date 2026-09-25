@@ -29,15 +29,6 @@ function calculateNewStock(previousStock, type, quantity) {
   return Math.max(amount, 0);
 }
 
-function totalProductStock(product, variationId, newVariationStock) {
-  if (!variationId || !product.variations?.length) return newVariationStock;
-
-  return product.variations.reduce((total, variation) => {
-    if (variation.id === variationId) return total + newVariationStock;
-    return total + normalizeQuantity(variation.stock);
-  }, 0);
-}
-
 function normalizeMovement(row) {
   return {
     id: row.id || `mov-${Date.now()}`,
@@ -85,7 +76,7 @@ export async function listStockMovements(productId) {
   return readLocalMovements().filter((movement) => movement.productId === productId);
 }
 
-export async function createStockMovement({ product, variationId = "", type, quantity, reason, notes }) {
+export async function createStockMovement({ product, type, quantity, reason, notes }) {
   if (!product?.id) throw new Error("Produto invalido para movimentacao de estoque.");
 
   const normalizedType = normalizeType(type);
@@ -94,25 +85,17 @@ export async function createStockMovement({ product, variationId = "", type, qua
     throw new Error("Informe uma quantidade valida.");
   }
 
-  const variation = variationId ? product.variations?.find((item) => item.id === variationId) : null;
-  if (variationId && !variation) {
-    throw new Error("Variacao nao encontrada para movimentar estoque.");
-  }
-
-  const previousStock = normalizeQuantity(variation ? variation.stock : product.stock);
+  const previousStock = normalizeQuantity(product.stock);
   const newStock = calculateNewStock(previousStock, normalizedType, amount);
   if (newStock < 0) {
     throw new Error("Estoque insuficiente.");
   }
 
-  const newProductStock = variation?.id
-    ? totalProductStock(product, variation.id, newStock)
-    : newStock;
   const movementQuantity = normalizedType === "ajuste" ? newStock - previousStock : amount;
 
   const payload = {
     product_id: product.id,
-    variation_id: variation?.id || null,
+    variation_id: null,
     type: normalizedType,
     quantity: movementQuantity,
     previous_stock: previousStock,
@@ -122,17 +105,10 @@ export async function createStockMovement({ product, variationId = "", type, qua
   };
 
   if (isSupabaseConfigured) {
-    if (variation?.id) {
-      await supabaseRequest(`/product_variations?id=eq.${encodeURIComponent(variation.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ stock: newStock, updated_at: new Date().toISOString() }),
-      });
-    }
-
     await supabaseRequest(`/products?id=eq.${encodeURIComponent(product.id)}`, {
       method: "PATCH",
       body: JSON.stringify({
-        stock: newProductStock,
+        stock: newStock,
         updated_at: new Date().toISOString(),
         ...(product.blingProductId ? {
           bling_stock_sync_status: "dirty",
@@ -151,15 +127,7 @@ export async function createStockMovement({ product, variationId = "", type, qua
   const products = readJson(adminStorageKey, []);
   const nextProducts = products.map((item) => {
     if (item.id !== product.id) return item;
-    if (!variation?.id) return { ...item, stock: newProductStock, updatedAt: new Date().toISOString() };
-    return {
-      ...item,
-      stock: newProductStock,
-      variations: (item.variations || []).map((itemVariation) => (
-        itemVariation.id === variation.id ? { ...itemVariation, stock: newStock } : itemVariation
-      )),
-      updatedAt: new Date().toISOString(),
-    };
+    return { ...item, stock: newStock, updatedAt: new Date().toISOString() };
   });
   writeJson(adminStorageKey, nextProducts);
 
@@ -167,7 +135,7 @@ export async function createStockMovement({ product, variationId = "", type, qua
     ...payload,
     id: `mov-${Date.now()}`,
     productId: product.id,
-    variationId: variation?.id || "",
+    variationId: "",
     createdAt: new Date().toISOString(),
   });
   writeLocalMovements([movement, ...readLocalMovements()]);
